@@ -1,7 +1,7 @@
 
 FROM ubuntu:noble
 
-RUN apt-get update && apt-get install -y git build-essential cmake clangd clang-format && \
+RUN apt-get update && apt-get install -y git build-essential gdb cmake clangd clang-format clang-tidy libtbb-dev libeigen3-dev && \
   rm -rf /var/lib/apt/lists/*
 
 WORKDIR /deps

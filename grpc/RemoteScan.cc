@@ -1,5 +1,6 @@
 #include "RemoteScan.hh"
-#include "Points.hh"
+#include "Conversions.hh"
+#include "common/Points.hh"
 #include "points.grpc.pb.h"
 #include "points.pb.h"
 #include <chrono>
@@ -8,44 +9,41 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/grpcpp.h>
 #include <mutex>
-#include <stdexcept>
 #include <thread>
 
+const int g_idleTimeMs = 5;
 std::mutex g_mutex;
 
-namespace {
-PointCloud2D convert(const lidar::PointCloud3 &msg) {
-  PointCloud2D pointcloud;
+RemoteScan::RemoteScan(const std::string &remote_ip)
+    : remote_ip_(remote_ip), is_running_(false) {
 
-  pointcloud.points.reserve(msg.points_size());
-  for (const auto &pt : msg.points()) {
-    pointcloud.points.emplace_back(pt.x(), pt.y());
-  }
-
-  return pointcloud;
+  channel_ = grpc::CreateChannel(remote_ip, grpc::InsecureChannelCredentials());
+  service_stub_ = lidar::LidarService::NewStub(channel_);
 }
-} // namespace
 
-PointCloud2D RemoteScan::getScan() {
+mslam::PointCloud2D RemoteScan::getScan(bool blocking) {
   if (!is_running_) {
     throw std::runtime_error("Scan not started.");
   }
 
-  if (!scans_.empty()) {
-    {
-      std::lock_guard<std::mutex> lock(g_mutex);
-      auto pointcloud = scans_.front();
-      pointcloud.timestamp =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::high_resolution_clock::now().time_since_epoch())
-              .count();
-      scans_.pop();
-      return pointcloud;
+  if (blocking) {
+    while (scans_.empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(g_idleTimeMs));
     }
-
-  } else {
-    return {};
   }
+
+  if (!scans_.empty()) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto pointcloud = scans_.front();
+    pointcloud.timestamp =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch())
+            .count();
+    scans_.pop();
+    return pointcloud;
+  }
+
+  return {};
 }
 
 void RemoteScan::Start() {
@@ -72,7 +70,7 @@ void RemoteScan::Start() {
 
       {
         std::lock_guard<std::mutex> lock(g_mutex);
-        scans_.push(convert(msg));
+        scans_.push(fromGRPC(msg));
       }
     }
   });
@@ -81,11 +79,4 @@ void RemoteScan::Start() {
 void RemoteScan::Stop() {
   is_running_ = false;
   read_thread_.get();
-}
-
-RemoteScan::RemoteScan(const std::string &remote_ip)
-    : remote_ip_(remote_ip), is_running_(false) {
-
-  channel_ = grpc::CreateChannel(remote_ip, grpc::InsecureChannelCredentials());
-  service_stub_ = lidar::LidarService::NewStub(channel_);
 }

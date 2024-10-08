@@ -1,19 +1,19 @@
 #pragma once
 
 #include "IScan.hh"
-#include "Points.hh"
+#include "common/Points.hh"
 #include "points.grpc.pb.h"
 #include <future>
 #include <grpcpp/channel.h>
 #include <memory>
 #include <queue>
 
-class RemoteScan : public IScan {
+class RemoteScan : public mslam::IScan {
 public:
   RemoteScan(const std::string &remote_ip);
   void Start();
   void Stop();
-  PointCloud2D getScan() override;
+  mslam::PointCloud2D getScan(bool blocking = false) override;
 
 private:
   std::string remote_ip_;
@@ -24,5 +24,5 @@ private:
   bool is_running_;
   std::future<void> read_thread_;
 
-  std::queue<PointCloud2D> scans_;
+  std::queue<mslam::PointCloud2D> scans_;
 };

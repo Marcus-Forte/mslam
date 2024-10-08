@@ -15,6 +15,10 @@ endif()
 set(BUILD_TESTING OFF)
 add_subdirectory(third_party/moptim)
 
+add_library(mslamlib
+src/map/Simple2DMap.cc)
+target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-add_executable(mslam src/app.cc)
-target_link_libraries(mslam moptim RemoteScan)
+add_executable(mslam
+src/app.cc)
+target_link_libraries(mslam moptim mslamlib gRPCInterface)

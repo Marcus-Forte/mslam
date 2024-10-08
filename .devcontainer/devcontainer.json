@@ -12,17 +12,13 @@
 		"vscode": {
 			"extensions": [
 				"ms-vscode.cpptools-extension-pack",
-				"llvm-vs-code-extensions.vscode-clangd"
-			],
-			"settings": {
-				"cmake.additionalKits": [
-					"/workspaces/rplidar_publisher_app/cmake/toolchains.json"
-				]
-			}
+				"llvm-vs-code-extensions.vscode-clangd",
+				"cschlosser.doxdocgen"
+			]
 		}
 	},
 
 	"mounts": [
-		"source=rplidar-publisher-app-cache,target=${containerWorkspaceFolder}/build,type=volume"
+		"source=mslam-app-cache,target=${containerWorkspaceFolder}/build,type=volume"
 	]
 }

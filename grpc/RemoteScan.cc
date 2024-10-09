@@ -70,6 +70,7 @@ void RemoteScan::Start() {
 
       {
         std::lock_guard<std::mutex> lock(g_mutex);
+        std::cout << "Got scan at: " << msg.timestamp() << std::endl;
         scans_.push(fromGRPC(msg));
       }
     }

@@ -9,6 +9,7 @@ mslam::PointCloud2D fromGRPC(const lidar::PointCloud3 &msg) {
   for (const auto &pt : msg.points()) {
     pointcloud.points.emplace_back(pt.x(), pt.y());
   }
+  pointcloud.timestamp = msg.timestamp();
 
   return pointcloud;
 }

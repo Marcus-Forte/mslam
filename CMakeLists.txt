@@ -3,7 +3,7 @@ project(mslam)
 
 set(CMAKE_CXX_STANDARD 20)
 include(cmake/format.cmake)
-
+find_package(PCL REQUIRED COMPONENTS kdtree search filters)
 find_package(Eigen3 REQUIRED)
 link_libraries(Eigen3::Eigen)
 option(GPRC_SENSOR "Use gRPC sensor" ON)
@@ -16,9 +16,12 @@ set(BUILD_TESTING OFF)
 add_subdirectory(third_party/moptim)
 
 add_library(mslamlib
-src/map/Simple2DMap.cc)
-target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+src/map/KDTree2DMap.cc
+src/map/VoxelHashMap.cc
+src/FileScan.cc)
+target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${PCL_INCLUDE_DIRS})
+target_link_libraries(mslamlib protolib)
 
 add_executable(mslam
 src/app.cc)
-target_link_libraries(mslam moptim mslamlib gRPCInterface)
+target_link_libraries(mslam moptim mslamlib gRPCInterface ${PCL_LIBRARIES})

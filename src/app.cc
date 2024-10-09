@@ -2,17 +2,23 @@
 #include "FileScan.hh"
 #include "ILog.hh"
 #include "IScan.hh"
+#include "Registration.hh"
 #include "RemoteMap.hh"
 #include "RemoteScan.hh"
 #include "TImer.hh"
 #include "common/Points.hh"
 #include "common/Pose.hh"
 #include "map/KDtree2DMap.hh"
-#include "points.pb.h"
 #include <filesystem>
-#include <fstream>
 #include <getopt.h>
 #include <memory>
+#include <utility>
+#include <vector>
+
+using Correspondence = std::pair<mslam::Point2, mslam::Point2>;
+using Correspondences = std::vector<Correspondence>;
+
+const float g_maxDistance = 0.1;
 
 int main(int argc, char **argv) {
   std::string filescan;
@@ -57,29 +63,45 @@ int main(int argc, char **argv) {
   }
 
   Timer tmr;
+  mslam::Registration registration;
   while (true) {
 
-    const auto scan = scanner->getScan(false);
+    // std::cout << "Predict.. " << std::endl;
+    const auto imu = scanner->getImutData();
 
-    tmr.start();
-    map.addScan(scan);
-    auto delta_us = tmr.stop();
-    logger.log(ILog::Level::INFO, "addScan: {} us", delta_us);
-    // (optional) predict motion with high frequency IMU.
-    // auto scan = rscan.getScan(true);
-    // pre-process scan. Dedistort.
+    // predict
 
-    // Register scan with map (optimization problem). Factor IMU measurements
-    // in. Estimate correspondences.
+    auto scan = scanner->getScan(false);
 
-    // Update map with transformed scan.
-    const auto mapcloud = map.getPointCloudRepresentation();
+    // update
+    if (!scan.points.empty()) {
+      std::cout << "Update.. " << std::endl;
+      std::cout << scan.timestamp << std::endl;
+      // (optional) predict motion with high frequency IMU.
+      // pre-process scan. Dedistort.
 
-    logger.log(ILog::Level::INFO, "Posting map... ({} pts)",
-               mapcloud.points.size());
+      // Register scan with map (optimization problem). Factor IMU measurements
+      // in. Estimate correspondences.
+      Correspondences correspondences;
+      for (const auto scan_pt : scan.points) {
+        auto closest = map.getClosestNeighbor(scan_pt);
+        if (closest.second < g_maxDistance * g_maxDistance) {
+          // source, target
+          correspondences.emplace_back(scan_pt, closest.first);
+        }
+      }
 
-    rmap.publishMap(mapcloud);
-    rmap.publishPose(pose);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      pose = registration.Align(pose, &map, scan);
+
+      // Update map with transformed scan.
+      const auto mapcloud = map.getPointCloudRepresentation();
+
+      logger.log(ILog::Level::INFO, "Posting map... ({} pts)",
+                 mapcloud.points.size());
+
+      rmap.publishMap(mapcloud);
+      rmap.publishPose(pose);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
 }

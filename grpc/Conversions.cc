@@ -1,6 +1,8 @@
 
 #include "Conversions.hh"
+#include "common/IMU.hh"
 #include "glserver.pb.h"
+#include "points.pb.h"
 
 mslam::PointCloud2D fromGRPC(const lidar::PointCloud3 &msg) {
   mslam::PointCloud2D pointcloud;
@@ -12,6 +14,12 @@ mslam::PointCloud2D fromGRPC(const lidar::PointCloud3 &msg) {
   pointcloud.timestamp = msg.timestamp();
 
   return pointcloud;
+}
+
+mslam::IMUData fromGRPC(const lidar::IMUData &msg) {
+
+  return {msg.timestamp(), msg.ax(), msg.ay(), msg.az(),
+          msg.gx(),        msg.gy(), msg.gz()};
 }
 
 gl::PointCloud3 toGRPC(const mslam::PointCloud2D &pointcloud) {

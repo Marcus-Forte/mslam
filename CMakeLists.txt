@@ -18,10 +18,11 @@ add_subdirectory(third_party/moptim)
 add_library(mslamlib
 src/map/KDTree2DMap.cc
 src/map/VoxelHashMap.cc
-src/FileScan.cc)
+src/FileScan.cc
+src/Registration.cc)
 target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${PCL_INCLUDE_DIRS})
-target_link_libraries(mslamlib protolib)
+target_link_libraries(mslamlib moptim protolib)
 
 add_executable(mslam
 src/app.cc)
-target_link_libraries(mslam moptim mslamlib gRPCInterface ${PCL_LIBRARIES})
+target_link_libraries(mslam  mslamlib gRPCInterface ${PCL_LIBRARIES})

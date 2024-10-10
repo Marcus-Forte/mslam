@@ -14,7 +14,7 @@ public:
    */
   virtual PointCloud2D getScan(bool blocking = false) = 0;
 
-  virtual IMUData getImutData() = 0;
+  virtual IMUData getImuData() = 0;
 };
 
 } // namespace mslam

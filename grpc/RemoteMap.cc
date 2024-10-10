@@ -10,12 +10,13 @@ RemoteMap::RemoteMap(const std::string &remote_ip) : remote_ip_(remote_ip) {
   channel_ = grpc::CreateChannel(remote_ip, grpc::InsecureChannelCredentials());
   service_stub_ = gl::addToScene::NewStub(channel_);
 }
-void RemoteMap::publishMap(const mslam::PointCloud2D &map) const {
+void RemoteMap::publishScan(const mslam::PointCloud2D &map, float r, float g,
+                            float b, const std::string &name) const {
   grpc::ClientContext context;
   google::protobuf::Empty empty;
 
-  auto cloud = toGRPC(map);
-  cloud.set_entity_name("map");
+  auto cloud = toGRPC(map, r, g, b);
+  cloud.set_entity_name(name);
 
   service_stub_->addPointCloud(&context, cloud, &empty);
 }

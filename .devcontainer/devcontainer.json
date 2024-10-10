@@ -14,7 +14,11 @@
 				"ms-vscode.cpptools-extension-pack",
 				"llvm-vs-code-extensions.vscode-clangd",
 				"cschlosser.doxdocgen"
-			]
+			],
+			"settings": {
+				"C_Cpp.intelliSenseEngine": "disabled",
+				"clangd.arguments": ["-header-insertion=never"]
+			}
 		}
 	},
 

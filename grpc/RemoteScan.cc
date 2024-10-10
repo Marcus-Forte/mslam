@@ -46,7 +46,7 @@ mslam::PointCloud2D RemoteScan::getScan(bool blocking) {
   return {};
 }
 
-mslam::IMUData RemoteScan::getImutData() {
+mslam::IMUData RemoteScan::getImuData() {
   if (!is_running_) {
     throw std::runtime_error("Scan not started.");
   }

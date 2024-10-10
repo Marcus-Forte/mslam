@@ -58,6 +58,6 @@ PointCloud2D FileScan::getScan(bool blocking) {
   return fromProto(pointcloud);
 }
 
-IMUData FileScan::getImutData() {}
+IMUData FileScan::getImuData() {}
 
 } // namespace mslam

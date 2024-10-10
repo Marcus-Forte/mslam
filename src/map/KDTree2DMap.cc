@@ -9,7 +9,7 @@
 #include <vector>
 
 using PointCloudT = pcl::PointCloud<pcl::PointXYZ>;
-constexpr float g_voxelSize = 0.1;
+constexpr float g_voxelSize = 0.05;
 
 namespace mslam {
 
@@ -21,7 +21,7 @@ void KDTree2DMap::addScan(const PointCloud2D &pointcloud) {
   }
   // Subsample
   pcl::VoxelGrid<pcl::PointXYZ> voxel;
-  voxel.setMinimumPointsNumberPerVoxel(2);
+  voxel.setMinimumPointsNumberPerVoxel(1);
   voxel.setLeafSize(g_voxelSize, g_voxelSize, g_voxelSize);
   voxel.setInputCloud(map_cloud_);
   voxel.filter(*map_cloud_);

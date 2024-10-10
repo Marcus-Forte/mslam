@@ -4,8 +4,8 @@
 #include <vector>
 
 namespace mslam {
-using Point2 = Eigen::Vector2f;
-using Point3 = Eigen::Vector3f;
+using Point2 = Eigen::Vector2d;
+using Point3 = Eigen::Vector3d;
 
 struct PointCloud2D {
   long timestamp;

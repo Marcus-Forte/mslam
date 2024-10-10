@@ -15,7 +15,7 @@ public:
   void Start();
   void Stop();
   mslam::PointCloud2D getScan(bool blocking = false) override;
-  mslam::IMUData getImutData() override;
+  mslam::IMUData getImuData() override;
 
 private:
   std::string remote_ip_;

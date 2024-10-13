@@ -15,8 +15,8 @@ namespace mslam {
 
 KDTree2DMap::KDTree2DMap() { map_cloud_ = pcl::make_shared<PointCloudT>(); }
 
-void KDTree2DMap::addScan(const PointCloud2D &pointcloud) {
-  for (const auto &pt : pointcloud.points) {
+void KDTree2DMap::addScan(const PointCloud2 &pointcloud) {
+  for (const auto &pt : pointcloud) {
     map_cloud_->emplace_back(pt[0], pt[1], 0);
   }
   // Subsample
@@ -26,16 +26,16 @@ void KDTree2DMap::addScan(const PointCloud2D &pointcloud) {
   voxel.setInputCloud(map_cloud_);
   voxel.filter(*map_cloud_);
 
-  map_.points.resize(map_cloud_->size());
+  map_rep_.resize(map_cloud_->size());
   std::transform(
-      map_cloud_->begin(), map_cloud_->end(), map_.points.begin(),
+      map_cloud_->begin(), map_cloud_->end(), map_rep_.begin(),
       [](const pcl::PointXYZ &pt) -> Point2 { return {pt.x, pt.y}; });
 
   kdtree_.setInputCloud(map_cloud_);
 }
 
-const mslam::PointCloud2D &KDTree2DMap::getPointCloudRepresentation() const {
-  return map_;
+const mslam::PointCloud2 &KDTree2DMap::getPointCloudRepresentation() const {
+  return map_rep_;
 }
 
 IMap2D::Neighbor KDTree2DMap::getClosestNeighbor(const Point2 &query) const {

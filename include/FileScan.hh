@@ -6,7 +6,7 @@ namespace mslam {
 class FileScan : public IScan {
 public:
   FileScan(const std::string &scan_file);
-  PointCloud2D getScan(bool blocking = false) override;
+  PointCloud2T getScan(bool blocking = false) override;
   virtual IMUData getImuData() override;
 
 private:

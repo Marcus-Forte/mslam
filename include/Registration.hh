@@ -8,7 +8,7 @@ namespace mslam {
 
 class Registration {
 public:
-  Pose2D Align(const Pose2D &pose, const IMap2D &map, const PointCloud2D &scan);
+  Pose2D Align(const Pose2D &pose, const IMap2D &map, const PointCloud2 &scan);
 
 private:
 };

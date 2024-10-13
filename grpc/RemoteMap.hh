@@ -7,7 +7,7 @@
 class RemoteMap : public mslam::IMapPublisher {
 public:
   RemoteMap(const std::string &remote_ip);
-  void publishScan(const mslam::PointCloud2D &map, float r, float g, float b,
+  void publishScan(const mslam::PointCloud2 &map, float r, float g, float b,
                    const std::string &name) const override;
   void publishPose(const mslam::Pose2D &pose) const override;
 

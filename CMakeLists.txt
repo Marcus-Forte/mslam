@@ -14,16 +14,23 @@ add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor_library EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
 
+add_subdirectory(src/map)
+
 add_library(mslamlib
-    src/map/KDTree2DMap.cc
-    src/map/VoxelHashMap.cc
     src/FileScan.cc
     src/Registration.cc
     src/Transform.cc
 )
-target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${PCL_INCLUDE_DIRS})
-target_link_libraries(mslamlib moptim sensors_proto)
+target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(mslamlib moptim maps sensors_proto)
 
 add_executable(mslam
 src/mslam.cc)
-target_link_libraries(mslam  mslamlib gRPCInterface ${PCL_LIBRARIES})
+target_link_libraries(mslam  mslamlib gRPCInterface)
+
+
+## Testing ##
+include(CTest)
+if(BUILD_TESTING)
+add_subdirectory(test)
+endif()

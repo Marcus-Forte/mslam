@@ -25,7 +25,7 @@ RemoteScan::RemoteScan(const std::string &remote_ip)
   service_stub_ = sensors::SensorService::NewStub(channel_);
 }
 
-mslam::PointCloud2D RemoteScan::getScan(bool blocking) {
+mslam::PointCloud2T RemoteScan::getScan(bool blocking) {
   if (!is_running_) {
     throw std::runtime_error("Scan not started.");
   }

@@ -9,15 +9,15 @@ namespace mslam {
 class KDTree2DMap : public IMap2D {
 public:
   KDTree2DMap();
-  void addScan(const PointCloud2D &points) override;
+  void addScan(const PointCloud2 &points) override;
 
-  const PointCloud2D &getPointCloudRepresentation() const override;
+  const PointCloud2 &getPointCloudRepresentation() const override;
 
   Neighbor getClosestNeighbor(const Point2 &query) const override;
 
 private:
   pcl::search::KdTree<pcl::PointXYZ> kdtree_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_;
-  PointCloud2D map_;
+  PointCloud2 map_rep_;
 };
 } // namespace mslam

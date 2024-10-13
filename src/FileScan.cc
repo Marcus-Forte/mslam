@@ -6,8 +6,8 @@
 #include <thread>
 
 namespace {
-mslam::PointCloud2D fromProto(const sensors::PointCloud3 &msg) {
-  mslam::PointCloud2D pointcloud;
+mslam::PointCloud2T fromProto(const sensors::PointCloud3 &msg) {
+  mslam::PointCloud2T pointcloud;
   pointcloud.points.reserve(msg.points_size());
   for (const auto &pt : msg.points()) {
     pointcloud.points.emplace_back(pt.x(), pt.y());
@@ -35,7 +35,7 @@ FileScan::FileScan(const std::string &file_scan) {
   }
   scan_time_ = pointcloud.timestamp();
 }
-PointCloud2D FileScan::getScan(bool blocking) {
+PointCloud2T FileScan::getScan(bool blocking) {
   if (scan_file_.peek() == EOF) {
     // Loop back
     scan_file_.seekg(0);

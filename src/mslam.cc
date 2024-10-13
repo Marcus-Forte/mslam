@@ -68,9 +68,9 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < 5; ++i) {
     const auto scan = scanner->getScan(true);
-    map.addScan(scan);
+    map.addScan(scan.points);
     logger.log(ILog::Level::INFO, "Init map pts: {}",
-               map.getPointCloudRepresentation().points.size());
+               map.getPointCloudRepresentation().size());
   }
 
   Timer tmr;
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
       // Register scan with map (optimization problem). Factor IMU measurements.
       if (use_lidar) {
-        const auto new_pose = registration.Align(pose, map, scan);
+        const auto new_pose = registration.Align(pose, map, scan.points);
         const auto delta = new_pose - pose;
         vel[0] = delta[0];
         vel[1] = delta[1];
@@ -126,13 +126,13 @@ int main(int argc, char **argv) {
       }
 
       // Update map with transformed scan.
-      // map.addScan(scan);
+      map.addScan(scan.points);
       const auto mapcloud = map.getPointCloudRepresentation();
       logger.log(ILog::Level::INFO, "map pts: {}",
-                 map.getPointCloudRepresentation().points.size());
+                 map.getPointCloudRepresentation().size());
 
       rmap.publishScan(mapcloud, 1.0, 0.0, 0.0, "map");
-      rmap.publishScan(scan, 0, 1, 0, "scan");
+      rmap.publishScan(scan.points, 0, 1, 0, "scan");
       rmap.publishPose(pose);
 
       std::cout << "Pose:" << pose << std::endl;

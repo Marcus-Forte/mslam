@@ -11,7 +11,7 @@ public:
    *
    * @param map
    */
-  virtual void publishScan(const PointCloud2D &map, float r, float g, float b,
+  virtual void publishScan(const PointCloud2 &map, float r, float g, float b,
                            const std::string &name) const = 0;
 
   virtual void publishPose(const Pose2D &pose) const = 0;

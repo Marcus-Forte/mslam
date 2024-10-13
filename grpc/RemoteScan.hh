@@ -14,7 +14,7 @@ public:
   RemoteScan(const std::string &remote_ip);
   void Start();
   void Stop();
-  mslam::PointCloud2D getScan(bool blocking = false) override;
+  mslam::PointCloud2T getScan(bool blocking = false) override;
   mslam::IMUData getImuData() override;
 
 private:
@@ -26,6 +26,6 @@ private:
   std::future<void> read_thread_;
   std::future<void> imu_reader_thread_;
 
-  std::deque<mslam::PointCloud2D> scans_;
+  std::deque<mslam::PointCloud2T> scans_;
   std::deque<mslam::IMUData> imu_measurements_;
 };

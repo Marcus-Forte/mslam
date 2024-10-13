@@ -7,14 +7,12 @@ namespace mslam {
 using Point2 = Eigen::Vector2d;
 using Point3 = Eigen::Vector3d;
 
-struct PointCloud2D {
-  long timestamp;
-  std::vector<Point2> points;
-};
+using PointCloud2 = std::vector<Point2>;
+using PointCloud3 = std::vector<Point3>;
 
-struct PointCloud3D {
-  long timestamp;
-  std::vector<Point3> points;
+struct PointCloud2T {
+  uint64_t timestamp;
+  PointCloud2 points;
 };
 
 } // namespace mslam

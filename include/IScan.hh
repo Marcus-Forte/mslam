@@ -7,12 +7,12 @@ namespace mslam {
 class IScan {
 public:
   /**
-   * @brief Gets one scan from sensor.
+   * @brief Get one scan from sensor.
    *
    * @param blocking blocking call.
-   * @return PointCloud2D
+   * @return PointCloud2T timestamped pointcloud.
    */
-  virtual PointCloud2D getScan(bool blocking = false) = 0;
+  virtual PointCloud2T getScan(bool blocking = false) = 0;
 
   virtual IMUData getImuData() = 0;
 };

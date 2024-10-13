@@ -3,7 +3,7 @@
 #include "IScan.hh"
 #include "common/IMU.hh"
 #include "common/Points.hh"
-#include "points.grpc.pb.h"
+#include "sensors.grpc.pb.h"
 #include <deque>
 #include <future>
 #include <grpcpp/channel.h>
@@ -20,7 +20,7 @@ public:
 private:
   std::string remote_ip_;
   std::shared_ptr<grpc::Channel> channel_;
-  std::unique_ptr<lidar::LidarService::Stub> service_stub_;
+  std::unique_ptr<sensors::SensorService::Stub> service_stub_;
 
   bool is_running_;
   std::future<void> read_thread_;

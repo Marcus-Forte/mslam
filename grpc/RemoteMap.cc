@@ -1,7 +1,6 @@
 #include "RemoteMap.hh"
 #include "Conversions.hh"
-#include "glserver.grpc.pb.h"
-#include "glserver.pb.h"
+#include "gl_server.grpc.pb.h"
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/grpcpp.h>

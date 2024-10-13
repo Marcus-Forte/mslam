@@ -4,7 +4,6 @@
 #include "NumericalCost.hh"
 #include "Transform.hh"
 #include "common/Points.hh"
-#include <Eigen/src/Core/Matrix.h>
 #include <memory>
 
 const float g_maxDistance = 0.05; //

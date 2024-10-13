@@ -1,7 +1,7 @@
 #pragma once
 
 #include "IMapPublisher.hh"
-#include "glserver.grpc.pb.h"
+#include "gl_server.grpc.pb.h"
 #include <grpcpp/channel.h>
 
 class RemoteMap : public mslam::IMapPublisher {

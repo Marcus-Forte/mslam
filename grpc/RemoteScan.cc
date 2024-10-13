@@ -1,8 +1,8 @@
 #include "RemoteScan.hh"
 #include "Conversions.hh"
 #include "common/Points.hh"
-#include "points.grpc.pb.h"
-#include "points.pb.h"
+#include "sensors.grpc.pb.h"
+#include "sensors.pb.h"
 #include <chrono>
 #include <future>
 #include <google/protobuf/empty.pb.h>
@@ -22,7 +22,7 @@ RemoteScan::RemoteScan(const std::string &remote_ip)
     : remote_ip_(remote_ip), is_running_(false) {
 
   channel_ = grpc::CreateChannel(remote_ip, grpc::InsecureChannelCredentials());
-  service_stub_ = lidar::LidarService::NewStub(channel_);
+  service_stub_ = sensors::SensorService::NewStub(channel_);
 }
 
 mslam::PointCloud2D RemoteScan::getScan(bool blocking) {
@@ -71,7 +71,7 @@ void RemoteScan::Start() {
     auto reader =
         service_stub_->getScan(service_context_.get(), empty_response);
 
-    lidar::PointCloud3 msg;
+    sensors::PointCloud3 msg;
     while (is_running_) {
       if (!reader->Read(&msg)) {
         // std::cout << "Unable to read remote lidar" << std::endl;
@@ -91,7 +91,7 @@ void RemoteScan::Start() {
     google::protobuf::Empty empty_response;
     auto imu_reader =
         service_stub_->getImu(imu_service_context_.get(), empty_response);
-    lidar::IMUData msg;
+    sensors::IMUData msg;
 
     while (is_running_) {
 

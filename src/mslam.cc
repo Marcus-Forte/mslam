@@ -5,7 +5,7 @@
 #include "Registration.hh"
 #include "RemoteMap.hh"
 #include "RemoteScan.hh"
-#include "TImer.hh"
+#include "Timer.hh"
 #include "Transform.hh"
 #include "common/Points.hh"
 #include "common/Pose.hh"

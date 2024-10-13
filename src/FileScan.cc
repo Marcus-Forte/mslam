@@ -1,12 +1,12 @@
 #include "FileScan.hh"
-#include "points.pb.h"
+#include "sensors.pb.h"
 #include <chrono>
 #include <filesystem>
 #include <stdexcept>
 #include <thread>
 
 namespace {
-mslam::PointCloud2D fromProto(const lidar::PointCloud3 &msg) {
+mslam::PointCloud2D fromProto(const sensors::PointCloud3 &msg) {
   mslam::PointCloud2D pointcloud;
   pointcloud.points.reserve(msg.points_size());
   for (const auto &pt : msg.points()) {
@@ -23,7 +23,7 @@ FileScan::FileScan(const std::string &file_scan) {
   }
 
   scan_file_.open(file_scan, std::ios::binary | std::ios::in);
-  lidar::PointCloud3 pointcloud;
+  sensors::PointCloud3 pointcloud;
   size_t bytes;
   scan_file_ >> bytes;
 
@@ -44,7 +44,7 @@ PointCloud2D FileScan::getScan(bool blocking) {
   scan_file_ >> bytes;
   std::string data(bytes, 0);
   scan_file_.read(&data[0], bytes);
-  lidar::PointCloud3 pointcloud;
+  sensors::PointCloud3 pointcloud;
   if (!pointcloud.ParseFromString(data)) {
     throw std::runtime_error("invalid read");
   }

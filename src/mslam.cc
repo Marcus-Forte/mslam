@@ -5,16 +5,16 @@
 #include "Registration.hh"
 #include "RemoteMap.hh"
 #include "RemoteScan.hh"
-#include "Timer.hh"
 #include "Transform.hh"
 #include "common/Points.hh"
 #include "common/Pose.hh"
+#include "config/JsonConfig.hh"
 #include "map/KDtree2DMap.hh"
+#include "map/VoxelHashMap.hh"
 #include <chrono>
 #include <filesystem>
 #include <getopt.h>
 #include <memory>
-
 uint64_t now() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
@@ -25,21 +25,18 @@ int main(int argc, char **argv) {
   std::string filescan;
   int opt;
   bool use_filescan = false;
-  bool use_imu = false;
-  bool use_lidar = false;
-  while ((opt = getopt(argc, argv, "lif:")) != -1) {
+  mslam::Config slam_config;
+  while ((opt = getopt(argc, argv, "c:f:")) != -1) {
     switch (opt) {
     case 'f':
       filescan = optarg;
       use_filescan = true;
       break;
-    case 'i':
-      std::cout << "Using IMU..." << std::endl;
-      use_imu = true;
-      break;
-    case 'l':
-      use_lidar = true;
-      std::cout << "Using LiDAR..." << std::endl;
+    case 'c':
+      std::cout << "Using config: " << optarg << std::endl;
+      mslam::JsonConfig config(optarg);
+      config.load();
+      slam_config = config.getConfig();
       break;
     }
   }
@@ -54,26 +51,35 @@ int main(int argc, char **argv) {
 
     scanner = std::make_unique<mslam::FileScan>(filescan);
   } else {
-    scanner = std::make_unique<RemoteScan>("192.168.2.34:50051");
+    scanner = std::make_unique<RemoteScan>(slam_config.remote_scan_address);
     static_cast<RemoteScan *>(scanner.get())->Start();
   }
 
+  std::cout << slam_config << std::endl;
+
   ConsoleLogger logger;
 
-  RemoteMap rmap("host.docker.internal:50052");
+  RemoteMap rmap(slam_config.gl_server_address);
 
   mslam::Pose2D pose{0, 0, 0};
-  mslam::KDTree2DMap map;
+
+  std::unique_ptr<mslam::IMap2D> map;
+  if (slam_config.map_type == mslam::MapType::Voxel) {
+    map = std::make_unique<mslam::VoxelHashMap>(0.1, 2);
+    reinterpret_cast<mslam::VoxelHashMap *>(map.get())
+        ->setNumAdjacentVoxelSearch(2);
+  } else {
+    map = std::make_unique<mslam::KDTree2DMap>();
+  }
   // Form a map with first 5 scans.
 
   for (int i = 0; i < 5; ++i) {
     const auto scan = scanner->getScan(true);
-    map.addScan(scan.points);
+    map->addScan(scan.points);
     logger.log(ILog::Level::INFO, "Init map pts: {}",
-               map.getPointCloudRepresentation().size());
+               map->getPointCloudRepresentation().size());
   }
 
-  Timer tmr;
   mslam::Registration registration;
   double last_imu_timestamp = 0;
 
@@ -83,7 +89,7 @@ int main(int argc, char **argv) {
   while (true) {
 
     // Predict
-    if (use_imu) {
+    if (slam_config.with_imu) {
       const auto imu = scanner->getImuData();
       if (imu.timestamp != 0) {
 
@@ -111,8 +117,8 @@ int main(int argc, char **argv) {
       // Pre-process scan. Dedistort.
 
       // Register scan with map (optimization problem). Factor IMU measurements.
-      if (use_lidar) {
-        const auto new_pose = registration.Align(pose, map, scan.points);
+      if (slam_config.with_lidar) {
+        const auto new_pose = registration.Align(pose, *map, scan.points);
         const auto delta = new_pose - pose;
         vel[0] = delta[0];
         vel[1] = delta[1];
@@ -126,10 +132,10 @@ int main(int argc, char **argv) {
       }
 
       // Update map with transformed scan.
-      map.addScan(scan.points);
-      const auto mapcloud = map.getPointCloudRepresentation();
+      // map->addScan(scan.points);
+      const auto mapcloud = map->getPointCloudRepresentation();
       logger.log(ILog::Level::INFO, "map pts: {}",
-                 map.getPointCloudRepresentation().size());
+                 map->getPointCloudRepresentation().size());
 
       rmap.publishScan(mapcloud, 1.0, 0.0, 0.0, "map");
       rmap.publishScan(scan.points, 0, 1, 0, "scan");

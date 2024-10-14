@@ -21,7 +21,7 @@ std::vector<Voxel2> GetAdjacentVoxels(const Voxel2 &voxel,
 }
 } // namespace
 VoxelHashMap::VoxelHashMap(float voxel_size, size_t max_points_per_voxel)
-    : voxel_size_(voxel_size), max_points_per_voxel(max_points_per_voxel),
+    : voxel_size_(voxel_size), max_points_per_voxel_(max_points_per_voxel),
       adjacent_voxels_(1) {}
 
 void VoxelHashMap::addScan(const PointCloud2 &scan) {
@@ -33,12 +33,12 @@ void VoxelHashMap::addScan(const PointCloud2 &scan) {
     auto search = map_.find(voxel);
     if (search != map_.end()) {
       auto &bucket = search->second;
-      if (bucket.size() != max_points_per_voxel) {
+      if (bucket.size() != max_points_per_voxel_) {
         bucket.emplace_back(point);
       }
     } else { // new bucket
       std::vector<Point2> new_bucket;
-      new_bucket.reserve(max_points_per_voxel);
+      new_bucket.reserve(max_points_per_voxel_);
       new_bucket.emplace_back(point);
       map_.insert({voxel, std::move(new_bucket)});
     }
@@ -80,11 +80,12 @@ IMap2D::Neighbor VoxelHashMap::getClosestNeighbor(const Point2 &query) const {
  * @return PointCloud2D
  */
 const PointCloud2 &VoxelHashMap::getPointCloudRepresentation() const {
-
-  map_rep_.reserve(map_.size() * static_cast<size_t>(max_points_per_voxel));
+  map_rep_.clear();
+  map_rep_.reserve(map_.size() * static_cast<size_t>(max_points_per_voxel_));
   std::for_each(map_.cbegin(), map_.cend(), [&](const auto &map_element) {
-    const auto &voxel_points = map_element.second;
-    map_rep_.insert(map_rep_.end(), voxel_points.cbegin(), voxel_points.cend());
+    const auto &voxel_buckets = map_element.second;
+    map_rep_.insert(map_rep_.begin(), voxel_buckets.cbegin(),
+                    voxel_buckets.cend());
   });
   map_rep_.shrink_to_fit();
   return map_rep_;

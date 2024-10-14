@@ -6,7 +6,7 @@
 #include "common/Points.hh"
 #include <memory>
 
-const float g_maxDistance = 0.05; //
+const float g_maxDistance = 0.1; //
 const int g_numRegIterations = 10;
 namespace mslam {
 
@@ -26,15 +26,15 @@ constexpr int g_numIterations = 5;
 Pose2D Registration::Align(const Pose2D &pose, const IMap2D &map,
                            const PointCloud2 &scan) {
 
-  std::vector<mslam::Point2> src;
-  std::vector<mslam::Point2> tgt;
+  PointCloud2 src;
+  PointCloud2 tgt;
 
+  // Initial guess.
   Eigen::VectorXd x{{pose[0], pose[1], pose[2]}};
-
   Eigen::Affine2d transform_;
 
   for (int i = 0; i < g_numRegIterations; ++i) {
-    Eigen::Affine2d transform_ = toAffine(x[0], x[1], x[2]);
+    transform_ = toAffine(x[0], x[1], x[2]);
     // Data association
     src.clear();
     tgt.clear();
@@ -51,7 +51,8 @@ Pose2D Registration::Align(const Pose2D &pose, const IMap2D &map,
     }
     // Align
     auto logger = std::make_shared<ConsoleLogger>();
-    logger->setLevel(ILog::Level::ERROR);
+    logger->log(ILog::Level::INFO, "Cors: {}", tgt.size());
+    logger->setLevel(ILog::Level::INFO);
     LevenbergMarquardt lm(logger);
     lm.setMaxIterations(10);
     auto cost =
@@ -60,11 +61,7 @@ Pose2D Registration::Align(const Pose2D &pose, const IMap2D &map,
 
     lm.addCost(cost);
     lm.optimize(x);
-
-    transform_ = toAffine(x[0], x[1], x[2]);
   }
-
-  // Update transformed source
 
   return {x[0], x[1], x[2]};
 }

@@ -4,6 +4,7 @@ project(mslam)
 set(CMAKE_CXX_STANDARD 20)
 find_package(PCL REQUIRED COMPONENTS kdtree search filters)
 find_package(Eigen3 REQUIRED)
+find_package(jsoncpp REQUIRED)
 link_libraries(Eigen3::Eigen)
 
 include(cmake/findGRPC.cmake)
@@ -15,6 +16,7 @@ add_subdirectory(third_party/msensor_library EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
 
 add_subdirectory(src/map)
+add_subdirectory(src/config)
 
 add_library(mslamlib
     src/FileScan.cc
@@ -22,7 +24,7 @@ add_library(mslamlib
     src/Transform.cc
 )
 target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(mslamlib moptim maps sensors_proto)
+target_link_libraries(mslamlib moptim maps config sensors_proto)
 
 add_executable(mslam
 src/mslam.cc)

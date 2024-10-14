@@ -25,7 +25,7 @@ public:
 
 private:
   float voxel_size_;
-  size_t max_points_per_voxel;
+  size_t max_points_per_voxel_;
   int adjacent_voxels_;
 
   std::unordered_map<Voxel2, PointCloud2> map_;

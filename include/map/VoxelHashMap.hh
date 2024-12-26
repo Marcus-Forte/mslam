@@ -13,14 +13,7 @@ public:
   void addScan(const PointCloud2 &scan);
 
   Neighbor getClosestNeighbor(const Point2 &query) const;
-
-  /**
-   * @brief Get a Point Cloud Representation. Copy might be made.
-   *
-   * @return PointCloud2D
-   */
   const PointCloud2 &getPointCloudRepresentation() const;
-
   void setNumAdjacentVoxelSearch(int adjacent_voxels);
 
 private:

@@ -109,7 +109,6 @@ int main(int argc, char **argv) {
     pose[0] += vel[0] * deltatime;
     pose[1] += vel[1] * deltatime;
     last_time = current_time;
-
     // Update
     auto scan = scanner->getScan(false);
     if (!scan.points.empty()) {

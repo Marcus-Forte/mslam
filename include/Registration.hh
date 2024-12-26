@@ -3,7 +3,6 @@
 #include "common/Points.hh"
 #include "common/Pose.hh"
 #include "map/IMap2D.hh"
-#include <vector>
 namespace mslam {
 
 class Registration {

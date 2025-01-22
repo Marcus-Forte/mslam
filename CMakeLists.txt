@@ -13,13 +13,12 @@ include(cmake/code_format.cmake)
 
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor_library EXCLUDE_FROM_ALL)
-add_subdirectory(grpc)
+link_libraries(ILidar IImu msensor::Timing sensors_server) # sensor data interface
 
 add_subdirectory(src/map)
 add_subdirectory(src/config)
 
 add_library(mslamlib
-    src/FileScan.cc
     src/Registration.cc
     src/Transform.cc
 )
@@ -28,7 +27,7 @@ target_link_libraries(mslamlib moptim maps config sensors_proto)
 
 add_executable(mslam
 src/mslam.cc)
-target_link_libraries(mslam  mslamlib gRPCInterface)
+target_link_libraries(mslam mslamlib)
 
 
 ## Testing ##

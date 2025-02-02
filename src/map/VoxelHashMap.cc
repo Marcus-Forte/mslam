@@ -66,7 +66,7 @@ IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
               [&](const auto &lhs, const auto &rhs) {
                 /// \todo optimize
                 const Eigen::Vector3f &lhs_vec = lhs.getVector3fMap();
-                const Eigen::Vector3f &rhs_vec = lhs.getVector3fMap();
+                const Eigen::Vector3f &rhs_vec = rhs.getVector3fMap();
 
                 return (lhs_vec - query_eigen).norm() <
                        (rhs_vec - query_eigen).norm();

@@ -1,4 +1,5 @@
 #include "config/JsonConfig.hh"
+#include "config/Validation.hh"
 #include "jsoncpp/json/reader.h"
 #include <fstream>
 
@@ -20,7 +21,20 @@ void JsonConfig::load() {
   } else {
     throw std::runtime_error("Invalid map_type field: " + map_type);
   }
-  config_.gl_server_address = root["gl_server_address"].asString();
-  config_.remote_scan_address = root["remote_scan_address"].asString();
+  config_.remote_scanner = root["remote_scanner"].asString();
+
+  if (!isValidIPAndPort(config_.remote_scanner)) {
+    throw std::runtime_error("Invalid Remote Scan IP: " +
+                             config_.remote_scanner);
+  }
+
+  // Slam parameters
+  config_.parameters.opt_iterations =
+      root["slam"]["optimizer_iterations"].asUInt();
+
+  if (config_.parameters.opt_iterations <= 0) {
+    throw std::runtime_error("Invalid optimizer iterations: " +
+                             std::to_string(config_.parameters.opt_iterations));
+  }
 }
 } // namespace mslam

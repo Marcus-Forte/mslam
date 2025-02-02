@@ -1,7 +1,7 @@
-#include "Registration.hh"
 #include "ConsoleLogger.hh"
 #include "LevenbergMarquardt.hh"
 #include "NumericalCost.hh"
+#include "Registration.hh"
 #include "Transform.hh"
 #include "common/Points.hh"
 #include <memory>
@@ -12,8 +12,10 @@ namespace mslam {
 
 struct Model {
   Model(const Eigen::VectorXd &x) : transform_{toAffine(x[0], x[1], x[2])} {}
-  mslam::Point2 operator()(const mslam::Point2 &input,
-                           const mslam::Point2 &observation) {
+
+  // Error function
+  Eigen::Vector2d operator()(const Eigen::Vector2d &input,
+                             const Eigen::Vector2d &observation) {
     return input - transform_ * observation;
   }
 
@@ -23,11 +25,11 @@ private:
 
 constexpr int g_numIterations = 5;
 
-Pose2D Registration::Align(const Pose2D &pose, const IMap2D &map,
-                           const PointCloud2 &scan) {
+Pose2D Registration::Align(const Pose2D &pose, const IMap &map,
+                           const PointCloud3 &scan) {
 
-  PointCloud2 src;
-  PointCloud2 tgt;
+  PointCloud3 src;
+  PointCloud3 tgt;
 
   // Initial guess.
   Eigen::VectorXd x{{pose[0], pose[1], pose[2]}};
@@ -41,8 +43,11 @@ Pose2D Registration::Align(const Pose2D &pose, const IMap2D &map,
     src.reserve(scan.size());
     tgt.reserve(scan.size());
     for (const auto &pt : scan) {
-      const auto transformed_scan_pt = transform_ * pt;
-      auto closest = map.getClosestNeighbor(transformed_scan_pt);
+      const Eigen::Vector2d point_eigen{pt.x, pt.y};
+      const auto transformed_scan_pt = transform_ * point_eigen;
+      /// \todo optimize
+      const Point3 query(transformed_scan_pt.x(), transformed_scan_pt.y(), 0);
+      auto closest = map.getClosestNeighbor(query);
       if (closest.second < g_maxDistance * g_maxDistance) {
         // source, target
         src.emplace_back(pt);
@@ -55,9 +60,8 @@ Pose2D Registration::Align(const Pose2D &pose, const IMap2D &map,
     logger->setLevel(ILog::Level::INFO);
     LevenbergMarquardt lm(logger);
     lm.setMaxIterations(10);
-    auto cost =
-        std::make_shared<NumericalCost<mslam::Point2, mslam::Point2, Model>>(
-            &tgt, &src);
+    auto cost = std::make_shared<
+        NumericalCost<Eigen::Vector2d, Eigen::Vector2d, Model>>(&tgt, &src);
 
     lm.addCost(cost);
     lm.optimize(x);

@@ -2,12 +2,13 @@
 
 #include "common/Points.hh"
 #include "common/Pose.hh"
-#include "map/IMap2D.hh"
+#include "map/IMap.hh"
+
 namespace mslam {
 
 class Registration {
 public:
-  Pose2D Align(const Pose2D &pose, const IMap2D &map, const PointCloud2 &scan);
+  Pose2D Align(const Pose2D &pose, const IMap &map, const PointCloud3 &scan);
 
 private:
 };

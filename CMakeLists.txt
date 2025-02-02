@@ -17,17 +17,18 @@ link_libraries(ILidar IImu msensor::Timing sensors_server) # sensor data interfa
 
 add_subdirectory(src/map)
 add_subdirectory(src/config)
+add_subdirectory(src/slam)
 
-add_library(mslamlib
-    src/Registration.cc
-    src/Transform.cc
-)
-target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(mslamlib moptim maps config sensors_proto)
+# add_library(mslamlib
+#     # src/Registration.cc
+#     src/Transform.cc
+# )
+# target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# target_link_libraries(mslamlib )
 
 add_executable(mslam
-src/mslam.cc)
-target_link_libraries(mslam mslamlib)
+src/main.cc)
+target_link_libraries(mslam moptim maps slam config sensors_proto)
 
 
 ## Testing ##

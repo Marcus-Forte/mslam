@@ -1,7 +1,11 @@
 {
     "imu": true,
     "lidar" : true,
+    "camera": false,
     "map_type": "voxel",
-    "gl_server_address": "host.docker.internal:50052",
-    "remote_scan_address": "192.168.2.34:50051"
+    "remote_scanner": "localhost:50051",
+
+    "slam": {
+        "optimizer_iterations": 10
+    }
 }

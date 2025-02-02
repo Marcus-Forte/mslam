@@ -3,23 +3,23 @@
 #include "common/Points.hh"
 
 namespace mslam {
-class IMap2D {
+class IMap {
 public:
-  using Neighbor = std::pair<Point2, double>;
+  using Neighbor = std::pair<Point3, double>;
   /**
    * @brief Add points to the map.
    *
    * @param points
    */
-  virtual void addScan(const PointCloud2 &scan) = 0;
+  virtual void addScan(const PointCloud3 &scan) = 0;
 
-  virtual Neighbor getClosestNeighbor(const Point2 &query) const = 0;
+  virtual Neighbor getClosestNeighbor(const Point3 &query) const = 0;
 
   /**
    * @brief Get a Point Cloud Representation. Copy might be made.
    *
    * @return PointCloud2D
    */
-  virtual const PointCloud2 &getPointCloudRepresentation() const = 0;
+  virtual const PointCloud3 &getPointCloudRepresentation() const = 0;
 };
 } // namespace mslam

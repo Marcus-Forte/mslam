@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
-            "args": [],
+            "args": ["-c", "/workspaces/mslam/config/mslam.json"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],

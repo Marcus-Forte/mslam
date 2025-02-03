@@ -19,16 +19,9 @@ add_subdirectory(src/map)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)
 
-# add_library(mslamlib
-#     # src/Registration.cc
-#     src/Transform.cc
-# )
-# target_include_directories(mslamlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-# target_link_libraries(mslamlib )
-
 add_executable(mslam
 src/main.cc)
-target_link_libraries(mslam moptim maps slam config sensors_proto)
+target_link_libraries(mslam maps slam config sensors_proto)
 
 
 ## Testing ##

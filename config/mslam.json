@@ -1,11 +1,13 @@
 {
-    "imu": true,
+    "imu": false,
     "lidar" : true,
     "camera": false,
     "map_type": "voxel",
-    "remote_scanner": "localhost:50051",
+    "remote_scanner": "192.168.2.34:50051",
 
     "slam": {
-        "optimizer_iterations": 10
+        "optimizer_iterations": 3,
+        "reg_iterations": 10,
+        "max_correspondence_distance": 0.5
     }
 }

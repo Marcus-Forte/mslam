@@ -5,7 +5,7 @@
 namespace mslam {
 class IMap {
 public:
-  using Neighbor = std::pair<Point3, double>;
+  using Neighbor = std::pair<Point3, float>;
   /**
    * @brief Add points to the map.
    *

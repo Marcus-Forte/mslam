@@ -31,6 +31,9 @@ void JsonConfig::load() {
   // Slam parameters
   config_.parameters.opt_iterations =
       root["slam"]["optimizer_iterations"].asUInt();
+  config_.parameters.reg_iterations = root["slam"]["reg_iterations"].asUInt();
+  config_.parameters.max_correspondence_distance =
+      root["slam"]["max_correspondence_distance"].asFloat();
 
   if (config_.parameters.opt_iterations <= 0) {
     throw std::runtime_error("Invalid optimizer iterations: " +

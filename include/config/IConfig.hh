@@ -11,8 +11,9 @@ enum class MapType { KdTree, Voxel };
  *
  */
 struct SlamParameters {
-
   int opt_iterations = 5;
+  int reg_iterations = 5;
+  float max_correspondence_distance = 0.1;
 };
 
 /**
@@ -34,7 +35,11 @@ struct SlamConfiguration {
        << (config.map_type == MapType::KdTree ? "KDtree" : "Voxel") << "\n"
        << "Scanner: " << config.remote_scanner << "\n"
        << "# SLAM Parameters #" << "\n\n"
-       << "Optimizer Iterations: " << config.parameters.opt_iterations;
+       << "Optimizer Iterations: " << config.parameters.opt_iterations << "\n"
+       << "Registration Iterations: " << config.parameters.reg_iterations
+       << "\n"
+       << "Max Corr. Distance: "
+       << config.parameters.max_correspondence_distance;
     return os;
   }
 };

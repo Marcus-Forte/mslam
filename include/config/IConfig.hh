@@ -24,7 +24,7 @@ struct SlamConfiguration {
   bool with_imu = false;
   bool with_lidar = true;
   MapType map_type = MapType::KdTree;
-  std::string remote_scanner;
+  std::string remote_scanner = "local";
 
   SlamParameters parameters;
 
@@ -39,7 +39,8 @@ struct SlamConfiguration {
        << "Registration Iterations: " << config.parameters.reg_iterations
        << "\n"
        << "Max Corr. Distance: "
-       << config.parameters.max_correspondence_distance;
+       << config.parameters.max_correspondence_distance << "\n"
+       << "# #";
     return os;
   }
 };

@@ -13,15 +13,15 @@ include(cmake/code_format.cmake)
 
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor_library EXCLUDE_FROM_ALL)
-link_libraries(ILidar IImu msensor::Timing sensors_server) # sensor data interface
+link_libraries(ILidar IImu msensor::Timing msensor_library)
 
-add_subdirectory(src/map)
+add_subdirectory(src/maps)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)
 
 add_executable(mslam
 src/main.cc)
-target_link_libraries(mslam maps slam config sensors_proto)
+target_link_libraries(mslam maps slam config)
 
 
 ## Testing ##

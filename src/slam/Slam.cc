@@ -12,7 +12,7 @@ Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamParameters &config,
 }
 void Slam::ResetPose() {
   pose_.setZero();
-  logger_->log(ILog::Level::DEBUG, "Slam Reset: Pose -> {}, {}, {}", pose_[0],
+  logger_->log(ILog::Level::INFO, "Slam Reset: Pose -> {}, {}, {}", pose_[0],
                pose_[1], pose_[2]);
 }
 void Slam::Predict(const msensor::IMUData &imuData) {
@@ -30,10 +30,10 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     return;
   }
 
-  logger_->log(ILog::Level::DEBUG, "delta: {}", delta);
+  // logger_->log(ILog::Level::DEBUG, "delta: {}", delta);
   pose_[2] = pose_[2] + delta * imuData.gz;
 
-  logger_->log(ILog::Level::DEBUG,
+  logger_->log(ILog::Level::INFO,
                "Slam Predict: Pose update: {},{},{} -> {}, {}, {}",
                pose_prior[0], pose_prior[1], pose_prior[2], pose_[0], pose_[1],
                pose_[2]);
@@ -48,4 +48,6 @@ void Slam::Update(const msensor::Scan3D &lidarData) {
                pose_prior[0], pose_prior[1], pose_prior[2], pose_[0], pose_[1],
                pose_[2]);
 }
+
+mslam::Pose2D Slam::getPose() const { return pose_; }
 } // namespace mslam

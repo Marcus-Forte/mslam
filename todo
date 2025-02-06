@@ -3,3 +3,6 @@
 * filescan
 * Map publisher?
 * cmake target namespace
+* config validation
+
+* Add init scan logic to slam class?

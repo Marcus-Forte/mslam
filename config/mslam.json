@@ -1,5 +1,5 @@
 {
-    "imu": false,
+    "imu": true,
     "lidar" : true,
     "camera": false,
     "map_type": "voxel",

@@ -15,6 +15,7 @@ public:
   void ResetPose() override;
   void Predict(const msensor::IMUData &imuData) override;
   void Update(const msensor::Scan3D &lidarData) override;
+  Pose2D getPose() const;
 
 private:
   SlamParameters config_;

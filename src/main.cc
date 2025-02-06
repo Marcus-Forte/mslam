@@ -6,15 +6,18 @@
 #include "map/VoxelHashMap.hh"
 #include "sensors_client.hh"
 #include "slam/Slam.hh"
-#include <filesystem>
+#include "slam/SlamPlayer.hh"
 #include <getopt.h>
 #include <memory>
+
+const int g_init_scans = 5;
 
 int main(int argc, char **argv) {
 
   int opt;
   mslam::SlamConfiguration config;
-  while ((opt = getopt(argc, argv, "c:")) != -1) {
+  std::string slam_play_file = "";
+  while ((opt = getopt(argc, argv, "c:f:")) != -1) {
     switch (opt) {
     case 'c': {
       std::cout << "Using config: " << optarg << std::endl;
@@ -23,6 +26,11 @@ int main(int argc, char **argv) {
       config = json_config.getConfig();
       break;
     }
+    case 'f':
+      std::cout << "Using SlamPlayer with: " << optarg << std::endl;
+      slam_play_file = optarg;
+      break;
+
     case '?':
       exit(0);
       break;
@@ -31,19 +39,11 @@ int main(int argc, char **argv) {
 
   std::cout << config << std::endl;
 
-  std::shared_ptr<msensor::ILidar> lidar_sensor;
-  std::shared_ptr<msensor::IImu> imu_sensor;
-  if (config.remote_scanner == "local") {
-    /// \todo Select which lidar?
-    throw std::runtime_error("Local mode not yet supported");
+  // Create logger.
+  const auto logger = std::make_shared<ConsoleLogger>();
+  logger->setLevel(ILog::Level::INFO);
 
-  } else {
-    auto scanner = std::make_shared<SensorsClient>(config.remote_scanner);
-    scanner->start();
-    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(scanner);
-    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
-  }
-
+  // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
   if (config.map_type == mslam::MapType::Voxel) {
     map = std::make_shared<mslam::VoxelHashMap>(0.1, 2);
@@ -53,13 +53,32 @@ int main(int argc, char **argv) {
     map = std::make_shared<mslam::KDTreeMap>();
   }
 
-  const auto logger = std::make_shared<ConsoleLogger>();
-  logger->setLevel(ILog::Level::INFO);
+  if (!slam_play_file.empty()) {
+    mslam::SlamPlayer player(slam_play_file, logger, config, map);
+    player.run();
+    exit(0);
+  }
+
+  // Create sensor readers.
+  std::shared_ptr<msensor::ILidar> lidar_sensor;
+  std::shared_ptr<msensor::IImu> imu_sensor;
+
+  if (config.remote_scanner == "local") {
+    /// \todo lidar factory
+    throw std::runtime_error("Local mode not yet supported");
+
+  } else {
+    auto scanner = std::make_shared<SensorsClient>(config.remote_scanner);
+    scanner->start();
+    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(scanner);
+    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
+  }
 
   mslam::Slam slam(logger, config.parameters, map);
 
   const int init_scans = 5;
   int init_scan_count = 0;
+
   while (true) {
 
     const auto scani = lidar_sensor->getScan();
@@ -85,18 +104,14 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    logger->log(ILog::Level::INFO, "New scan @ {}. Points: {}", scan.timestamp,
-                scan.points.size());
-
     if (config.with_imu) {
       msensor::IMUData imudata;
       while ((imudata = imu_sensor->getImuData()).timestamp != 0) {
-        logger->log(ILog::Level::INFO, "New IMU @ {}. Gz: {}",
-                    imudata.timestamp, imudata.gz);
         slam.Predict(imudata);
       }
     }
-
-    slam.Update(scan);
+    if (config.with_lidar) {
+      slam.Update(scan);
+    }
   }
 }

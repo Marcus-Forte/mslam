@@ -1,7 +1,9 @@
 #include "slam/SlamPlayer.hh"
 #include "ConsoleLogger.hh"
 #include "slam/Slam.hh"
+#include "slam/Transform.hh"
 #include "timing/timing.hh"
+#include <pcl/filters/voxel_grid.h>
 #include <thread>
 
 namespace mslam {
@@ -12,13 +14,16 @@ SlamPlayer::SlamPlayer(const std::filesystem::path &file,
                        const std::shared_ptr<ILog> &logger,
                        const SlamConfiguration &config,
                        const std::shared_ptr<IMap> &map)
-    : player_(file), logger_(logger), config_(config), map_(map) {}
+    : player_(file), logger_(logger), config_(config), map_(map),
+      slam_publisher_(config.remote_gl_server) {}
 
 void SlamPlayer::run() {
 
   auto slam_logger = std::make_shared<ConsoleLogger>();
   slam_logger->setLevel(ILog::Level::INFO);
-  mslam::Slam slam(slam_logger, config_.parameters, map_);
+
+  auto preprocessor = std::make_shared<Preprocessor>(config_.preprocessor);
+  mslam::Slam slam(slam_logger, config_.parameters, map_, preprocessor);
 
   int init_scan_count = 0;
 
@@ -36,7 +41,7 @@ void SlamPlayer::run() {
       slam.Predict(imudata);
 
     } else if (entry.entry_case() == sensors::RecordingEntry::kScan) {
-      const auto scan = fromEntryScan3D(entry);
+      auto scan = fromEntryScan3D(entry);
       if (!config_.with_lidar) {
         continue;
       }
@@ -50,7 +55,13 @@ void SlamPlayer::run() {
         continue;
       }
 
-      slam.Update(scan);
+      auto filtered_scan = preprocessor->downsample(scan);
+
+      slam.Update(*filtered_scan);
+      const auto pose = slam.getPose();
+      slam_publisher_.publishPose(pose[0], pose[1], pose[2]);
+      transformCloud(slam.getTransform(), filtered_scan->points);
+      slam_publisher_.publishScan(filtered_scan->points);
     }
 
     const auto delta_time = timing::getNowUs() - time_start;
@@ -61,6 +72,8 @@ void SlamPlayer::run() {
     if (time_delay > 0) {
       std::this_thread::sleep_for(std::chrono::microseconds(time_delay));
     }
+
+    slam_publisher_.publishMap(map_->getPointCloudRepresentation());
   }
 
   std::cout << "Finished Slam player." << std::endl;

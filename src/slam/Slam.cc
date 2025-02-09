@@ -1,4 +1,5 @@
 #include "slam/Slam.hh"
+#include "slam/Transform.hh"
 
 namespace {
 void logPose3D(const std::shared_ptr<ILog> &logger, const mslam::Pose3D &pose) {
@@ -9,11 +10,12 @@ void logPose3D(const std::shared_ptr<ILog> &logger, const mslam::Pose3D &pose) {
 namespace mslam {
 
 Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamParameters &config,
-           const std::shared_ptr<IMap> &map)
+           const std::shared_ptr<IMap> &map,
+           const std::shared_ptr<Preprocessor> &preprocessor)
     : logger_(logger), config_(config),
       registration_(config.opt_iterations, config.reg_iterations,
                     config.max_correspondence_distance, logger),
-      map_(map) {
+      map_(map), preprocessor_(preprocessor) {
   ResetPose();
 }
 void Slam::ResetPose() {
@@ -35,8 +37,8 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     return;
   }
 
-  // logger_->log(ILog::Level::DEBUG, "delta: {}", delta);
-  pose_[2] = pose_[2] + delta * imuData.gz;
+  logger_->log(ILog::Level::INFO, "delta: {} * {}", delta, imuData.az);
+  pose_[5] = pose_[5] + delta * imuData.az;
 
   logger_->log(ILog::Level::INFO, "Predict");
   logPose3D(logger_, pose_);
@@ -50,4 +52,8 @@ void Slam::Update(const msensor::Scan3D &lidarData) {
 }
 
 mslam::Pose3D Slam::getPose() const { return pose_; }
+
+Eigen::Affine3d Slam::getTransform() const {
+  return toAffine(pose_[0], pose_[1], pose_[2], pose_[3], pose_[4], pose_[5]);
+}
 } // namespace mslam

@@ -2,8 +2,17 @@
     "imu": false,
     "lidar" : true,
     "camera": false,
-    "map_type": "kdtree",
+    "map_type": "voxel",
     "remote_scanner": "192.168.2.1:50051",
+    "remote_gl_server": "host.docker.internal:50051",
+
+    "preprocessor": {
+        "voxel_size": 0.1
+    },
+    "map": {
+        "resolution": 0.1,
+        "max_points_per_voxel": 1
+    },
 
     "slam": {
         "optimizer_iterations": 3,
@@ -12,6 +21,6 @@
     },
 
     "player": {
-        "delay_ms": 100
+        "delay_ms": 50
     }
 }

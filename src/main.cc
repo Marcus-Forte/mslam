@@ -46,7 +46,9 @@ int main(int argc, char **argv) {
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
   if (config.map_type == mslam::MapType::Voxel) {
-    map = std::make_shared<mslam::VoxelHashMap>(0.1, 5);
+    map = std::make_shared<mslam::VoxelHashMap>(
+        config.map_parameters.resolution,
+        config.map_parameters.max_points_per_voxel);
     reinterpret_cast<mslam::VoxelHashMap *>(map.get())
         ->setNumAdjacentVoxelSearch(2); /// \todo add configurable
   } else {
@@ -73,7 +75,9 @@ int main(int argc, char **argv) {
     imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
   }
 
-  mslam::Slam slam(logger, config.parameters, map);
+  auto preprocessor =
+      std::make_shared<mslam::Preprocessor>(config.preprocessor);
+  mslam::Slam slam(logger, config.parameters, map, preprocessor);
 
   const int init_scans = 5;
   int init_scan_count = 0;

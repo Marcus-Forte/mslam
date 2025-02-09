@@ -22,11 +22,35 @@ void JsonConfig::load() {
     throw std::runtime_error("Invalid map_type field: " + map_type);
   }
   config_.remote_scanner = root["remote_scanner"].asString();
+  config_.remote_gl_server = root["remote_gl_server"].asString();
+
+  if (config_.remote_gl_server.empty()) {
+    throw std::runtime_error("Empty Remote GL Server IP");
+  }
 
   if (!isValidIPAndPort(config_.remote_scanner)) {
     throw std::runtime_error("Invalid Remote Scan IP: " +
                              config_.remote_scanner);
   }
+  // Preprocessor parameters
+
+  if (root["preprocessor"]["voxel_size"].empty()) {
+    throw std::runtime_error("Empty preprocessor voxel_size setting");
+  }
+  config_.preprocessor.voxel_size =
+      root["preprocessor"]["voxel_size"].asFloat();
+
+  // Map parameters
+  if (root["map"]["resolution"].empty()) {
+    throw std::runtime_error("Empty map resolution setting");
+  }
+
+  if (root["map"]["max_points_per_voxel"].empty()) {
+    throw std::runtime_error("Empty map max_points_per_voxel setting");
+  }
+  config_.map_parameters.resolution = root["map"]["resolution"].asFloat();
+  config_.map_parameters.max_points_per_voxel =
+      root["map"]["max_points_per_voxel"].asUInt();
 
   // Slam parameters
   config_.parameters.opt_iterations =

@@ -39,5 +39,10 @@ void JsonConfig::load() {
     throw std::runtime_error("Invalid optimizer iterations: " +
                              std::to_string(config_.parameters.opt_iterations));
   }
+
+  if (root["player"]["delay_ms"].empty()) {
+    throw std::runtime_error("Empty slam player delay setting");
+  }
+  config_.player_config.entry_delay_ms = root["player"]["delay_ms"].asUInt();
 }
 } // namespace mslam

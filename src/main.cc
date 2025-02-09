@@ -46,13 +46,12 @@ int main(int argc, char **argv) {
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
   if (config.map_type == mslam::MapType::Voxel) {
-    map = std::make_shared<mslam::VoxelHashMap>(0.1, 2);
+    map = std::make_shared<mslam::VoxelHashMap>(0.1, 5);
     reinterpret_cast<mslam::VoxelHashMap *>(map.get())
         ->setNumAdjacentVoxelSearch(2); /// \todo add configurable
   } else {
     map = std::make_shared<mslam::KDTreeMap>();
   }
-
   if (!slam_play_file.empty()) {
     mslam::SlamPlayer player(slam_play_file, logger, config, map);
     player.run();

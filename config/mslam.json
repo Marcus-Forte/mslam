@@ -1,13 +1,17 @@
 {
-    "imu": true,
+    "imu": false,
     "lidar" : true,
     "camera": false,
-    "map_type": "voxel",
-    "remote_scanner": "192.168.2.34:50051",
+    "map_type": "kdtree",
+    "remote_scanner": "192.168.2.1:50051",
 
     "slam": {
         "optimizer_iterations": 3,
-        "reg_iterations": 10,
-        "max_correspondence_distance": 0.5
+        "reg_iterations": 5,
+        "max_correspondence_distance": 0.3
+    },
+
+    "player": {
+        "delay_ms": 100
     }
 }

@@ -1,8 +1,7 @@
-* Point types
 * slam test
-* filescan
-* Map publisher?
-* cmake target namespace
-* config validation
+* Map/Scan publisher (glServer) / separate thread?
 
-* Add init scan logic to slam class?
+* Add initial scan logic to slam class?
+* Add configurable scan player speed
+* Add multi-client to GL proxy. Configurable color.
+* SO3 operations module

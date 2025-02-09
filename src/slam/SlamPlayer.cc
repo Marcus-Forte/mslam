@@ -1,6 +1,8 @@
 #include "slam/SlamPlayer.hh"
 #include "ConsoleLogger.hh"
 #include "slam/Slam.hh"
+#include "timing/timing.hh"
+#include <thread>
 
 namespace mslam {
 
@@ -21,6 +23,9 @@ void SlamPlayer::run() {
   int init_scan_count = 0;
 
   while (player_.next()) {
+
+    const auto time_start = timing::getNowUs();
+
     const auto &entry = player_.getLastEntry();
 
     if (entry.entry_case() == sensors::RecordingEntry::kImu) {
@@ -46,6 +51,15 @@ void SlamPlayer::run() {
       }
 
       slam.Update(scan);
+    }
+
+    const auto delta_time = timing::getNowUs() - time_start;
+    const auto time_delay =
+        config_.player_config.entry_delay_ms * 1000 - delta_time;
+
+    /// \todo fix for imu and lidar updates at any time.
+    if (time_delay > 0) {
+      std::this_thread::sleep_for(std::chrono::microseconds(time_delay));
     }
   }
 

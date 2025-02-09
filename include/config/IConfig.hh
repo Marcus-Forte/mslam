@@ -11,9 +11,18 @@ enum class MapType { KdTree, Voxel };
  *
  */
 struct SlamParameters {
-  int opt_iterations = 5;
-  int reg_iterations = 5;
+  unsigned int opt_iterations = 5;
+  unsigned int reg_iterations = 5;
   float max_correspondence_distance = 0.1;
+};
+
+/**
+ * @brief
+ *
+ */
+struct PlayerConfiguration {
+  unsigned int entry_delay_ms =
+      200; // delay inbetween processing filescan entries
 };
 
 /**
@@ -27,6 +36,7 @@ struct SlamConfiguration {
   std::string remote_scanner = "local";
 
   SlamParameters parameters;
+  PlayerConfiguration player_config;
 
   friend std::ostream &operator<<(std::ostream &os, SlamConfiguration config) {
     os << "IMU: " << config.with_imu << "\n"
@@ -40,7 +50,10 @@ struct SlamConfiguration {
        << "\n"
        << "Max Corr. Distance: "
        << config.parameters.max_correspondence_distance << "\n"
-       << "# #";
+       << "# #" << "\n"
+       << config.parameters.max_correspondence_distance << "\n"
+       << "Player Configuration" << "\n"
+       << "Entry Delay: " << config.player_config.entry_delay_ms << "\n";
     return os;
   }
 };

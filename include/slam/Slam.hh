@@ -4,7 +4,7 @@
 #include "ISlam.hh"
 #include "config/IConfig.hh"
 #include "map/IMap.hh"
-#include "slam/Registration2D.hh"
+#include "slam/Registration.hh"
 
 namespace mslam {
 
@@ -15,14 +15,14 @@ public:
   void ResetPose() override;
   void Predict(const msensor::IMUData &imuData) override;
   void Update(const msensor::Scan3D &lidarData) override;
-  Pose2D getPose() const;
+  Pose3D getPose() const;
 
 private:
   SlamParameters config_;
   std::shared_ptr<IMap> map_;
 
-  Registration2D reg_2d_;
-  Pose2D pose_;
+  Registration registration_;
+  Pose3D pose_;
   std::shared_ptr<ILog> logger_;
 };
 } // namespace mslam

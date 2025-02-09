@@ -1,5 +1,5 @@
 add_library(slam 
-Registration2D.cc
+Registration.cc
 Transform.cc
 SlamPlayer.cc
 Slam.cc)

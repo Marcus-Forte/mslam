@@ -10,10 +10,12 @@
 			"extensions": [
 				"ms-vscode.cpptools-extension-pack",
 				"llvm-vs-code-extensions.vscode-clangd",
-				"cschlosser.doxdocgen"
+				"cschlosser.doxdocgen",
+				"zxh404.vscode-proto3"
 			],
 			"settings": {
 				"C_Cpp.intelliSenseEngine": "disabled",
+				"remote.autoForwardPorts": false,
 				"clangd.arguments": ["-header-insertion=never"]
 			}
 		}

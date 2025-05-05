@@ -73,7 +73,9 @@ void SlamPlayer::run() {
       std::this_thread::sleep_for(std::chrono::microseconds(time_delay));
     }
 
-    slam_publisher_.publishMap(map_->getPointCloudRepresentation());
+    // Publish mao
+    slam_publisher_.publishScan(map_->getPointCloudRepresentation(), 1.0, 0.0,
+                                0.0, "map");
   }
 
   std::cout << "Finished Slam player." << std::endl;

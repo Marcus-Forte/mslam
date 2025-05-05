@@ -12,7 +12,7 @@ include(cmake/generate_proto.cmake)
 include(cmake/code_format.cmake)
 
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
-add_subdirectory(third_party/msensor_library EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/msensor_library)
 link_libraries(ILidar IImu msensor::Timing msensor_library)
 
 add_subdirectory(src/maps)
@@ -22,6 +22,10 @@ add_subdirectory(src/slam)
 add_executable(mslam
 src/main.cc)
 target_link_libraries(mslam maps slam config)
+
+add_executable(register_scans
+src/register_scans.cc)
+target_link_libraries(register_scans maps slam config gl_publisher) # why does msensor_library not capture that library already?
 
 
 ## Testing ##

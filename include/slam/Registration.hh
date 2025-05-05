@@ -9,6 +9,7 @@ namespace mslam {
 
 class Registration {
 public:
+  using RegistrationCallback = std::function<void(const Pose2D &pose)>;
   Registration(int num_registration_iterations_, int num_optimizer_iterations_,
                float max_correspondence_distance,
                const std::shared_ptr<ILog> &logger);
@@ -34,11 +35,15 @@ public:
    */
   Pose3D Align3D(const Pose3D &pose, const IMap &map, const PointCloud3 &scan);
 
+  void registerIterationCallback(RegistrationCallback &&callback);
+
 private:
   int num_registration_iterations_;
   int num_optimizer_iterations_;
   float max_correspondence_distance_;
   std::shared_ptr<ILog> logger_;
+
+  RegistrationCallback registration_callback_;
 };
 
 } // namespace mslam

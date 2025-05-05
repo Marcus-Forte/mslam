@@ -53,6 +53,10 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
                                          closest.first.y); // point in map
       }
     }
+    if (registration_callback2d_) {
+      registration_callback2d_({x[0], x[1], x[2]}, map_correspondences,
+                               scan_points);
+    }
     // Align
     logger_->log(ILog::Level::INFO, "Correspondences: {} / {}",
                  map_correspondences.size(), scan.size());
@@ -69,10 +73,6 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
 
     lm.addCost(cost);
     lm.optimize(x);
-
-    if (registration_callback_) {
-      registration_callback_({x[0], x[1], x[2]});
-    }
   }
 
   return {x[0], x[1], x[2]};
@@ -84,7 +84,8 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
   throw std::runtime_error("Align3D not implemented");
 }
 
-void Registration::registerIterationCallback(RegistrationCallback &&callback) {
-  registration_callback_ = callback;
+void Registration::registerIterationCallback2D(
+    RegistrationCallback2D &&callback) {
+  registration_callback2d_ = callback;
 }
 } // namespace mslam

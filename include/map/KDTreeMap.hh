@@ -16,7 +16,6 @@ public:
 
 private:
   pcl::search::KdTree<pcl::PointXYZ> kdtree_;
-  pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_;
-  PointCloud3 map_rep_;
+  PointCloud3::Ptr map_rep_;
 };
 } // namespace mslam

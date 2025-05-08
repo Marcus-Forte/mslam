@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
-            "args": ["-c", "/workspaces/mslam/config/mslam.json"],
+            "args": ["/workspaces/mslam/build/src.ply", "/workspaces/mslam/build/tgt.ply", "host.docker.internal:50051"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],

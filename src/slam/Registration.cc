@@ -10,6 +10,8 @@
 
 namespace mslam {
 
+constexpr int g_maxSmallDeltaHits = 3;
+
 Registration::Registration(int num_registration_iterations,
                            int num_optimizer_iterations,
                            float max_correspondence_distance,
@@ -31,6 +33,7 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
   Eigen::Affine2d transform_;
 
   static Timer timer;
+  int small_delta_hits = 0;
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
     timer.start();
@@ -77,16 +80,20 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
     logger_->log(
         ILog::Level::INFO,
         "Reg. Iteration: {}/ {}. Correspondences: {} / {}. Took: {} us", i + 1,
-        num_optimizer_iterations_, map_correspondences.size(), scan.size(),
+        num_registration_iterations_, map_correspondences.size(), scan.size(),
         delta);
 
     if (registration_callback2d_) {
       registration_callback2d_({x[0], x[1], x[2]}, map_correspondences,
                                scan_points);
     }
-    /// \todo status convergence heuristic
+
     if (status == IOptimizer::Status::SMALL_DELTA) {
-      break;
+      small_delta_hits++;
+
+      if (small_delta_hits > g_maxSmallDeltaHits) {
+        break;
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 #include "ConsoleLogger.hh"
 #include "gl_publisher.hh"
 #include "map/KDTreeMap.hh"
+#include "map/VoxelHashMap.hh"
 #include "slam/Registration.hh"
 #include "slam/Transform.hh"
 #include <filesystem>
@@ -99,10 +100,10 @@ int main(int argc, char **argv) {
   for (auto scan_idx = 1; scan_idx < num_scans; ++scan_idx) {
 
     pose = registration.Align2D(pose, *map, scans[scan_idx]);
-    msensor::PointCloud3 transformed_scan = scans[scan_idx];
-    const auto transform = toAffine(pose[0], pose[1], pose[2]);
-    transformCloud(transform, transformed_scan);
-    map->addScan(transformed_scan);
+    // msensor::PointCloud3 transformed_scan = scans[scan_idx];
+    // const auto transform = toAffine(pose[0], pose[1], pose[2]);
+    // transformCloud(transform, transformed_scan);
+    // map->addScan(transformed_scan);
     gl_publisher.publishScan(map->getPointCloudRepresentation(), 1.0, 0.0, 0.0,
                              "map");
 

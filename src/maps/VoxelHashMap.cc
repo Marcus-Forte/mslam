@@ -2,24 +2,15 @@
 
 namespace mslam {
 
-namespace {
-std::vector<Voxel3> GetAdjacentVoxels(const Voxel3 &voxel,
-                                      int adjacent_voxels = 1) {
+static const std::array<Voxel3, 27> voxel_shifts{
+    {Voxel3{0, 0, 0},   Voxel3{1, 0, 0},   Voxel3{-1, 0, 0},  Voxel3{0, 1, 0},
+     Voxel3{0, -1, 0},  Voxel3{0, 0, 1},   Voxel3{0, 0, -1},  Voxel3{1, 1, 0},
+     Voxel3{1, -1, 0},  Voxel3{-1, 1, 0},  Voxel3{-1, -1, 0}, Voxel3{1, 0, 1},
+     Voxel3{1, 0, -1},  Voxel3{-1, 0, 1},  Voxel3{-1, 0, -1}, Voxel3{0, 1, 1},
+     Voxel3{0, 1, -1},  Voxel3{0, -1, 1},  Voxel3{0, -1, -1}, Voxel3{1, 1, 1},
+     Voxel3{1, 1, -1},  Voxel3{1, -1, 1},  Voxel3{1, -1, -1}, Voxel3{-1, 1, 1},
+     Voxel3{-1, 1, -1}, Voxel3{-1, -1, 1}, Voxel3{-1, -1, -1}}};
 
-  std::vector<Voxel3> voxel_neighborhood;
-  for (int i = voxel.x() - adjacent_voxels; i < voxel.x() + adjacent_voxels + 1;
-       ++i) {
-    for (int j = voxel.y() - adjacent_voxels;
-         j < voxel.y() + adjacent_voxels + 1; ++j) {
-      for (int k = voxel.z() - adjacent_voxels;
-           k < voxel.z() + adjacent_voxels + 1; ++k) {
-        voxel_neighborhood.emplace_back(i, j, k);
-      }
-    }
-  }
-  return voxel_neighborhood;
-}
-} // namespace
 VoxelHashMap::VoxelHashMap(float voxel_size, size_t max_points_per_voxel)
     : voxel_size_(voxel_size), max_points_per_voxel_(max_points_per_voxel),
       adjacent_voxels_(1) {}
@@ -51,13 +42,12 @@ IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
 
   const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
 
-  const auto &query_voxels = GetAdjacentVoxels(voxel, adjacent_voxels_);
-
   Point3 closest_neighbor = {0, 0, 0};
   double closest_distance = std::numeric_limits<double>::max();
   // Search each neighbor
   std::for_each(
-      query_voxels.begin(), query_voxels.end(), [&](const auto &query_voxel) {
+      voxel_shifts.begin(), voxel_shifts.end(), [&](const auto &voxel_shift) {
+        const auto query_voxel = voxel + voxel_shift;
         auto search = map_.find(query_voxel);
         if (search != map_.end()) {
           const auto &bucket_points = search->second;

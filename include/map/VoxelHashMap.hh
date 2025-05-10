@@ -5,11 +5,13 @@
 #include <Eigen/Dense>
 
 namespace mslam {
+
 class VoxelHashMap : public IMap {
 public:
   VoxelHashMap(float voxel_size, size_t max_points_per_voxel);
   void addScan(const PointCloud3 &scan);
 
+  /// \todo If query is 3x beyond points, how to indicate to caller?
   Neighbor getClosestNeighbor(const Point3 &query) const;
   const PointCloud3 &getPointCloudRepresentation() const;
   void setNumAdjacentVoxelSearch(int adjacent_voxels);

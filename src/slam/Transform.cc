@@ -34,3 +34,16 @@ void transformCloud(const Eigen::Affine3d &transform,
     pt.z = transformed_scan_pt.z();
   });
 }
+
+/// \todo how to prevent conversions to double?
+void transformCloud(const Eigen::Affine2d &transform,
+                    msensor::PointCloud3 &cloud_out) {
+
+  // pcl::transformPointCloud(cloud_out, cloud_out, transform.matrix());
+  std::for_each(cloud_out.begin(), cloud_out.end(), [&](auto &pt) {
+    const Eigen::Vector2d point_eigen{pt.x, pt.y};
+    const Eigen::Vector2d transformed_scan_pt = transform * point_eigen;
+    pt.x = transformed_scan_pt.x();
+    pt.y = transformed_scan_pt.y();
+  });
+}

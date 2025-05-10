@@ -1,6 +1,7 @@
 #include "slam/Registration.hh"
 #include "LevenbergMarquardt.hh"
 #include "NumericalCost.hh"
+#include "Timer.hh"
 #include "common/Points.hh"
 #include "slam/Transform.hh"
 #include <memory>
@@ -18,6 +19,7 @@ Registration::Registration(int num_registration_iterations,
       max_correspondence_distance_(max_correspondence_distance),
       logger_(logger) {}
 
+/// \todo add transformed scan as output
 Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
                              const PointCloud3 &scan) {
 
@@ -28,7 +30,10 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
   Eigen::VectorXd x{{pose[0], pose[1], pose[2]}};
   Eigen::Affine2d transform_;
 
+  static Timer timer;
+
   for (int i = 0; i < num_registration_iterations_; ++i) {
+    timer.start();
     transform_ = toAffine(x[0], x[1], x[2]);
     // Data association
 
@@ -53,14 +58,8 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
                                          closest.first.y); // point in map
       }
     }
-    if (registration_callback2d_) {
-      registration_callback2d_({x[0], x[1], x[2]}, map_correspondences,
-                               scan_points);
-    }
-    // Align
-    logger_->log(ILog::Level::INFO, "Correspondences: {} / {}",
-                 map_correspondences.size(), scan.size());
 
+    // Align
     LevenbergMarquardt lm(logger_);
 
     lm.setMaxIterations(num_optimizer_iterations_);
@@ -72,7 +71,23 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
         map_correspondences.size(), 2, 3, model);
 
     lm.addCost(cost);
-    lm.optimize(x);
+    const auto status = lm.optimize(x);
+
+    const auto delta = timer.stop();
+    logger_->log(
+        ILog::Level::INFO,
+        "Reg. Iteration: {}/ {}. Correspondences: {} / {}. Took: {} us", i + 1,
+        num_optimizer_iterations_, map_correspondences.size(), scan.size(),
+        delta);
+
+    if (registration_callback2d_) {
+      registration_callback2d_({x[0], x[1], x[2]}, map_correspondences,
+                               scan_points);
+    }
+    /// \todo status convergence heuristic
+    if (status == IOptimizer::Status::SMALL_DELTA) {
+      break;
+    }
   }
 
   return {x[0], x[1], x[2]};

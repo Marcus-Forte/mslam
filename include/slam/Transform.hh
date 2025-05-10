@@ -9,3 +9,6 @@ Eigen::Affine3d toAffine(double x, double y, double z, double rx, double ry,
 
 void transformCloud(const Eigen::Affine3d &transform,
                     msensor::PointCloud3 &cloud_out);
+
+void transformCloud(const Eigen::Affine2d &transform,
+                    msensor::PointCloud3 &cloud_out);

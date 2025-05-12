@@ -10,4 +10,6 @@
 ## Registering individual scans 
 
 This executable register two point clouds and publish their results in the GL server (https://github.com/Marcus-Forte/learning-opengl) 
-`./register_scans src.ply tgt.ply host.docker.internal:50051`
+`./register_scans host.docker.internal:50051 target.ply src1.ply src2.ply ...`
+
+Data is available at `test/data/scan*.ply`

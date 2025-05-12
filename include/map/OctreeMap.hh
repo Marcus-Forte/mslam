@@ -7,12 +7,10 @@ namespace mslam {
 class OctreeMap : public IMap {
 public:
   OctreeMap(float voxel_size);
-  void addScan(const PointCloud3 &scan);
 
-  /// \todo If query is 3x beyond points, how to indicate to caller?
-  Neighbor getClosestNeighbor(const Point3 &query) const;
-  const PointCloud3 &getPointCloudRepresentation() const;
-  void setNumAdjacentVoxelSearch(int adjacent_voxels);
+  void addScan(const PointCloud3 &scan) override;
+  Neighbor getClosestNeighbor(const Point3 &query) const override;
+  const PointCloud3 &getPointCloudRepresentation() const override;
 
 private:
   mutable pcl::octree::OctreePointCloudSearch<Point3> octree_;

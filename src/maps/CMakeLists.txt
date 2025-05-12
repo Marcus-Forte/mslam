@@ -1,5 +1,6 @@
 add_library(maps
   KDTreeMap.cc
+  OctreeMap.cc
   VoxelHashMap.cc
   Voxel.cc
 )

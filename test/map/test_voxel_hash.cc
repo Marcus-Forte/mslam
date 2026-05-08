@@ -86,7 +86,7 @@ TEST_F(TestVoxelHashMap, query_point_outside_voxel_corners) {
   neighbor = map_->getClosestNeighbor({-1.5, -1.5, 0.0});
   // Point outside voxel resolution, return convention is (0,0) and distance
   // is numeric max.
-  EXPECT_EQ(neighbor.second, std::numeric_limits<double>::max());
+  EXPECT_EQ(neighbor.second, std::numeric_limits<float>::max());
   EXPECT_EQ(neighbor.first.x, 0.0);
   EXPECT_EQ(neighbor.first.y, 0.0);
 }

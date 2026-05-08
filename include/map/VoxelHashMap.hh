@@ -20,6 +20,7 @@ private:
   float voxel_size_;
   size_t max_points_per_voxel_;
   int adjacent_voxels_;
+  std::vector<Voxel3> voxel_shifts_;
 
   std::unordered_map<Voxel3, PointCloud3> map_;
   mutable PointCloud3 map_rep_;

@@ -51,7 +51,6 @@ struct SlamConfiguration {
   bool with_lidar = true;
   MapType map_type = MapType::KdTree;
   std::string remote_scanner = "local";
-  std::string remote_gl_server;
 
   PreProcessor preprocessor;
   SlamParameters parameters;
@@ -62,7 +61,6 @@ struct SlamConfiguration {
     os << "IMU: " << config.with_imu << "\n"
        << "LIDAR: " << config.with_lidar << "\n"
        << "Scanner: " << config.remote_scanner << "\n"
-       << "GL Server: " << config.remote_gl_server << "\n"
        << "# MAP Parameters #" << "\n"
        << "Map Type: "
        << (config.map_type == MapType::KdTree ? "KDtree" : "Voxel") << "\n"

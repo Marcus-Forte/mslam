@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package sensors;
+
+import "lidar.proto";
+
+message Empty {
+}
+
+message Pose3D {
+	double x = 1;
+	double y = 2;
+	double z = 3;
+	double phi = 4;
+	double omega = 5;
+	double theta = 6;
+}
+
+service SlamService {
+	rpc GetMap(Empty) returns (stream PointCloud3);
+	rpc GetPose(Empty) returns (Pose3D);
+}
+
+service ScanService {
+	rpc GetScan(Empty) returns (stream PointCloud3);
+}

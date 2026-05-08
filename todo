@@ -1,7 +1,6 @@
 * slam test
-* Map/Scan publisher (glServer) / separate thread?
 
 * Add initial scan logic to slam class?
 * Add configurable scan player speed
-* Add multi-client to GL proxy. Configurable color.
 * SO3 operations module
+* Publish map increments

@@ -8,11 +8,11 @@ find_package(jsoncpp REQUIRED)
 link_libraries(Eigen3::Eigen)
 
 include(cmake/findGRPC.cmake)
-include(cmake/generate_proto.cmake)
 include(cmake/code_format.cmake)
 
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
+add_subdirectory(grpc)
 link_libraries(ILidar IImu msensor::timing msensor)
 
 add_subdirectory(src/maps)

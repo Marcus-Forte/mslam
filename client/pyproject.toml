@@ -1,0 +1,14 @@
+[project]
+name = "mslam_client"
+version = "0.1.0"
+description = "MSLAM client library"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "grpcio==1.78.0",
+    "grpcio-tools==1.78.0",
+    "opencv-python>=4.12.0.88",
+    "ruff>=0.15.5",
+    "viser>=1.0.27"
+]
+

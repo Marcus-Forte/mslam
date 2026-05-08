@@ -18,8 +18,8 @@ public:
   /**
    * @brief
    *
-   * @param pose input pose in 2 dimensions. Parameter vector represents x, y
-   * and theta.
+   * @param pose input pose in 2 dimensions. Parameter vector represents x, y. z
+   * cordinates are ignored. and theta.
    * @param map
    * @param scan
    * @return Pose2D

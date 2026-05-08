@@ -22,11 +22,6 @@ void JsonConfig::load() {
     throw std::runtime_error("Invalid map_type field: " + map_type);
   }
   config_.remote_scanner = root["remote_scanner"].asString();
-  config_.remote_gl_server = root["remote_gl_server"].asString();
-
-  if (config_.remote_gl_server.empty()) {
-    throw std::runtime_error("Empty Remote GL Server IP");
-  }
 
   if (!isValidIPAndPort(config_.remote_scanner)) {
     throw std::runtime_error("Invalid Remote Scan IP: " +

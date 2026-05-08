@@ -5,20 +5,34 @@
 #include "map/KDTreeMap.hh"
 #include "map/VoxelHashMap.hh"
 #include "sensors_remote_client.hh"
+#include "slam/Preprocessor.hh"
 #include "slam/Slam.hh"
 #include "slam/SlamPlayer.hh"
+#include "slam/SlamServer.hh"
+#include "slam/Transform.hh"
 #include <getopt.h>
+#include <iostream>
 #include <memory>
 #include <thread>
 
 const int g_init_scans = 5;
 
-int main(int argc, char **argv) {
+namespace {
+void printUsage(const char *program_name) {
+  std::cout << "Usage: " << program_name
+            << " [-c config.json] [-f recording.pbscan] [-h]\n"
+            << "  -c <file>  Load SLAM configuration from JSON\n"
+            << "  -f <file>  Replay a recorded scan file instead of connecting "
+               "remotely\n"
+            << "  -h         Show this help message\n";
+}
+} // namespace
 
+int main(int argc, char **argv) {
   int opt;
   mslam::SlamConfiguration config;
   std::string slam_play_file = "";
-  while ((opt = getopt(argc, argv, "c:f:")) != -1) {
+  while ((opt = getopt(argc, argv, "c:f:h")) != -1) {
     switch (opt) {
     case 'c': {
       std::cout << "Using config: " << optarg << std::endl;
@@ -31,9 +45,13 @@ int main(int argc, char **argv) {
       std::cout << "Using SlamPlayer with: " << optarg << std::endl;
       slam_play_file = optarg;
       break;
+    case 'h':
+      printUsage(argv[0]);
+      return 0;
 
     case '?':
-      exit(0);
+      printUsage(argv[0]);
+      return 1;
       break;
     }
   }
@@ -55,11 +73,15 @@ int main(int argc, char **argv) {
   } else {
     map = std::make_shared<mslam::KDTreeMap>();
   }
+
   if (!slam_play_file.empty()) {
     mslam::SlamPlayer player(slam_play_file, logger, config, map);
     player.run();
-    exit(0);
+    return 0;
   }
+
+  mslam::SlamServer slam_server(logger);
+  slam_server.start();
 
   // Create sensor readers.
   std::shared_ptr<msensor::ILidar> lidar_sensor;
@@ -78,7 +100,8 @@ int main(int argc, char **argv) {
 
   auto preprocessor =
       std::make_shared<mslam::Preprocessor>(config.preprocessor);
-  mslam::Slam slam(logger, config.parameters, map, preprocessor);
+  mslam::Slam slam(logger, config.parameters, map);
+  slam_server.updatePose(slam.getPose());
 
   const int init_scans = 5;
   int init_scan_count = 0;
@@ -106,6 +129,8 @@ int main(int argc, char **argv) {
     if (init_scan_count < init_scans) {
       map->addScan(*scan.points);
       init_scan_count++;
+      slam_server.updateScan(*scan.points);
+      slam_server.updateMap(map->getPointCloudRepresentation());
       logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
                   init_scan_count, init_scans,
                   map->getPointCloudRepresentation().size());
@@ -119,10 +144,17 @@ int main(int argc, char **argv) {
           break;
         }
         slam.Predict(*imudata);
+        slam_server.updatePose(slam.getPose());
       }
     }
     if (config.with_lidar) {
-      slam.Update(scan);
+      auto filtered_scan = preprocessor->downsample(scan);
+      slam.Update(*filtered_scan);
+      transformCloud(slam.getTransform(), *filtered_scan->points);
+      slam_server.updateScan(*filtered_scan->points);
+      map->addScan(*filtered_scan->points);
+      slam_server.updateMap(map->getPointCloudRepresentation());
+      slam_server.updatePose(slam.getPose());
     }
   }
 }

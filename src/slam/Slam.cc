@@ -10,12 +10,11 @@ void logPose3D(const std::shared_ptr<ILog> &logger, const mslam::Pose3D &pose) {
 namespace mslam {
 
 Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamParameters &config,
-           const std::shared_ptr<IMap> &map,
-           const std::shared_ptr<Preprocessor> &preprocessor)
+           const std::shared_ptr<IMap> &map)
     : logger_(logger), config_(config),
       registration_(config.opt_iterations, config.reg_iterations,
                     config.max_correspondence_distance, logger),
-      map_(map), preprocessor_(preprocessor) {
+      map_(map) {
   ResetPose();
 }
 void Slam::ResetPose() {

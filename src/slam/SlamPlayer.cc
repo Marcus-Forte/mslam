@@ -1,6 +1,8 @@
 #include "slam/SlamPlayer.hh"
 #include "ConsoleLogger.hh"
+#include "slam/Preprocessor.hh"
 #include "slam/Slam.hh"
+#include "slam/Transform.hh"
 #include "timing/timing.hh"
 #include <thread>
 
@@ -20,7 +22,7 @@ void SlamPlayer::run() {
   slam_logger->setLevel(ILog::Level::INFO);
 
   auto preprocessor = std::make_shared<Preprocessor>(config_.preprocessor);
-  mslam::Slam slam(slam_logger, config_.parameters, map_, preprocessor);
+  mslam::Slam slam(slam_logger, config_.parameters, map_);
 
   int init_scan_count = 0;
 
@@ -55,6 +57,8 @@ void SlamPlayer::run() {
       auto filtered_scan = preprocessor->downsample(scan);
 
       slam.Update(*filtered_scan);
+      transformCloud(slam.getTransform(), *filtered_scan->points);
+      map_->addScan(*filtered_scan->points);
       const auto pose = slam.getPose();
       logger_->log(ILog::Level::INFO,
                    "Pose: {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", pose[0],

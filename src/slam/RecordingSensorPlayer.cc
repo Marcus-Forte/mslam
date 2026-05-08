@@ -1,24 +1,24 @@
-#include "slam/SlamPlayer.hh"
+#include "slam/RecordingSensorPlayer.hh"
 #include "timing/timing.hh"
 #include <thread>
 
 namespace mslam {
 
-SlamPlayer::SlamPlayer(const std::filesystem::path &file,
-                       const std::shared_ptr<ILog> &logger,
-                       const SlamConfiguration &config)
+RecordingSensorPlayer::RecordingSensorPlayer(
+    const std::filesystem::path &file, const std::shared_ptr<ILog> &logger,
+    const SlamConfiguration &config)
     : player_(file), logger_(logger), config_(config) {}
 
-void SlamPlayer::init() {}
+void RecordingSensorPlayer::init() {}
 
-void SlamPlayer::startSampling() { started_ = true; }
+void RecordingSensorPlayer::startSampling() { started_ = true; }
 
-void SlamPlayer::stopSampling() {
+void RecordingSensorPlayer::stopSampling() {
   started_ = false;
   end_of_file_ = true;
 }
 
-std::shared_ptr<msensor::Scan3DI> SlamPlayer::getScan() {
+std::shared_ptr<msensor::Scan3DI> RecordingSensorPlayer::getScan() {
   if (!started_) {
     return nullptr;
   }
@@ -32,7 +32,7 @@ std::shared_ptr<msensor::Scan3DI> SlamPlayer::getScan() {
   return scan;
 }
 
-std::optional<msensor::IMUData> SlamPlayer::getImuData() {
+std::optional<msensor::IMUData> RecordingSensorPlayer::getImuData() {
   if (!started_ || imu_queue_.empty()) {
     return std::nullopt;
   }
@@ -42,7 +42,7 @@ std::optional<msensor::IMUData> SlamPlayer::getImuData() {
   return imu;
 }
 
-bool SlamPlayer::fillUntilScanAvailable() {
+bool RecordingSensorPlayer::fillUntilScanAvailable() {
   while (!end_of_file_ && scan_queue_.empty()) {
     const auto time_start = timing::getNowUs();
 
@@ -73,20 +73,21 @@ bool SlamPlayer::fillUntilScanAvailable() {
   }
 
   if (end_of_file_ && scan_queue_.empty()) {
-    logger_->log(ILog::Level::INFO, "Finished Slam player.");
+    logger_->log(ILog::Level::INFO, "Finished sensor recording playback.");
   }
 
   return !scan_queue_.empty();
 }
 
 msensor::IMUData
-SlamPlayer::fromEntryToImu(const sensors::RecordingEntry &entry) {
+RecordingSensorPlayer::fromEntryToImu(const sensors::RecordingEntry &entry) {
   return {entry.imu().ax(),       entry.imu().ay(), entry.imu().az(),
           entry.imu().gx(),       entry.imu().gy(), entry.imu().gz(),
           entry.imu().timestamp()};
 }
+
 std::shared_ptr<msensor::Scan3DI>
-SlamPlayer::fromEntryScan3D(const sensors::RecordingEntry &entry) {
+RecordingSensorPlayer::fromEntryScan3D(const sensors::RecordingEntry &entry) {
   auto scan = std::make_shared<msensor::Scan3DI>();
   for (const auto &pt : entry.scan().points()) {
     msensor::Point3I point;

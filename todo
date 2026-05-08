@@ -1,6 +1,0 @@
-* slam test
-
-* Add initial scan logic to slam class?
-* Add configurable scan player speed
-* SO3 operations module
-* Publish map increments

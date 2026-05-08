@@ -4,7 +4,6 @@
 #include "config/IConfig.hh"
 #include "interface/IImu.hh"
 #include "interface/ILidar.hh"
-#include "map/IMap.hh"
 #include "recorder/scan_player.hh"
 #include <filesystem>
 #include <queue>
@@ -12,15 +11,14 @@
 namespace mslam {
 
 /**
- * @brief Loads a file with scans and exposes the recording through the
- *        ILidar / IImu interfaces.
- *
+ * @brief Loads a recorded sensor file and exposes it through the ILidar / IImu
+ *        interfaces.
  */
-
-class SlamPlayer : public msensor::ILidar, public msensor::IImu {
+class RecordingSensorPlayer : public msensor::ILidar, public msensor::IImu {
 public:
-  SlamPlayer(const std::filesystem::path &file,
-             const std::shared_ptr<ILog> &logger, const SlamConfiguration &config);
+  RecordingSensorPlayer(const std::filesystem::path &file,
+                        const std::shared_ptr<ILog> &logger,
+                        const SlamConfiguration &config);
 
   void init() override;
   void startSampling() override;

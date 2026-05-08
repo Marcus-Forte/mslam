@@ -6,8 +6,8 @@
 #include "map/VoxelHashMap.hh"
 #include "sensors_remote_client.hh"
 #include "slam/Preprocessor.hh"
+#include "slam/RecordingSensorPlayer.hh"
 #include "slam/Slam.hh"
-#include "slam/SlamPlayer.hh"
 #include "slam/SlamServer.hh"
 #include "slam/Transform.hh"
 #include <getopt.h>
@@ -42,7 +42,8 @@ int main(int argc, char **argv) {
       break;
     }
     case 'f':
-      std::cout << "Using SlamPlayer with: " << optarg << std::endl;
+      std::cout << "Using recorded sensor playback with: " << optarg
+                << std::endl;
       slam_play_file = optarg;
       break;
     case 'h':
@@ -74,12 +75,6 @@ int main(int argc, char **argv) {
     map = std::make_shared<mslam::KDTreeMap>();
   }
 
-  if (!slam_play_file.empty()) {
-    mslam::SlamPlayer player(slam_play_file, logger, config, map);
-    player.run();
-    return 0;
-  }
-
   mslam::SlamServer slam_server(logger);
   slam_server.start();
 
@@ -87,13 +82,21 @@ int main(int argc, char **argv) {
   std::shared_ptr<msensor::ILidar> lidar_sensor;
   std::shared_ptr<msensor::IImu> imu_sensor;
 
-  if (config.remote_scanner == "local") {
+  if (!slam_play_file.empty()) {
+    auto player = std::make_shared<mslam::RecordingSensorPlayer>(
+        slam_play_file, logger, config);
+    player->init();
+    player->startSampling();
+    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(player);
+    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(player);
+  } else if (config.remote_scanner == "local") {
     /// \todo lidar factory
     throw std::runtime_error("Local mode not yet supported");
 
   } else {
     auto scanner = std::make_shared<SensorsRemoteClient>(config.remote_scanner);
-    scanner->start();
+    scanner->init();
+    scanner->startSampling();
     lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(scanner);
     imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
   }
@@ -139,6 +142,7 @@ int main(int argc, char **argv) {
 
     if (config.with_imu) {
       while (true) {
+        std::cout << "Checking for IMU data..." << std::endl;
         const auto imudata = imu_sensor->getImuData();
         if (!imudata.has_value()) {
           break;

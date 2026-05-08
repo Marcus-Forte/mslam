@@ -4,7 +4,7 @@ Transform.cc
 Preprocessor.cc
 conversion.cc
 SlamServer.cc
-SlamPlayer.cc
+RecordingSensorPlayer.cc
 Slam.cc)
 target_link_libraries(slam moptim msensor scan_recorder sensors_proto slam_grpc)
 target_include_directories(slam PUBLIC ${CMAKE_SOURCE_DIR}/include)

@@ -49,7 +49,6 @@ void SlamServer::start() {
     throw std::runtime_error("Failed to start SLAM gRPC server");
   }
 
-  server_thread_ = std::thread([this]() { server_->Wait(); });
   if (logger_) {
     logger_->log(ILog::Level::INFO, "SLAM gRPC server listening on {}",
                  address_);
@@ -62,9 +61,6 @@ void SlamServer::stop() {
   }
 
   server_->Shutdown();
-  if (server_thread_.joinable()) {
-    server_thread_.join();
-  }
   server_.reset();
 }
 

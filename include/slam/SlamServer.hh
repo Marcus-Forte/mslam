@@ -9,7 +9,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 
 namespace mslam {
 
@@ -44,7 +43,6 @@ private:
   std::shared_ptr<ILog> logger_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
-  std::thread server_thread_;
   mutable std::mutex mutex_;
   mutable std::condition_variable map_cv_;
   mutable std::condition_variable scan_cv_;

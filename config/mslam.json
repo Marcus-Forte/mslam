@@ -6,20 +6,20 @@
     "remote_scanner": "192.168.178.129:50051",
 
     "preprocessor": {
-        "voxel_size": 0.2
+        "voxel_size": 0.1
     },
     "map": {
-        "resolution": 0.2,
-        "max_points_per_voxel": 5
+        "resolution": 0.1,
+        "max_points_per_voxel": 1
     },
 
     "slam": {
         "optimizer_iterations": 3,
-        "reg_iterations": 5,
-        "max_correspondence_distance": 0.3
+        "reg_iterations": 3,
+        "max_correspondence_distance": 0.1
     },
 
     "player": {
-        "delay_ms": 50
+        "delay_ms": 5
     }
 }

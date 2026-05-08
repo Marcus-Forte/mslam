@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config/IConfig.hh"
-#include <lidar/ILidar.hh>
+#include "interface/ILidar.hh"
 
 namespace mslam {
 class Preprocessor {

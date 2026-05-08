@@ -2,10 +2,9 @@
 
 #include "ILog.hh"
 #include "config/IConfig.hh"
-#include "gl_publisher.hh"
-#include "imu/IImu.hh"
+#include "interface/IImu.hh"
 #include "map/IMap.hh"
-#include "recorder/ScanPlayer.hh"
+#include "recorder/scan_player.hh"
 #include <filesystem>
 
 namespace mslam {
@@ -33,7 +32,6 @@ private:
   std::shared_ptr<IMap> map_;
   std::shared_ptr<ILog> logger_;
   SlamConfiguration config_;
-  msensor::GLPublisher slam_publisher_;
 
   msensor::IMUData fromEntryToImu(const sensors::RecordingEntry &entry);
   msensor::Scan3D fromEntryScan3D(const sensors::RecordingEntry &entry);

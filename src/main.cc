@@ -4,11 +4,12 @@
 
 #include "map/KDTreeMap.hh"
 #include "map/VoxelHashMap.hh"
-#include "sensors_client.hh"
+#include "sensors_remote_client.hh"
 #include "slam/Slam.hh"
 #include "slam/SlamPlayer.hh"
 #include <getopt.h>
 #include <memory>
+#include <thread>
 
 const int g_init_scans = 5;
 
@@ -69,7 +70,7 @@ int main(int argc, char **argv) {
     throw std::runtime_error("Local mode not yet supported");
 
   } else {
-    auto scanner = std::make_shared<SensorsClient>(config.remote_scanner);
+    auto scanner = std::make_shared<SensorsRemoteClient>(config.remote_scanner);
     scanner->start();
     lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(scanner);
     imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
@@ -85,21 +86,25 @@ int main(int argc, char **argv) {
   while (true) {
 
     const auto scani = lidar_sensor->getScan();
-
-    msensor::Scan3D scan;
-    scan.points.reserve(scani.points.size());
-    scan.timestamp = scani.timestamp;
-    for (const auto &pt : scani.points) {
-      scan.points.emplace_back(pt.x, pt.y, pt.z);
+    if (!scani) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
     }
 
-    if (scan.points.size() == 0) {
+    msensor::Scan3D scan;
+    scan.points->reserve(scani->points->size());
+    scan.timestamp = scani->timestamp;
+    for (const auto &pt : *scani->points) {
+      scan.points->emplace_back(pt.x, pt.y, pt.z);
+    }
+
+    if (scan.points->empty()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
 
     if (init_scan_count < init_scans) {
-      map->addScan(scan.points);
+      map->addScan(*scan.points);
       init_scan_count++;
       logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
                   init_scan_count, init_scans,
@@ -108,9 +113,12 @@ int main(int argc, char **argv) {
     }
 
     if (config.with_imu) {
-      msensor::IMUData imudata;
-      while ((imudata = imu_sensor->getImuData()).timestamp != 0) {
-        slam.Predict(imudata);
+      while (true) {
+        const auto imudata = imu_sensor->getImuData();
+        if (!imudata.has_value()) {
+          break;
+        }
+        slam.Predict(*imudata);
       }
     }
     if (config.with_lidar) {

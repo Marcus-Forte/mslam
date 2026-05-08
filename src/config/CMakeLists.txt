@@ -1,5 +1,6 @@
-add_library(config
+add_library(mslam_config
 JsonConfig.cc
 Validation.cc)
-target_link_libraries(config jsoncpp)
-target_include_directories(config PUBLIC ${CMAKE_SOURCE_DIR}/include)
+add_library(mslam::config ALIAS mslam_config)
+target_link_libraries(mslam_config jsoncpp)
+target_include_directories(mslam_config PUBLIC ${CMAKE_SOURCE_DIR}/include)

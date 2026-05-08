@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lidar/ILidar.hh"
+#include "interface/ILidar.hh"
 #include <Eigen/Dense>
 
 namespace mslam {

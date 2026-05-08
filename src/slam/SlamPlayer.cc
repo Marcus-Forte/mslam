@@ -1,9 +1,7 @@
 #include "slam/SlamPlayer.hh"
 #include "ConsoleLogger.hh"
 #include "slam/Slam.hh"
-#include "slam/Transform.hh"
 #include "timing/timing.hh"
-#include <pcl/filters/voxel_grid.h>
 #include <thread>
 
 namespace mslam {
@@ -14,8 +12,7 @@ SlamPlayer::SlamPlayer(const std::filesystem::path &file,
                        const std::shared_ptr<ILog> &logger,
                        const SlamConfiguration &config,
                        const std::shared_ptr<IMap> &map)
-    : player_(file), logger_(logger), config_(config), map_(map),
-      slam_publisher_(config.remote_gl_server) {}
+    : player_(file), logger_(logger), config_(config), map_(map) {}
 
 void SlamPlayer::run() {
 
@@ -47,7 +44,7 @@ void SlamPlayer::run() {
       }
 
       if (init_scan_count < g_init_scans) {
-        map_->addScan(scan.points);
+        map_->addScan(*scan.points);
         init_scan_count++;
         logger_->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
                      init_scan_count, g_init_scans,
@@ -59,9 +56,9 @@ void SlamPlayer::run() {
 
       slam.Update(*filtered_scan);
       const auto pose = slam.getPose();
-      slam_publisher_.publishPose(pose[0], pose[1], pose[2]);
-      transformCloud(slam.getTransform(), filtered_scan->points);
-      slam_publisher_.publishScan(filtered_scan->points);
+      logger_->log(ILog::Level::INFO,
+                   "Pose: {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", pose[0],
+                   pose[1], pose[2], pose[3], pose[4], pose[5]);
     }
 
     const auto delta_time = timing::getNowUs() - time_start;
@@ -72,10 +69,6 @@ void SlamPlayer::run() {
     if (time_delay > 0) {
       std::this_thread::sleep_for(std::chrono::microseconds(time_delay));
     }
-
-    // Publish mao
-    slam_publisher_.publishScan(map_->getPointCloudRepresentation(), 1.0, 0.0,
-                                0.0, "map");
   }
 
   std::cout << "Finished Slam player." << std::endl;
@@ -91,7 +84,7 @@ msensor::Scan3D
 SlamPlayer::fromEntryScan3D(const sensors::RecordingEntry &entry) {
   msensor::Scan3D scan;
   for (const auto &pt : entry.scan().points()) {
-    scan.points.emplace_back(pt.x(), pt.y(), pt.z());
+    scan.points->emplace_back(pt.x(), pt.y(), pt.z());
   }
   scan.timestamp = entry.scan().timestamp();
   return scan;

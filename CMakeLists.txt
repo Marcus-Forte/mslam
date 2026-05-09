@@ -23,9 +23,13 @@ add_executable(mslam
 src/main.cc)
 target_link_libraries(mslam maps slam mslam::config sensors_server)
 
+
 add_executable(register_scans
 src/register_scans.cc)
 target_link_libraries(register_scans maps slam mslam::config)
+
+# Remote recoder comes from msensor
+install(TARGETS mslam remote_recorder DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 
 ## Testing ##

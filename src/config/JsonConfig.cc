@@ -4,6 +4,26 @@
 #include <fstream>
 
 namespace mslam {
+
+namespace {
+ILog::Level parseLogLevel(const std::string &log_level) {
+  if (log_level == "debug") {
+    return ILog::Level::DEBUG;
+  }
+  if (log_level == "info") {
+    return ILog::Level::INFO;
+  }
+  if (log_level == "warning") {
+    return ILog::Level::WARNING;
+  }
+  if (log_level == "error") {
+    return ILog::Level::ERROR;
+  }
+
+  throw std::runtime_error("Invalid log_level field: " + log_level);
+}
+} // namespace
+
 JsonConfig::JsonConfig(const std::filesystem::path &config_file)
     : config_file_(config_file) {}
 
@@ -13,6 +33,9 @@ void JsonConfig::load() {
   file >> root;
   config_.with_imu = root["imu"].asBool();
   config_.with_lidar = root["lidar"].asBool();
+  if (!root["log_level"].empty()) {
+    config_.log_level = parseLogLevel(root["log_level"].asString());
+  }
   const auto &map_type = root["map_type"].asString();
   if (map_type == "voxel") {
     config_.map_type = MapType::Voxel;

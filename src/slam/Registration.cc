@@ -142,6 +142,14 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
       break;
     }
 
+    auto delta = timer.stop();
+
+    logger_->log(ILog::Level::INFO,
+                 "Correspondence Search. Correspondences: {} / {}. Took: {} us",
+                 map_correspondences.size(), scan.size(), delta);
+
+    timer.start();
+
     moptim::LevenbergMarquardt<double> lm(6, logger_);
     lm.setMaxIterations(num_optimizer_iterations_);
 
@@ -153,12 +161,8 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
     lm.addCost(cost);
     const auto status = lm.optimize(x.data());
 
-    const auto delta = timer.stop();
-    logger_->log(
-        ILog::Level::INFO,
-        "Reg. Iteration: {}/ {}. Correspondences: {} / {}. Took: {} us", i + 1,
-        num_registration_iterations_, map_correspondences.size(), scan.size(),
-        delta);
+    delta = timer.stop();
+    logger_->log(ILog::Level::INFO, "Opt.  Took: {} us", delta);
 
     if (status == moptim::Status::SMALL_DELTA) {
       small_delta_hits++;

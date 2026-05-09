@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
 
   // Create logger.
   const auto logger = std::make_shared<ConsoleLogger>();
-  logger->setLevel(ILog::Level::INFO);
+  logger->setLevel(config.log_level);
 
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   } else {
     auto scanner = std::make_shared<SensorsRemoteClient>(config.remote_scanner);
     scanner->init();
-    scanner->startSampling();
+    scanner->start();
     lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(scanner);
     imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
   }
@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
 
     const auto scani = lidar_sensor->getScan();
     if (!scani) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
 
@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     }
 
     if (scan.points->empty()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
 
@@ -141,18 +141,40 @@ int main(int argc, char **argv) {
     }
 
     if (config.with_imu) {
+      static uint64_t last_imu_time = 0;
+
       while (true) {
-        std::cout << "Checking for IMU data..." << std::endl;
         const auto imudata = imu_sensor->getImuData();
         if (!imudata.has_value()) {
           break;
         }
+        if (last_imu_time != 0) {
+          logger->log(ILog::Level::INFO, "IMU delta: {} ms",
+                      (imudata->timestamp - last_imu_time) * 1e-6);
+        }
+        last_imu_time = imudata->timestamp;
+
+        logger->log(ILog::Level::INFO, "Processing IMU with @ {}",
+                    imudata->timestamp);
+
         slam.Predict(*imudata);
         slam_server.updatePose(slam.getPose());
       }
     }
     if (config.with_lidar) {
+      static uint64_t last_scan_time = 0;
+      // print delta
+      if (last_scan_time != 0) {
+        logger->log(ILog::Level::DEBUG, "Scan delta: {} ms",
+                    (scan.timestamp - last_scan_time) * 1e-6);
+      }
+      last_scan_time = scan.timestamp;
+
+      logger->log(ILog::Level::INFO, "Processing scan with {} points @ {}",
+                  scan.points->size(), scan.timestamp);
       auto filtered_scan = preprocessor->downsample(scan);
+      logger->log(ILog::Level::INFO, "Downsampled scan to {} points",
+                  filtered_scan->points->size());
       slam.Update(*filtered_scan);
       transformCloud(slam.getTransform(), *filtered_scan->points);
       slam_server.updateScan(*filtered_scan->points);

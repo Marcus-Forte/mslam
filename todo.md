@@ -16,6 +16,7 @@
 ## Client
 
 * Have client attempt reconnection if connection to server is lost.
+* Scan Recoder: listen to sensor data and write to disk.
 
 ## Devenv
 

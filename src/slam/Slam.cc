@@ -27,7 +27,7 @@ void Slam::Predict(const msensor::IMUData &imuData) {
 
   const auto delta = (static_cast<double>(imuData.timestamp) -
                       static_cast<double>(last_timestamp)) *
-                     1e-6;
+                     1e-9;
 
   last_timestamp = imuData.timestamp;
 
@@ -36,8 +36,8 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     return;
   }
 
-  logger_->log(ILog::Level::INFO, "delta: {} * {}", delta, imuData.az);
-  pose_[5] = pose_[5] + delta * imuData.az;
+  logger_->log(ILog::Level::INFO, "delta: {} * {}", delta, imuData.gz);
+  pose_[5] = pose_[5] + delta * imuData.gz;
 
   logger_->log(ILog::Level::INFO, "Predict");
   logPose3D(logger_, pose_);

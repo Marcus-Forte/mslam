@@ -1,6 +1,7 @@
 {
     "imu": false,
     "lidar" : true,
+    "log_level": "info",
     "camera": false,
     "map_type": "voxel",
     "remote_scanner": "192.168.178.129:50051",

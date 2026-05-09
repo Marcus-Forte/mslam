@@ -1,10 +1,28 @@
 #pragma once
 
+#include "ILog.hh"
 #include <ostream>
+#include <stdexcept>
+#include <string>
 
 namespace mslam {
 
 enum class MapType { KdTree, Voxel };
+
+inline std::string toString(ILog::Level level) {
+  switch (level) {
+  case ILog::Level::DEBUG:
+    return "DEBUG";
+  case ILog::Level::INFO:
+    return "INFO";
+  case ILog::Level::WARNING:
+    return "WARNING";
+  case ILog::Level::ERROR:
+    return "ERROR";
+  }
+
+  throw std::runtime_error("Invalid log level");
+}
 
 /**
  * @brief Algorithm Paramters.
@@ -49,6 +67,7 @@ struct MapParameters {
 struct SlamConfiguration {
   bool with_imu = false;
   bool with_lidar = true;
+  ILog::Level log_level = ILog::Level::INFO;
   MapType map_type = MapType::KdTree;
   std::string remote_scanner = "local";
 
@@ -60,6 +79,7 @@ struct SlamConfiguration {
   friend std::ostream &operator<<(std::ostream &os, SlamConfiguration config) {
     os << "IMU: " << config.with_imu << "\n"
        << "LIDAR: " << config.with_lidar << "\n"
+       << "Log Level: " << toString(config.log_level) << "\n"
        << "Scanner: " << config.remote_scanner << "\n"
        << "# MAP Parameters #" << "\n"
        << "Map Type: "

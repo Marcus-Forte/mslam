@@ -17,6 +17,7 @@ public:
   void Update(const msensor::Scan3D &lidarData) override;
   Pose3D getPose() const;
   Eigen::Affine3d getTransform() const;
+  const VectorPoint3d &getLastMapCorrespondences() const;
 
 private:
   SlamParameters config_;

@@ -13,6 +13,10 @@ public:
 
   /// \todo If query is 3x beyond points, how to indicate to caller?
   Neighbor getClosestNeighbor(const Point3 &query) const override;
+  std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
+                                             int N) const override;
+  std::vector<Neighbor> getClosestNeighborsRadius(const Point3 &query,
+                                                  float radius) const override;
   const PointCloud3 &getPointCloudRepresentation() const override;
   void setNumAdjacentVoxelSearch(int adjacent_voxels);
 

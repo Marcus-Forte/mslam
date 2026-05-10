@@ -2,7 +2,7 @@ add_library(slam
 Registration.cc
 Transform.cc
 Preprocessor.cc
-conversion.cc
+Conversion.cc
 SlamServer.cc
 RecordingSensorPlayer.cc
 Slam.cc)

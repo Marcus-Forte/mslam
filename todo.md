@@ -12,11 +12,11 @@
 * Outlier pre-processing (e.g. radius outlier removal)
 * Voxel hashing adjacent voxel configuration
 * Logging to stages of the pipeline
+* Combine sensor timestamps.
 
 ## Client
 
 * Have client attempt reconnection if connection to server is lost.
-* Scan Recoder: listen to sensor data and write to disk.
 
 ## Devenv
 

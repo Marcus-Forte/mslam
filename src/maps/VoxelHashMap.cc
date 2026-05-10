@@ -1,5 +1,8 @@
 #include "map/VoxelHashMap.hh"
 
+#include <algorithm>
+#include <cmath>
+
 namespace mslam {
 
 static std::vector<Voxel3> buildVoxelShifts(int adjacent_voxels) {
@@ -37,37 +40,88 @@ void VoxelHashMap::addScan(const PointCloud3 &scan) {
 }
 
 IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
+  const auto neighbors = getClosestNNeighbors(query, 1);
+  if (neighbors.empty()) {
+    return {{0, 0, 0}, std::numeric_limits<float>::max()};
+  }
+
+  return neighbors.front();
+}
+
+std::vector<IMap::Neighbor>
+VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
+  std::vector<IMap::Neighbor> neighbors;
+  if (N <= 0) {
+    return neighbors;
+  }
 
   const auto &voxel = PointToVoxel(query, voxel_size_);
 
   const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
 
-  Point3 closest_neighbor = {0, 0, 0};
-  float closest_distance = std::numeric_limits<float>::max();
   for (const auto &voxel_shift : voxel_shifts_) {
     const auto query_voxel = voxel + voxel_shift;
     auto search = map_.find(query_voxel);
     if (search != map_.end()) {
       const auto &bucket_points = search->second;
-      const auto &neighbor = *std::min_element(
-          bucket_points.points.cbegin(), bucket_points.points.cend(),
-          [&](const auto &lhs, const auto &rhs) {
-            /// \todo optimize
-            const Eigen::Vector3f &lhs_vec = lhs.getVector3fMap();
-            const Eigen::Vector3f &rhs_vec = rhs.getVector3fMap();
-
-            return (lhs_vec - query_eigen).norm() <
-                   (rhs_vec - query_eigen).norm();
-          });
-
-      float distance = (neighbor.getVector3fMap() - query_eigen).norm();
-      if (distance < closest_distance) {
-        closest_neighbor = neighbor;
-        closest_distance = distance;
+      for (const auto &point : bucket_points.points) {
+        const float squared_distance =
+            (point.getVector3fMap() - query_eigen).squaredNorm();
+        neighbors.emplace_back(Point3{point.x, point.y, point.z},
+                               squared_distance);
       }
     }
   }
-  return {closest_neighbor, closest_distance};
+
+  std::sort(
+      neighbors.begin(), neighbors.end(),
+      [](const auto &lhs, const auto &rhs) { return lhs.second < rhs.second; });
+
+  if (neighbors.size() > static_cast<std::size_t>(N)) {
+    neighbors.resize(static_cast<std::size_t>(N));
+  }
+
+  return neighbors;
+}
+
+std::vector<IMap::Neighbor>
+VoxelHashMap::getClosestNeighborsRadius(const Point3 &query,
+                                        float radius) const {
+  std::vector<IMap::Neighbor> neighbors;
+  if (radius <= 0.0F) {
+    return neighbors;
+  }
+
+  const auto voxel = PointToVoxel(query, voxel_size_);
+  const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
+  const float squared_radius = radius * radius;
+  const int search_voxels =
+      std::max(0, static_cast<int>(std::ceil(radius / voxel_size_)));
+  const auto voxel_shifts = buildVoxelShifts(search_voxels);
+
+  for (const auto &voxel_shift : voxel_shifts) {
+    const auto query_voxel = voxel + voxel_shift;
+    auto search = map_.find(query_voxel);
+    if (search == map_.end()) {
+      continue;
+    }
+
+    const auto &bucket_points = search->second;
+    for (const auto &point : bucket_points.points) {
+      const float squared_distance =
+          (point.getVector3fMap() - query_eigen).squaredNorm();
+      if (squared_distance <= squared_radius) {
+        neighbors.emplace_back(Point3{point.x, point.y, point.z},
+                               squared_distance);
+      }
+    }
+  }
+
+  std::sort(
+      neighbors.begin(), neighbors.end(),
+      [](const auto &lhs, const auto &rhs) { return lhs.second < rhs.second; });
+
+  return neighbors;
 }
 
 /**
@@ -91,13 +145,14 @@ const PointCloud3 &VoxelHashMap::getPointCloudRepresentation() const {
 
 /**
  * @brief Set number of adjacent voxels from the query point to search for
- * buckets. This number exponentially decreases performance, albeit to as much
+ * bucket\s. This number exponentially decreases performance, albeit to as much
  * for low numbers.
  * @param adjacent_voxels
  */
 void VoxelHashMap::setNumAdjacentVoxelSearch(int adjacent_voxels) {
   adjacent_voxels_ = adjacent_voxels;
   voxel_shifts_ = buildVoxelShifts(adjacent_voxels);
+  std::cout << "Shifts: " << voxel_shifts_.size() << std::endl;
 }
 
 } // namespace mslam

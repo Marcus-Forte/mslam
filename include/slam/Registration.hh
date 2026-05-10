@@ -33,7 +33,7 @@ public:
    * z, roll, pitch and yaw.
    * @param map
    * @param scan
-   * @return Pose2D
+   * @return Pose
    */
   Pose3D Align3D(const Pose3D &pose, const IMap &map, const PointCloud3 &scan);
 
@@ -43,11 +43,16 @@ public:
    */
   void registerIterationCallback2D(RegistrationCallback2D &&callback);
 
+  const VectorPoint3d &getLastMapCorrespondences() const {
+    return last_map_correspondences_;
+  }
+
 private:
   int num_registration_iterations_;
   int num_optimizer_iterations_;
   float max_correspondence_distance_;
   std::shared_ptr<ILog> logger_;
+  VectorPoint3d last_map_correspondences_;
 
   RegistrationCallback2D registration_callback2d_;
 };

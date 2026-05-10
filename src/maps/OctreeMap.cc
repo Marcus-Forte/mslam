@@ -26,6 +26,38 @@ IMap::Neighbor OctreeMap::getClosestNeighbor(const Point3 &query) const {
   const auto nearest = map_rep_->points[index[0]];
   return {{nearest.x, nearest.y, nearest.z}, sqr_distances[0]};
 }
+
+std::vector<IMap::Neighbor> OctreeMap::getClosestNNeighbors(const Point3 &query,
+                                                            int N) const {
+  if (N <= 0) {
+    return {};
+  }
+
+  return {getClosestNeighbor(query)};
+}
+
+std::vector<IMap::Neighbor>
+OctreeMap::getClosestNeighborsRadius(const Point3 &query, float radius) const {
+  if (radius <= 0.0F || map_rep_->empty()) {
+    return {};
+  }
+
+  pcl::Indices indices;
+  std::vector<float> sqr_distances;
+  const int found = octree_.radiusSearch(query, radius, indices, sqr_distances);
+  std::vector<IMap::Neighbor> neighbors;
+  neighbors.reserve(static_cast<std::size_t>(found));
+
+  for (int i = 0; i < found; ++i) {
+    const auto &nearest =
+        map_rep_->points[indices[static_cast<std::size_t>(i)]];
+    neighbors.emplace_back(Point3{nearest.x, nearest.y, nearest.z},
+                           sqr_distances[static_cast<std::size_t>(i)]);
+  }
+
+  return neighbors;
+}
+
 const PointCloud3 &OctreeMap::getPointCloudRepresentation() const {
 
   octree_.getOccupiedVoxelCenters(map_centers_rep->points);

@@ -55,4 +55,8 @@ mslam::Pose3D Slam::getPose() const { return pose_; }
 Eigen::Affine3d Slam::getTransform() const {
   return toAffine(pose_[0], pose_[1], pose_[2], pose_[3], pose_[4], pose_[5]);
 }
+
+const VectorPoint3d &Slam::getLastMapCorrespondences() const {
+  return registration_.getLastMapCorrespondences();
+}
 } // namespace mslam

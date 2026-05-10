@@ -18,6 +18,15 @@
 const int g_init_scans = 5;
 
 namespace {
+mslam::PointCloud3 toPointCloud3(const mslam::VectorPoint3d &points) {
+  mslam::PointCloud3 point_cloud;
+  point_cloud.reserve(points.size());
+  for (const auto &point : points) {
+    point_cloud.emplace_back(point.x(), point.y(), point.z());
+  }
+  return point_cloud;
+}
+
 void printUsage(const char *program_name) {
   std::cout << "Usage: " << program_name
             << " [-c config.json] [-f recording.pbscan] [-h]\n"
@@ -70,7 +79,7 @@ int main(int argc, char **argv) {
         config.map_parameters.resolution,
         config.map_parameters.max_points_per_voxel);
     reinterpret_cast<mslam::VoxelHashMap *>(map.get())
-        ->setNumAdjacentVoxelSearch(2); /// \todo add configurable
+        ->setNumAdjacentVoxelSearch(1); /// \todo add configurable?
   } else {
     map = std::make_shared<mslam::KDTreeMap>();
   }
@@ -165,7 +174,7 @@ int main(int argc, char **argv) {
       static uint64_t last_scan_time = 0;
       // print delta
       if (last_scan_time != 0) {
-        logger->log(ILog::Level::DEBUG, "Scan delta: {} ms",
+        logger->log(ILog::Level::INFO, "Scan delta: {} ms",
                     (scan.timestamp - last_scan_time) * 1e-6);
       }
       last_scan_time = scan.timestamp;
@@ -176,6 +185,10 @@ int main(int argc, char **argv) {
       logger->log(ILog::Level::INFO, "Downsampled scan to {} points",
                   filtered_scan->points->size());
       slam.Update(*filtered_scan);
+
+      const auto &correspondences = slam.getLastMapCorrespondences();
+      slam_server.updateCorrespondences(toPointCloud3(correspondences));
+
       transformCloud(slam.getTransform(), *filtered_scan->points);
       slam_server.updateScan(*filtered_scan->points);
       map->addScan(*filtered_scan->points);

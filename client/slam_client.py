@@ -19,8 +19,11 @@ DEFAULT_VISER_PORT = 8080
 DEFAULT_POINT_SIZE = 0.03
 DEFAULT_RECONNECT_DELAY_SEC = 1.0
 DEFAULT_POSE_POLL_INTERVAL_SEC = 0.1
+MAP_POINT_SIZE_SCALE = 0.2
 SCAN_POINT_SIZE_SCALE = 0.4
+CORRESPONDENCE_POINT_SIZE_SCALE = 0.55
 SCAN_COLOR = np.array([0, 255, 0], dtype=np.uint8)
+CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
 
 
 def to_viser_points(points: Sequence[lidar_pb2.Point3]) -> np.ndarray:
@@ -110,7 +113,7 @@ class SlamViewerClient:
             name="/slam/map",
             points=np.empty((0, 3), dtype=np.float32),
             colors=np.empty((0, 3), dtype=np.uint8),
-            point_size=point_size,
+            point_size=point_size * MAP_POINT_SIZE_SCALE,
             point_shape="rounded",
         )
         self._scan_cloud = self._viser_server.scene.add_point_cloud(
@@ -119,6 +122,13 @@ class SlamViewerClient:
             colors=np.empty((0, 3), dtype=np.uint8),
             point_size=point_size * SCAN_POINT_SIZE_SCALE,
             point_shape="rounded",
+        )
+        self._correspondence_cloud = self._viser_server.scene.add_point_cloud(
+            name="/slam/correspondences",
+            points=np.empty((0, 3), dtype=np.float32),
+            colors=np.empty((0, 3), dtype=np.uint8),
+            point_size=point_size * CORRESPONDENCE_POINT_SIZE_SCALE,
+            point_shape="sparkle",
         )
         self._pose_frame = self._viser_server.scene.add_frame(
             name="/slam/pose",
@@ -132,13 +142,37 @@ class SlamViewerClient:
     def run(self) -> None:
         map_thread = threading.Thread(target=self._stream_map, daemon=True)
         scan_thread = threading.Thread(target=self._stream_scan, daemon=True)
+        correspondence_thread = threading.Thread(
+            target=self._stream_correspondences, daemon=True
+        )
         pose_thread = threading.Thread(target=self._stream_pose, daemon=True)
         map_thread.start()
         scan_thread.start()
+        correspondence_thread.start()
         pose_thread.start()
 
         while True:
             time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+
+    def _sleep_before_retry(self, stream_name: str) -> None:
+        logger.info(
+            "Retrying %s stream in %.1f seconds",
+            stream_name,
+            DEFAULT_RECONNECT_DELAY_SEC,
+        )
+        time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+
+    def _log_stream_exception(self, stream_name: str, exc: Exception) -> None:
+        if isinstance(exc, grpc.RpcError):
+            logger.warning(
+                "SLAM %s stream error: %s - %s",
+                stream_name,
+                exc.code().name,
+                exc.details(),
+            )
+            return
+
+        logger.exception("SLAM %s stream crashed", stream_name)
 
     def _stream_map(self) -> None:
         request = slam_pb2.Empty()
@@ -150,12 +184,10 @@ class SlamViewerClient:
                     stub = slam_pb2_grpc.SlamServiceStub(channel)
                     for map_snapshot in stub.GetMap(request):
                         self._update_cloud(map_snapshot)
-            except grpc.RpcError as exc:
-                logger.warning(
-                    "SLAM map stream error: %s - %s", exc.code().name, exc.details()
-                )
+            except Exception as exc:
+                self._log_stream_exception("map", exc)
 
-            time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+            self._sleep_before_retry("map")
 
     def _stream_scan(self) -> None:
         request = slam_pb2.Empty()
@@ -164,15 +196,31 @@ class SlamViewerClient:
             try:
                 logger.info("Connecting to SLAM scan stream at %s", self._server_addr)
                 with grpc.insecure_channel(self._server_addr) as channel:
-                    stub = slam_pb2_grpc.ScanServiceStub(channel)
+                    stub = slam_pb2_grpc.SlamServiceStub(channel)
                     for scan_snapshot in stub.GetScan(request):
                         self._update_scan_cloud(scan_snapshot)
-            except grpc.RpcError as exc:
-                logger.warning(
-                    "SLAM scan stream error: %s - %s", exc.code().name, exc.details()
-                )
+            except Exception as exc:
+                self._log_stream_exception("scan", exc)
 
-            time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+            self._sleep_before_retry("scan")
+
+    def _stream_correspondences(self) -> None:
+        request = slam_pb2.Empty()
+
+        while True:
+            try:
+                logger.info(
+                    "Connecting to SLAM correspondence stream at %s",
+                    self._server_addr,
+                )
+                with grpc.insecure_channel(self._server_addr) as channel:
+                    stub = slam_pb2_grpc.SlamServiceStub(channel)
+                    for correspondences in stub.GetCorrespondences(request):
+                        self._update_correspondence_cloud(correspondences)
+            except Exception as exc:
+                self._log_stream_exception("correspondence", exc)
+
+            self._sleep_before_retry("correspondence")
 
     def _stream_pose(self) -> None:
         request = slam_pb2.Empty()
@@ -186,12 +234,10 @@ class SlamViewerClient:
                         pose = stub.GetPose(request)
                         self._update_pose(pose)
                         time.sleep(DEFAULT_POSE_POLL_INTERVAL_SEC)
-            except grpc.RpcError as exc:
-                logger.warning(
-                    "SLAM pose stream error: %s - %s", exc.code().name, exc.details()
-                )
+            except Exception as exc:
+                self._log_stream_exception("pose", exc)
 
-            time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+            self._sleep_before_retry("pose")
 
     def _update_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(map_snapshot.points)
@@ -204,6 +250,16 @@ class SlamViewerClient:
         self._scan_cloud.points = points
         self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))
         logger.info("Rendered scan snapshot with %d points", len(points))
+
+    def _update_correspondence_cloud(
+        self, correspondences: lidar_pb2.PointCloud3
+    ) -> None:
+        points = to_viser_points(correspondences.points)
+        self._correspondence_cloud.points = points
+        self._correspondence_cloud.colors = np.tile(
+            CORRESPONDENCE_COLOR, (len(points), 1)
+        )
+        logger.info("Rendered correspondence snapshot with %d points", len(points))
 
     def _update_pose(self, pose: slam_pb2.Pose3D) -> None:
         self._pose_frame.position = np.array([pose.x, pose.y, pose.z], dtype=np.float32)

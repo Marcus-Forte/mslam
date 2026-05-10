@@ -102,7 +102,6 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
 Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
                              const PointCloud3 &scan) {
   VectorPoint3d scan_points;
-  VectorPoint3d map_correspondences;
 
   Eigen::VectorXd x(6);
   x << pose[0], pose[1], pose[2], pose[3], pose[4], pose[5];
@@ -116,9 +115,9 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
     transform_ = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
 
     scan_points.clear();
-    map_correspondences.clear();
+    last_map_correspondences_.clear();
     scan_points.reserve(scan.size());
-    map_correspondences.reserve(scan.size());
+    last_map_correspondences_.reserve(scan.size());
 
     for (const auto &pt : scan) {
       const Eigen::Vector3d point_eigen{pt.x, pt.y, pt.z};
@@ -130,12 +129,12 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
       if (closest.second <
           max_correspondence_distance_ * max_correspondence_distance_) {
         scan_points.emplace_back(pt.x, pt.y, pt.z);
-        map_correspondences.emplace_back(closest.first.x, closest.first.y,
-                                         closest.first.z);
+        last_map_correspondences_.emplace_back(closest.first.x, closest.first.y,
+                                               closest.first.z);
       }
     }
 
-    if (map_correspondences.empty()) {
+    if (last_map_correspondences_.empty()) {
       logger_->log(
           ILog::Level::WARNING,
           "3D registration found no correspondences; returning prior pose.");
@@ -146,7 +145,7 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
 
     logger_->log(ILog::Level::INFO,
                  "Correspondence Search. Correspondences: {} / {}. Took: {} us",
-                 map_correspondences.size(), scan.size(), delta);
+                 last_map_correspondences_.size(), scan.size(), delta);
 
     timer.start();
 
@@ -155,8 +154,8 @@ Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
 
     auto cost = std::make_shared<
         moptim::NumericalCostForwardEuler<Point3Distance, double>>(
-        map_correspondences[0].data(), scan_points[0].data(),
-        map_correspondences.size(), 3, 3, 6);
+        last_map_correspondences_[0].data(), scan_points[0].data(),
+        last_map_correspondences_.size(), 3, 3, 6);
 
     lm.addCost(cost);
     const auto status = lm.optimize(x.data());

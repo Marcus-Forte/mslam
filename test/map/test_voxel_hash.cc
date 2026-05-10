@@ -41,27 +41,27 @@ TEST_F(TestVoxelHashMap, query_point_inside_voxel_corners) {
   map_->addScan(scan);
 
   auto neighbor = map_->getClosestNeighbor({0.8, 0.8, 0.0});
-  // dist (0.8, 0.8) -> (0.9 ,0.9) = norm(0.1, 0.1)
-  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.1, 0.1).norm(), 1e-5);
+  // squared dist (0.8, 0.8) -> (0.9 ,0.9) = squaredNorm(0.1, 0.1)
+  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.1, 0.1).squaredNorm(), 1e-5);
   EXPECT_NEAR(neighbor.first.x, 0.9, 1e-5);
   EXPECT_NEAR(neighbor.first.y, 0.9, 1e-5);
   EXPECT_NEAR(neighbor.first.z, 0.0, 1e-5);
 
   neighbor = map_->getClosestNeighbor({0.3, 0.3, 0.0});
-  // dist (0.3, 0.3) -> (0.1, 0.1) = norm(0.2, 0.2)
-  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.2, 0.2).norm(), 1e-5);
+  // squared dist (0.3, 0.3) -> (0.1, 0.1) = squaredNorm(0.2, 0.2)
+  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.2, 0.2).squaredNorm(), 1e-5);
   EXPECT_NEAR(neighbor.first.x, 0.1, 1e-5);
   EXPECT_NEAR(neighbor.first.y, 0.1, 1e-5);
 
   neighbor = map_->getClosestNeighbor({0.15, 0.75, 0.0});
-  // dist (0.15, 0.75) -> (0.1 0.9) = norm(0.05, 0.15)
-  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.05, 0.15).norm(), 1e-5);
+  // squared dist (0.15, 0.75) -> (0.1 0.9) = squaredNorm(0.05, 0.15)
+  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.05, 0.15).squaredNorm(), 1e-5);
   EXPECT_NEAR(neighbor.first.x, 0.1, 1e-5);
   EXPECT_NEAR(neighbor.first.y, 0.9, 1e-5);
 
   neighbor = map_->getClosestNeighbor({0.7, 0.2, 0.0});
-  // dist (0.7, 0.2) -> (0.9, 0.1) = norm(0.2, 0.1)
-  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.2, 0.1).norm(), 1e-5);
+  // squared dist (0.7, 0.2) -> (0.9, 0.1) = squaredNorm(0.2, 0.1)
+  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.2, 0.1).squaredNorm(), 1e-5);
   EXPECT_NEAR(neighbor.first.x, 0.9, 1e-5);
   EXPECT_NEAR(neighbor.first.y, 0.1, 1e-5);
 }
@@ -78,8 +78,8 @@ TEST_F(TestVoxelHashMap, query_point_outside_voxel_corners) {
   map_->addScan(scan);
 
   auto neighbor = map_->getClosestNeighbor({-0.5, -0.5, 0.0});
-  // dist (-0.5, -0.5) -> (0.1 ,0.1) = norm(0.6, 0.6)
-  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.6, 0.6).norm(), 1e-5);
+  // squared dist (-0.5, -0.5) -> (0.1 ,0.1) = squaredNorm(0.6, 0.6)
+  EXPECT_NEAR(neighbor.second, Eigen::Vector2d(0.6, 0.6).squaredNorm(), 1e-5);
   EXPECT_NEAR(neighbor.first.x, 0.1, 1e-5);
   EXPECT_NEAR(neighbor.first.y, 0.1, 1e-5);
 
@@ -114,4 +114,60 @@ TEST_F(TestVoxelHashMap, query_point_adjacent_voxels) {
   neighbor = map_->getClosestNeighbor({2.5, 2.5, 0.0});
   EXPECT_EQ(neighbor.first.x, 0.5);
   EXPECT_EQ(neighbor.first.y, 0.5);
+}
+
+TEST_F(TestVoxelHashMap, query_multiple_closest_neighbors) {
+  map_ = std::make_unique<VoxelHashMap>(1.0, 5);
+
+  PointCloud3 scan;
+  scan.emplace_back(0.1, 0.1, 0.0);
+  scan.emplace_back(0.2, 0.2, 0.0);
+  scan.emplace_back(0.8, 0.8, 0.0);
+  scan.emplace_back(1.1, 1.1, 0.0);
+
+  map_->setNumAdjacentVoxelSearch(1);
+  map_->addScan(scan);
+
+  const auto neighbors = map_->getClosestNNeighbors({0.0, 0.0, 0.0}, 3);
+  ASSERT_EQ(neighbors.size(), 3);
+
+  EXPECT_NEAR(neighbors[0].first.x, 0.1, 1e-5);
+  EXPECT_NEAR(neighbors[0].first.y, 0.1, 1e-5);
+  EXPECT_NEAR(neighbors[1].first.x, 0.2, 1e-5);
+  EXPECT_NEAR(neighbors[1].first.y, 0.2, 1e-5);
+  EXPECT_NEAR(neighbors[2].first.x, 0.8, 1e-5);
+  EXPECT_NEAR(neighbors[2].first.y, 0.8, 1e-5);
+
+  EXPECT_LE(neighbors[0].second, neighbors[1].second);
+  EXPECT_LE(neighbors[1].second, neighbors[2].second);
+}
+
+TEST_F(TestVoxelHashMap, query_multiple_neighbors_invalid_count) {
+  const auto neighbors = map_->getClosestNNeighbors({0.0, 0.0, 0.0}, 0);
+  EXPECT_TRUE(neighbors.empty());
+}
+
+TEST_F(TestVoxelHashMap, query_neighbors_within_radius) {
+  map_ = std::make_unique<VoxelHashMap>(1.0, 5);
+
+  PointCloud3 scan;
+  scan.emplace_back(0.1, 0.1, 0.0);
+  scan.emplace_back(0.2, 0.2, 0.0);
+  scan.emplace_back(0.8, 0.8, 0.0);
+  scan.emplace_back(1.1, 1.1, 0.0);
+  map_->addScan(scan);
+
+  const auto neighbors =
+      map_->getClosestNeighborsRadius({0.0, 0.0, 0.0}, 0.35F);
+  ASSERT_EQ(neighbors.size(), 2);
+
+  EXPECT_NEAR(neighbors[0].first.x, 0.1, 1e-5);
+  EXPECT_NEAR(neighbors[0].first.y, 0.1, 1e-5);
+  EXPECT_NEAR(neighbors[1].first.x, 0.2, 1e-5);
+  EXPECT_NEAR(neighbors[1].first.y, 0.2, 1e-5);
+}
+
+TEST_F(TestVoxelHashMap, query_neighbors_invalid_radius) {
+  const auto neighbors = map_->getClosestNeighborsRadius({0.0, 0.0, 0.0}, 0.0F);
+  EXPECT_TRUE(neighbors.empty());
 }

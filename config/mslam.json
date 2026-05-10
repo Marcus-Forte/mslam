@@ -1,5 +1,5 @@
 {
-    "imu": true,
+    "imu": false,
     "lidar" : true,
     "log_level": "info",
     "camera": false,
@@ -17,10 +17,6 @@
     "slam": {
         "optimizer_iterations": 3,
         "reg_iterations": 3,
-        "max_correspondence_distance": 0.02
-    },
-
-    "player": {
-        "delay_ms": 10
+        "max_correspondence_distance": 0.1
     }
 }

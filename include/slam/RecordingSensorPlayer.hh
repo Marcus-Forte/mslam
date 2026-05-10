@@ -17,19 +17,22 @@ namespace mslam {
 class RecordingSensorPlayer : public msensor::ILidar, public msensor::IImu {
 public:
   RecordingSensorPlayer(const std::filesystem::path &file,
-                        const std::shared_ptr<ILog> &logger,
-                        const SlamConfiguration &config);
+                        const std::shared_ptr<ILog> &logger, bool with_imu,
+                        bool with_lidar, unsigned int entry_delay_ms);
 
   void init() override;
   void startSampling() override;
   void stopSampling() override;
   std::shared_ptr<msensor::Scan3DI> getScan() override;
   std::optional<msensor::IMUData> getImuData() override;
+  bool isFinished() const;
 
 private:
   msensor::ScanPlayer player_;
   std::shared_ptr<ILog> logger_;
-  SlamConfiguration config_;
+  bool with_imu_ = false;
+  bool with_lidar_ = true;
+  unsigned int entry_delay_ms_ = 0;
   bool started_ = false;
   bool end_of_file_ = false;
   std::queue<std::shared_ptr<msensor::Scan3DI>> scan_queue_;

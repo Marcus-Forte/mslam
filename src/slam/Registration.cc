@@ -1,16 +1,157 @@
 #include "slam/Registration.hh"
+#include "AnalyticalCost.hh"
 #include "LevenbergMarquardt.hh"
 #include "NumericalCostForwardEuler.hh"
 #include "Timer.hh"
 #include "common/Points.hh"
 #include "slam/Transform.hh"
 #include <memory>
+#include <optional>
+#include <pcl/features/normal_3d.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 
 #include "PointDistance.hh"
 
 namespace mslam {
 
 constexpr int g_maxSmallDeltaHits = 3;
+constexpr int g_normalEstimationNeighbors = 5;
+
+namespace {
+
+std::optional<Eigen::Vector3d>
+estimateSurfaceNormal(const IMap &map, const Point3 &query, int num_neighbors) {
+  const auto neighbors = map.getClosestNNeighbors(query, num_neighbors);
+  if (neighbors.size() < 3) {
+    return std::nullopt;
+  }
+
+  pcl::PointCloud<pcl::PointXYZ> neighborhood;
+  neighborhood.reserve(neighbors.size());
+  for (const auto &[point, _] : neighbors) {
+    neighborhood.emplace_back(point.x, point.y, point.z);
+  }
+
+  Eigen::Vector4f plane_parameters;
+  float curvature = 0.0f;
+  if (!pcl::computePointNormal(neighborhood, plane_parameters, curvature)) {
+    return std::nullopt;
+  }
+
+  Eigen::Vector3d normal = plane_parameters.head<3>().cast<double>();
+  const double norm = normal.norm();
+  if (norm <= std::numeric_limits<double>::epsilon()) {
+    return std::nullopt;
+  }
+
+  return normal / norm;
+}
+
+template <typename Model, int InputDim, bool UseNormals>
+Pose3D
+align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
+                  VectorPoint3d &last_map_correspondences,
+                  int num_registration_iterations, int num_optimizer_iterations,
+                  float max_correspondence_distance,
+                  const std::shared_ptr<ILog> &logger) {
+  std::vector<Eigen::Matrix<double, InputDim, 1>> metric_inputs;
+
+  Eigen::VectorXd x(6);
+  x << pose[0], pose[1], pose[2], pose[3], pose[4], pose[5];
+  Eigen::Affine3d transform;
+
+  int small_delta_hits = 0;
+  Timer iteration_timer;
+  Timer stage_timer;
+
+  for (int i = 0; i < num_registration_iterations; ++i) {
+    iteration_timer.start();
+    transform = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
+
+    metric_inputs.clear();
+    last_map_correspondences.clear();
+    metric_inputs.reserve(scan.size());
+    last_map_correspondences.reserve(scan.size());
+
+    uint64_t normal_estimation_us = 0;
+    stage_timer.start();
+    for (const auto &pt : scan) {
+      const Eigen::Vector3d point_eigen{pt.x, pt.y, pt.z};
+      const Eigen::Vector3d transformed_scan_pt = transform * point_eigen;
+
+      const Point3 query(transformed_scan_pt.x(), transformed_scan_pt.y(),
+                         transformed_scan_pt.z());
+      const auto closest = map.getClosestNeighbor(query);
+      if (closest.second >=
+          max_correspondence_distance * max_correspondence_distance) {
+        continue;
+      }
+
+      Eigen::Matrix<double, InputDim, 1> metric_input;
+      metric_input.template head<3>() << pt.x, pt.y, pt.z;
+
+      if constexpr (UseNormals) {
+        Timer normal_timer;
+        normal_timer.start();
+        const auto normal = estimateSurfaceNormal(map, closest.first,
+                                                  g_normalEstimationNeighbors);
+        normal_estimation_us += normal_timer.stop();
+        if (!normal.has_value()) {
+          continue;
+        }
+        metric_input.template tail<3>() = *normal;
+      }
+
+      metric_inputs.push_back(metric_input);
+      last_map_correspondences.emplace_back(closest.first.x, closest.first.y,
+                                            closest.first.z);
+    }
+
+    const auto correspondence_us = stage_timer.stop();
+
+    if (last_map_correspondences.empty()) {
+      logger->log(
+          ILog::Level::WARNING,
+          "3D registration found no correspondences; returning prior pose.");
+      break;
+    }
+
+    logger->log(ILog::Level::INFO,
+                "Correspondence Search. Correspondences: {} / {}. Normal Est.: "
+                "{} us. Took: {} us",
+                last_map_correspondences.size(), scan.size(),
+                normal_estimation_us, correspondence_us);
+
+    stage_timer.start();
+    moptim::LevenbergMarquardt<double> lm(6, logger);
+    lm.setMaxIterations(num_optimizer_iterations);
+
+    auto cost =
+        std::make_shared<moptim::NumericalCostForwardEuler<Model, double>>(
+            metric_inputs[0].data(), last_map_correspondences[0].data(),
+            last_map_correspondences.size(), InputDim, 3, 6);
+
+    lm.addCost(cost);
+    const auto status = lm.optimize(x.data());
+
+    const auto optimization_us = stage_timer.stop();
+    logger->log(ILog::Level::INFO, "Opt. Took: {} us", optimization_us);
+    logger->log(ILog::Level::INFO, "Reg3D Iteration: {}/{}. Total: {} us",
+                i + 1, num_registration_iterations, iteration_timer.stop());
+
+    if (status == moptim::Status::SMALL_DELTA) {
+      small_delta_hits++;
+      if (small_delta_hits > g_maxSmallDeltaHits) {
+        break;
+      }
+    }
+  }
+
+  return {x[0], x[1], x[2], x[3], x[4], x[5]};
+}
+
+} // namespace
 
 Registration::Registration(int num_registration_iterations,
                            int num_optimizer_iterations,
@@ -100,79 +241,22 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
 }
 
 Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
-                             const PointCloud3 &scan) {
-  VectorPoint3d scan_points;
-
-  Eigen::VectorXd x(6);
-  x << pose[0], pose[1], pose[2], pose[3], pose[4], pose[5];
-  Eigen::Affine3d transform_;
-
-  static Timer timer;
-  int small_delta_hits = 0;
-
-  for (int i = 0; i < num_registration_iterations_; ++i) {
-    timer.start();
-    transform_ = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
-
-    scan_points.clear();
-    last_map_correspondences_.clear();
-    scan_points.reserve(scan.size());
-    last_map_correspondences_.reserve(scan.size());
-
-    for (const auto &pt : scan) {
-      const Eigen::Vector3d point_eigen{pt.x, pt.y, pt.z};
-      const Eigen::Vector3d transformed_scan_pt = transform_ * point_eigen;
-
-      const Point3 query(transformed_scan_pt.x(), transformed_scan_pt.y(),
-                         transformed_scan_pt.z());
-      const auto closest = map.getClosestNeighbor(query);
-      if (closest.second <
-          max_correspondence_distance_ * max_correspondence_distance_) {
-        scan_points.emplace_back(pt.x, pt.y, pt.z);
-        last_map_correspondences_.emplace_back(closest.first.x, closest.first.y,
-                                               closest.first.z);
-      }
-    }
-
-    if (last_map_correspondences_.empty()) {
-      logger_->log(
-          ILog::Level::WARNING,
-          "3D registration found no correspondences; returning prior pose.");
-      break;
-    }
-
-    auto delta = timer.stop();
-
-    logger_->log(ILog::Level::INFO,
-                 "Correspondence Search. Correspondences: {} / {}. Took: {} us",
-                 last_map_correspondences_.size(), scan.size(), delta);
-
-    timer.start();
-
-    moptim::LevenbergMarquardt<double> lm(6, logger_);
-    lm.setMaxIterations(num_optimizer_iterations_);
-
-    auto cost = std::make_shared<
-        moptim::NumericalCostForwardEuler<Point3Distance, double>>(
-        last_map_correspondences_[0].data(), scan_points[0].data(),
-        last_map_correspondences_.size(), 3, 3, 6);
-
-    lm.addCost(cost);
-    const auto status = lm.optimize(x.data());
-
-    delta = timer.stop();
-    logger_->log(ILog::Level::INFO, "Opt.  Took: {} us", delta);
-
-    if (status == moptim::Status::SMALL_DELTA) {
-      small_delta_hits++;
-
-      if (small_delta_hits > g_maxSmallDeltaHits) {
-        break;
-      }
-    }
+                             const PointCloud3 &scan,
+                             RegistrationMetric3D metric) {
+  switch (metric) {
+  case RegistrationMetric3D::PointToPoint:
+    return align3DWithMetric<Point3Distance, 3, false>(
+        pose, map, scan, last_map_correspondences_,
+        num_registration_iterations_, num_optimizer_iterations_,
+        max_correspondence_distance_, logger_);
+  case RegistrationMetric3D::PointToPlane:
+    return align3DWithMetric<Point3PlaneDistance, 6, true>(
+        pose, map, scan, last_map_correspondences_,
+        num_registration_iterations_, num_optimizer_iterations_,
+        max_correspondence_distance_, logger_);
   }
 
-  return {x[0], x[1], x[2], x[3], x[4], x[5]};
+  throw std::runtime_error("Unsupported 3D registration metric");
 }
 
 void Registration::registerIterationCallback2D(

@@ -45,7 +45,8 @@ void Slam::Predict(const msensor::IMUData &imuData) {
 void Slam::Update(const msensor::Scan3D &lidarData) {
   const auto pose_prior = pose_;
 
-  pose_ = registration_.Align3D(pose_prior, *map_, *lidarData.points);
+  pose_ = registration_.Align3D(pose_prior, *map_, *lidarData.points,
+                                RegistrationMetric3D::PointToPlane);
   logger_->log(ILog::Level::INFO, "Update");
   logPose3D(logger_, pose_);
 }

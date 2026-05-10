@@ -2,6 +2,7 @@
 #include "ConsoleLogger.hh"
 #include "config/JsonConfig.hh"
 
+#include "Timer.hh"
 #include "map/KDTreeMap.hh"
 #include "map/VoxelHashMap.hh"
 #include "sensors_remote_client.hh"
@@ -16,6 +17,7 @@
 #include <thread>
 
 const int g_init_scans = 5;
+const unsigned int g_default_playback_delay_ms = 10;
 
 namespace {
 mslam::PointCloud3 toPointCloud3(const mslam::VectorPoint3d &points) {
@@ -29,8 +31,9 @@ mslam::PointCloud3 toPointCloud3(const mslam::VectorPoint3d &points) {
 
 void printUsage(const char *program_name) {
   std::cout << "Usage: " << program_name
-            << " [-c config.json] [-f recording.pbscan] [-h]\n"
+            << " [-c config.json] [-d delay_ms] [-f recording.pbscan] [-h]\n"
             << "  -c <file>  Load SLAM configuration from JSON\n"
+            << "  -d <ms>    Delay between playback entries when using -f\n"
             << "  -f <file>  Replay a recorded scan file instead of connecting "
                "remotely\n"
             << "  -h         Show this help message\n";
@@ -41,7 +44,8 @@ int main(int argc, char **argv) {
   int opt;
   mslam::SlamConfiguration config;
   std::string slam_play_file = "";
-  while ((opt = getopt(argc, argv, "c:f:h")) != -1) {
+  unsigned int playback_delay_ms = g_default_playback_delay_ms;
+  while ((opt = getopt(argc, argv, "c:d:f:h")) != -1) {
     switch (opt) {
     case 'c': {
       std::cout << "Using config: " << optarg << std::endl;
@@ -50,6 +54,9 @@ int main(int argc, char **argv) {
       config = json_config.getConfig();
       break;
     }
+    case 'd':
+      playback_delay_ms = static_cast<unsigned int>(std::stoul(optarg));
+      break;
     case 'f':
       std::cout << "Using recorded sensor playback with: " << optarg
                 << std::endl;
@@ -90,14 +97,16 @@ int main(int argc, char **argv) {
   // Create sensor readers.
   std::shared_ptr<msensor::ILidar> lidar_sensor;
   std::shared_ptr<msensor::IImu> imu_sensor;
+  std::shared_ptr<mslam::RecordingSensorPlayer> playback_player;
 
   if (!slam_play_file.empty()) {
-    auto player = std::make_shared<mslam::RecordingSensorPlayer>(
-        slam_play_file, logger, config);
-    player->init();
-    player->startSampling();
-    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(player);
-    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(player);
+    playback_player = std::make_shared<mslam::RecordingSensorPlayer>(
+        slam_play_file, logger, config.with_imu, config.with_lidar,
+        playback_delay_ms);
+    playback_player->init();
+    playback_player->startSampling();
+    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(playback_player);
+    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(playback_player);
   } else if (config.remote_scanner == "local") {
     /// \todo lidar factory
     throw std::runtime_error("Local mode not yet supported");
@@ -115,16 +124,24 @@ int main(int argc, char **argv) {
   mslam::Slam slam(logger, config.parameters, map);
   slam_server.updatePose(slam.getPose());
 
-  const int init_scans = 5;
   int init_scan_count = 0;
+  Timer scan_timer;
+  Timer stage_timer;
 
   while (true) {
 
     const auto scani = lidar_sensor->getScan();
     if (!scani) {
+      if (playback_player && playback_player->isFinished()) {
+        logger->log(ILog::Level::INFO,
+                    "Playback exhausted; exiting SLAM process.");
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
+
+    scan_timer.start();
 
     msensor::Scan3D scan;
     scan.points->reserve(scani->points->size());
@@ -138,14 +155,19 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    if (init_scan_count < init_scans) {
+    if (init_scan_count < g_init_scans) {
+      stage_timer.start();
       map->addScan(*scan.points);
+      const auto map_update_us = stage_timer.stop();
       init_scan_count++;
       slam_server.updateScan(*scan.points);
       slam_server.updateMap(map->getPointCloudRepresentation());
       logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
-                  init_scan_count, init_scans,
+                  init_scan_count, g_init_scans,
                   map->getPointCloudRepresentation().size());
+      logger->log(ILog::Level::INFO,
+                  "Init timing. Map update: {} us. Total: {} us", map_update_us,
+                  scan_timer.stop());
       continue;
     }
 
@@ -166,8 +188,12 @@ int main(int argc, char **argv) {
         logger->log(ILog::Level::INFO, "Processing IMU with @ {}",
                     imudata->timestamp);
 
+        stage_timer.start();
         slam.Predict(*imudata);
+        const auto imu_predict_us = stage_timer.stop();
         slam_server.updatePose(slam.getPose());
+        logger->log(ILog::Level::INFO, "IMU predict took: {} us",
+                    imu_predict_us);
       }
     }
     if (config.with_lidar) {
@@ -181,19 +207,39 @@ int main(int argc, char **argv) {
 
       logger->log(ILog::Level::INFO, "Processing scan with {} points @ {}",
                   scan.points->size(), scan.timestamp);
+
+      stage_timer.start();
       auto filtered_scan = preprocessor->downsample(scan);
+      const auto preprocessor_us = stage_timer.stop();
       logger->log(ILog::Level::INFO, "Downsampled scan to {} points",
                   filtered_scan->points->size());
+
+      stage_timer.start();
       slam.Update(*filtered_scan);
+      const auto registration_us = stage_timer.stop();
 
       const auto &correspondences = slam.getLastMapCorrespondences();
+
+      stage_timer.start();
       slam_server.updateCorrespondences(toPointCloud3(correspondences));
 
       transformCloud(slam.getTransform(), *filtered_scan->points);
+      const auto transform_us = stage_timer.stop();
+
+      stage_timer.start();
       slam_server.updateScan(*filtered_scan->points);
       map->addScan(*filtered_scan->points);
       slam_server.updateMap(map->getPointCloudRepresentation());
       slam_server.updatePose(slam.getPose());
+      const auto publish_us = stage_timer.stop();
+
+      logger->log(ILog::Level::INFO,
+                  "Scan timing. Preprocess: {} us. Registration: {} us. "
+                  "Transform: {} us. Publish/Map: {} us. Total: {} us",
+                  preprocessor_us, registration_us, transform_us, publish_us,
+                  scan_timer.stop());
     }
   }
+
+  return 0;
 }

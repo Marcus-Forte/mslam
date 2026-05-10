@@ -6,8 +6,9 @@ namespace mslam {
 
 RecordingSensorPlayer::RecordingSensorPlayer(
     const std::filesystem::path &file, const std::shared_ptr<ILog> &logger,
-    const SlamConfiguration &config)
-    : player_(file), logger_(logger), config_(config) {}
+    bool with_imu, bool with_lidar, unsigned int entry_delay_ms)
+    : player_(file), logger_(logger), with_imu_(with_imu),
+      with_lidar_(with_lidar), entry_delay_ms_(entry_delay_ms) {}
 
 void RecordingSensorPlayer::init() {}
 
@@ -42,6 +43,10 @@ std::optional<msensor::IMUData> RecordingSensorPlayer::getImuData() {
   return imu;
 }
 
+bool RecordingSensorPlayer::isFinished() const {
+  return end_of_file_ && scan_queue_.empty();
+}
+
 bool RecordingSensorPlayer::fillUntilScanAvailable() {
   while (!end_of_file_ && scan_queue_.empty()) {
     const auto time_start = timing::getNowUs();
@@ -54,18 +59,17 @@ bool RecordingSensorPlayer::fillUntilScanAvailable() {
     const auto &entry = player_.getLastEntry();
 
     if (entry.entry_case() == sensors::RecordingEntry::kImu) {
-      if (config_.with_imu) {
+      if (with_imu_) {
         imu_queue_.push(fromEntryToImu(entry));
       }
     } else if (entry.entry_case() == sensors::RecordingEntry::kScan) {
-      if (config_.with_lidar) {
+      if (with_lidar_) {
         scan_queue_.push(fromEntryScan3D(entry));
       }
     }
 
     const auto delta_time = timing::getNowUs() - time_start;
-    const auto time_delay =
-        config_.player_config.entry_delay_ms * 1000 - delta_time;
+    const auto time_delay = entry_delay_ms_ * 1000 - delta_time;
 
     if (time_delay > 0) {
       std::this_thread::sleep_for(std::chrono::microseconds(time_delay));

@@ -3,6 +3,7 @@
 #include "ILog.hh"
 #include "common/Points.hh"
 #include "common/Pose.hh"
+#include "config/IConfig.hh"
 #include "map/IMap.hh"
 
 namespace mslam {
@@ -33,9 +34,11 @@ public:
    * z, roll, pitch and yaw.
    * @param map
    * @param scan
+   * @param metric 3D registration metric to use for optimization.
    * @return Pose
    */
-  Pose3D Align3D(const Pose3D &pose, const IMap &map, const PointCloud3 &scan);
+  Pose3D Align3D(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
+                 RegistrationMetric3D metric);
 
   /**
    * @brief Register a callback function that will be called after each

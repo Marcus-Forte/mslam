@@ -22,7 +22,6 @@ void Slam::ResetPose() {
   logger_->log(ILog::Level::INFO, "Slam Reset: Pose");
 }
 void Slam::Predict(const msensor::IMUData &imuData) {
-  const auto pose_prior = pose_;
   static uint64_t last_timestamp = std::numeric_limits<uint64_t>::max();
 
   const auto delta = (static_cast<double>(imuData.timestamp) -
@@ -36,8 +35,11 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     return;
   }
 
-  logger_->log(ILog::Level::INFO, "delta: {} * {}", delta, imuData.gz);
-  pose_[5] = pose_[5] + delta * imuData.gz;
+  logger_->log(ILog::Level::INFO, "delta: {} * [{}, {}, {}]", delta, imuData.gx,
+               imuData.gy, imuData.gz);
+  pose_[3] += delta * imuData.gx;
+  pose_[4] += delta * imuData.gy;
+  pose_[5] += delta * imuData.gz;
 
   logger_->log(ILog::Level::INFO, "Predict");
   logPose3D(logger_, pose_);

@@ -1,5 +1,5 @@
 {
-    "imu": false,
+    "imu": true,
     "lidar" : true,
     "log_level": "info",
     "camera": false,

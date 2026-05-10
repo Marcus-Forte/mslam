@@ -6,20 +6,32 @@
 #include "map/KDTreeMap.hh"
 #include "map/VoxelHashMap.hh"
 #include "sensors_remote_client.hh"
+#include "slam/PointCloudExporter.hh"
 #include "slam/Preprocessor.hh"
 #include "slam/RecordingSensorPlayer.hh"
 #include "slam/Slam.hh"
 #include "slam/SlamServer.hh"
 #include "slam/Transform.hh"
+#include <atomic>
+#include <csignal>
 #include <getopt.h>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 
 const int g_init_scans = 10;
 const unsigned int g_default_playback_delay_ms = 10;
 
 namespace {
+std::atomic<bool> g_should_stop = false;
+
+void handleSignal(int signal_number) {
+  if (signal_number == SIGINT || signal_number == SIGTERM) {
+    g_should_stop.store(true);
+  }
+}
+
 mslam::PointCloud3 toPointCloud3(const mslam::VectorPoint3d &points) {
   mslam::PointCloud3 point_cloud;
   point_cloud.reserve(points.size());
@@ -29,23 +41,36 @@ mslam::PointCloud3 toPointCloud3(const mslam::VectorPoint3d &points) {
   return point_cloud;
 }
 
+void appendPointCloud(mslam::PointCloud3 &destination,
+                      const mslam::PointCloud3 &source) {
+  destination.points.insert(destination.points.end(), source.points.begin(),
+                            source.points.end());
+}
+
 void printUsage(const char *program_name) {
   std::cout << "Usage: " << program_name
-            << " [-c config.json] [-d delay_ms] [-f recording.pbscan] [-h]\n"
+            << " [-c config.json] [-d delay_ms] [-f recording.pbscan] "
+               "[-o output_prefix] [-h]\n"
             << "  -c <file>  Load SLAM configuration from JSON\n"
             << "  -d <ms>    Delay between playback entries when using -f\n"
             << "  -f <file>  Replay a recorded scan file instead of connecting "
                "remotely\n"
+            << "  -o <path>  Save final point clouds as <path>_voxel_hash.ply "
+               "and <path>_transformed_scans.ply\n"
             << "  -h         Show this help message\n";
 }
 } // namespace
 
 int main(int argc, char **argv) {
+  std::signal(SIGINT, handleSignal);
+  std::signal(SIGTERM, handleSignal);
+
   int opt;
   mslam::SlamConfiguration config;
   std::string slam_play_file = "";
+  std::string ply_export_prefix;
   unsigned int playback_delay_ms = g_default_playback_delay_ms;
-  while ((opt = getopt(argc, argv, "c:d:f:h")) != -1) {
+  while ((opt = getopt(argc, argv, "c:d:f:ho:")) != -1) {
     switch (opt) {
     case 'c': {
       std::cout << "Using config: " << optarg << std::endl;
@@ -61,6 +86,9 @@ int main(int argc, char **argv) {
       std::cout << "Using recorded sensor playback with: " << optarg
                 << std::endl;
       slam_play_file = optarg;
+      break;
+    case 'o':
+      ply_export_prefix = optarg;
       break;
     case 'h':
       printUsage(argv[0]);
@@ -125,18 +153,24 @@ int main(int argc, char **argv) {
               mslam::toString(config.preprocessor.downsample_filter));
   mslam::Slam slam(logger, config.parameters, map);
   slam_server.updatePose(slam.getPose());
+  mslam::PointCloudExporter point_cloud_exporter(
+      ply_export_prefix, config.map_parameters.resolution,
+      config.map_parameters.max_points_per_voxel);
 
   int init_scan_count = 0;
   Timer scan_timer;
   Timer stage_timer;
 
-  while (true) {
+  while (!g_should_stop.load()) {
 
     const auto scani = lidar_sensor->getScan();
     if (!scani) {
       if (playback_player && playback_player->isFinished()) {
         logger->log(ILog::Level::INFO,
                     "Playback exhausted; exiting SLAM process.");
+        break;
+      }
+      if (g_should_stop.load()) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -186,6 +220,7 @@ int main(int argc, char **argv) {
     if (init_scan_count < g_init_scans) {
       stage_timer.start();
       auto filtered_scan = preprocessor->removePointsNearCenter(scan);
+      point_cloud_exporter.addTransformedScan(*filtered_scan->points);
       map->addScan(*filtered_scan->points);
       const auto map_update_us = stage_timer.stop();
       init_scan_count++;
@@ -238,6 +273,8 @@ int main(int argc, char **argv) {
       transformCloud(slam.getTransform(), *filtered_scan->points);
       const auto transform_us = stage_timer.stop();
 
+      point_cloud_exporter.addTransformedScan(*filtered_scan->points);
+
       map->addScan(*filtered_scan->points);
 
       stage_timer.start();
@@ -251,6 +288,18 @@ int main(int argc, char **argv) {
                   preprocessor_us, registration_us, transform_us,
                   transformed_scan_publish_us, scan_timer.stop());
     }
+  }
+
+  if (point_cloud_exporter.isEnabled()) {
+    point_cloud_exporter.save();
+    logger->log(ILog::Level::INFO,
+                "Saved final voxel-hash cloud to {} ({} points)",
+                point_cloud_exporter.getVoxelHashPath().string(),
+                point_cloud_exporter.getVoxelHashPointCount());
+    logger->log(ILog::Level::INFO,
+                "Saved accumulated transformed scans to {} ({} points)",
+                point_cloud_exporter.getTransformedScansPath().string(),
+                point_cloud_exporter.getTransformedScanPointCount());
   }
 
   return 0;

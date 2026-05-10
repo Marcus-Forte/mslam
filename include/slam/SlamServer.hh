@@ -4,6 +4,7 @@
 #include "common/Points.hh"
 #include "common/Pose.hh"
 #include "slam.grpc.pb.h"
+#include <atomic>
 #include <condition_variable>
 #include <grpcpp/grpcpp.h>
 #include <memory>
@@ -51,6 +52,7 @@ private:
   std::shared_ptr<ILog> logger_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
+  std::atomic<bool> stopping_{false};
   mutable std::mutex mutex_;
   mutable std::condition_variable scan_cv_;
   mutable std::condition_variable transformed_scan_cv_;

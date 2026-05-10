@@ -58,7 +58,9 @@ PointCloudExporter::PointCloudExporter(std::string output_prefix,
       std::make_unique<VoxelHashMap>(voxel_size, max_points_per_voxel);
 }
 
-bool PointCloudExporter::isEnabled() const { return voxel_hash_map_ != nullptr; }
+bool PointCloudExporter::isEnabled() const {
+  return voxel_hash_map_ != nullptr;
+}
 
 void PointCloudExporter::addTransformedScan(const PointCloud3 &scan) {
   if (!isEnabled()) {

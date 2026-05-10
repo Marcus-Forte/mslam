@@ -6,13 +6,12 @@
 * slam unit test
 * Add initial scan logic to slam class?
 * SO3 operations module
-* Publish map increments to SlamServer service
-* Fix player so that it returns sensor data accordingly.
+* Fix player so that it returns sensor data accordingly (time?)
 * Outlier pre-processing (e.g. radius outlier removal)
-* Voxel hashing adjacent voxel configuration
 * Logging to stages of the pipeline
-* Combine sensor timestamps ( deskew)
-* Add other services: reset scan, start, stop, etc.
+* Combine sensor timestamps (deskew)
+* Add other services: reset slam, start, stop, etc.
+* Keep / Use point intensities (currently ignored)
 
 ## Client
 

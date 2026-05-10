@@ -47,6 +47,8 @@ void SlamServer::start() {
     return;
   }
 
+  stopping_.store(false);
+
   grpc::ServerBuilder builder;
   builder.SetMaxSendMessageSize(g_max_grpc_message_size);
   builder.SetMaxReceiveMessageSize(g_max_grpc_message_size);
@@ -68,6 +70,12 @@ void SlamServer::stop() {
   if (!server_) {
     return;
   }
+
+  stopping_.store(true);
+  scan_cv_.notify_all();
+  transformed_scan_cv_.notify_all();
+  correspondences_cv_.notify_all();
+  pose_cv_.notify_all();
 
   server_->Shutdown();
   server_.reset();
@@ -117,12 +125,16 @@ grpc::Status
 SlamServer::GetScan(grpc::ServerContext *context, const sensors::Empty *,
                     grpc::ServerWriter<sensors::PointCloud3> *writer) {
   uint64_t last_version = 0;
-  while (!context->IsCancelled()) {
+  while (!context->IsCancelled() && !stopping_.load()) {
     ScanSnapshot snapshot;
     {
       std::unique_lock lock(mutex_);
-      scan_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                        [&]() { return scan_version_ != last_version; });
+      scan_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+        return stopping_.load() || scan_version_ != last_version;
+      });
+      if (stopping_.load()) {
+        break;
+      }
       if (scan_version_ == last_version) {
         continue;
       }
@@ -145,13 +157,18 @@ grpc::Status SlamServer::GetTransformedScan(
     grpc::ServerContext *context, const sensors::Empty *,
     grpc::ServerWriter<sensors::PointCloud3> *writer) {
   uint64_t last_version = 0;
-  while (!context->IsCancelled()) {
+  while (!context->IsCancelled() && !stopping_.load()) {
     TransformedScanSnapshot snapshot;
     {
       std::unique_lock lock(mutex_);
       transformed_scan_cv_.wait_for(
-          lock, std::chrono::milliseconds(100),
-          [&]() { return transformed_scan_version_ != last_version; });
+          lock, std::chrono::milliseconds(100), [&]() {
+            return stopping_.load() ||
+                   transformed_scan_version_ != last_version;
+          });
+      if (stopping_.load()) {
+        break;
+      }
       if (transformed_scan_version_ == last_version) {
         continue;
       }
@@ -174,13 +191,16 @@ grpc::Status SlamServer::GetCorrespondences(
     grpc::ServerContext *context, const sensors::Empty *,
     grpc::ServerWriter<sensors::PointCloud3> *writer) {
   uint64_t last_version = 0;
-  while (!context->IsCancelled()) {
+  while (!context->IsCancelled() && !stopping_.load()) {
     CorrespondenceSnapshot snapshot;
     {
       std::unique_lock lock(mutex_);
       correspondences_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
-        return correspondences_version_ != last_version;
+        return stopping_.load() || correspondences_version_ != last_version;
       });
+      if (stopping_.load()) {
+        break;
+      }
       if (correspondences_version_ == last_version) {
         continue;
       }
@@ -203,12 +223,16 @@ grpc::Status SlamServer::GetPose(grpc::ServerContext *context,
                                  const sensors::Empty *,
                                  grpc::ServerWriter<sensors::Pose3D> *writer) {
   uint64_t last_version = 0;
-  while (!context->IsCancelled()) {
+  while (!context->IsCancelled() && !stopping_.load()) {
     PoseSnapshot snapshot;
     {
       std::unique_lock lock(mutex_);
-      pose_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                        [&]() { return pose_version_ != last_version; });
+      pose_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+        return stopping_.load() || pose_version_ != last_version;
+      });
+      if (stopping_.load()) {
+        break;
+      }
       if (pose_version_ == last_version) {
         continue;
       }

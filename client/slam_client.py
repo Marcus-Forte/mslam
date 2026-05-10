@@ -1,8 +1,8 @@
 import argparse
 import logging
-import platform
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 from typing import Sequence
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SERVER_ADDR = "127.0.0.1:50052"
 DEFAULT_VISER_PORT = 8080
 DEFAULT_POINT_SIZE = 0.03
-DEFAULT_RECONNECT_DELAY_SEC = 1.0
+DEFAULT_MAP_POLL_INTERVAL_SEC = 1.0
 DEFAULT_POSE_POLL_INTERVAL_SEC = 0.1
 MAP_POINT_SIZE_SCALE = 0.2
 SCAN_POINT_SIZE_SCALE = 0.4
@@ -91,20 +91,18 @@ class SlamViewerClient:
         try:
             import viser
         except ModuleNotFoundError as exc:
-            machine = platform.machine().lower()
-            system = platform.system().lower()
-            if system == "linux" and machine == "aarch64":
-                raise RuntimeError(
-                    "viser is not installed for this client environment. On linux/aarch64, "
-                    "the current viser dependency chain pulls in embreex, which has no compatible wheel."
-                ) from exc
-
             raise RuntimeError(
                 "viser is not installed in this environment. Install client dependencies first."
             ) from exc
 
         self._server_addr = server_addr
+        self._shutdown_event = threading.Event()
+        self._fatal_exception: BaseException | None = None
+        self._fatal_exception_lock = threading.Lock()
+        self._map_lock = threading.Lock()
         self._viser: Any = viser
+        self._map_points = np.empty((0, 3), dtype=np.float32)
+        self._map_colors = np.empty((0, 3), dtype=np.uint8)
         self._viser_server = viser.ViserServer(port=viser_port)
         self._viser_server.scene.set_background_image(
             np.zeros((1, 1, 3), dtype=np.uint8)
@@ -140,31 +138,46 @@ class SlamViewerClient:
         )
 
     def run(self) -> None:
-        map_thread = threading.Thread(target=self._stream_map, daemon=True)
-        scan_thread = threading.Thread(target=self._stream_scan, daemon=True)
-        correspondence_thread = threading.Thread(
-            target=self._stream_correspondences, daemon=True
+        map_thread = threading.Thread(target=self._run_stream_map, daemon=True)
+        scan_thread = threading.Thread(
+            target=self._run_stream_transformed_scan, daemon=True
         )
-        pose_thread = threading.Thread(target=self._stream_pose, daemon=True)
+        correspondence_thread = threading.Thread(
+            target=self._run_stream_correspondences, daemon=True
+        )
+        pose_thread = threading.Thread(target=self._run_stream_pose, daemon=True)
         map_thread.start()
         scan_thread.start()
         correspondence_thread.start()
         pose_thread.start()
 
-        while True:
-            time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+        while not self._shutdown_event.is_set():
+            time.sleep(DEFAULT_POSE_POLL_INTERVAL_SEC)
 
-    def _sleep_before_retry(self, stream_name: str) -> None:
-        logger.info(
-            "Retrying %s stream in %.1f seconds",
-            stream_name,
-            DEFAULT_RECONNECT_DELAY_SEC,
-        )
-        time.sleep(DEFAULT_RECONNECT_DELAY_SEC)
+        raise SystemExit(self._format_fatal_exception())
+
+    def _format_fatal_exception(self) -> str:
+        exc = self._fatal_exception
+        if exc is None:
+            return "SLAM viewer stopped unexpectedly."
+
+        if isinstance(exc, grpc.RpcError):
+            return (
+                "SLAM stream failed: "
+                f"{exc.code().name} - {exc.details()}"
+            )
+
+        return f"SLAM stream crashed: {exc}"
+
+    def _set_fatal_exception(self, exc: BaseException) -> None:
+        with self._fatal_exception_lock:
+            if self._fatal_exception is None:
+                self._fatal_exception = exc
+                self._shutdown_event.set()
 
     def _log_stream_exception(self, stream_name: str, exc: Exception) -> None:
         if isinstance(exc, grpc.RpcError):
-            logger.warning(
+            logger.error(
                 "SLAM %s stream error: %s - %s",
                 stream_name,
                 exc.code().name,
@@ -174,82 +187,107 @@ class SlamViewerClient:
 
         logger.exception("SLAM %s stream crashed", stream_name)
 
+    def _run_stream(
+        self,
+        stream_name: str,
+        stream_fn: Callable[[], None],
+    ) -> None:
+        try:
+            stream_fn()
+        except Exception as exc:
+            self._log_stream_exception(stream_name, exc)
+            self._set_fatal_exception(exc)
+
+    def _run_stream_map(self) -> None:
+        self._run_stream("map", self._stream_map)
+
+    def _run_stream_transformed_scan(self) -> None:
+        self._run_stream("transformed scan", self._stream_transformed_scan)
+
+    def _run_stream_correspondences(self) -> None:
+        self._run_stream("correspondence", self._stream_correspondences)
+
+    def _run_stream_pose(self) -> None:
+        self._run_stream("pose", self._stream_pose)
+
     def _stream_map(self) -> None:
         request = slam_pb2.Empty()
 
-        while True:
-            try:
-                logger.info("Connecting to SLAM map stream at %s", self._server_addr)
-                with grpc.insecure_channel(self._server_addr) as channel:
-                    stub = slam_pb2_grpc.SlamServiceStub(channel)
-                    for map_snapshot in stub.GetMap(request):
-                        self._update_cloud(map_snapshot)
-            except Exception as exc:
-                self._log_stream_exception("map", exc)
+        logger.info("Fetching initial SLAM map snapshot from %s", self._server_addr)
+        with grpc.insecure_channel(self._server_addr) as channel:
+            stub = slam_pb2_grpc.SlamServiceStub(channel)
+            self._set_map_cloud(stub.GetMap(request))
 
-            self._sleep_before_retry("map")
-
-    def _stream_scan(self) -> None:
+    def _stream_transformed_scan(self) -> None:
         request = slam_pb2.Empty()
 
-        while True:
-            try:
-                logger.info("Connecting to SLAM scan stream at %s", self._server_addr)
-                with grpc.insecure_channel(self._server_addr) as channel:
-                    stub = slam_pb2_grpc.SlamServiceStub(channel)
-                    for scan_snapshot in stub.GetScan(request):
-                        self._update_scan_cloud(scan_snapshot)
-            except Exception as exc:
-                self._log_stream_exception("scan", exc)
-
-            self._sleep_before_retry("scan")
+        logger.info(
+            "Connecting to SLAM transformed scan stream at %s",
+            self._server_addr,
+        )
+        with grpc.insecure_channel(self._server_addr) as channel:
+            stub = slam_pb2_grpc.SlamServiceStub(channel)
+            for scan_snapshot in stub.GetTransformedScan(request):
+                if self._shutdown_event.is_set():
+                    break
+                self._update_scan_cloud(scan_snapshot)
 
     def _stream_correspondences(self) -> None:
         request = slam_pb2.Empty()
 
-        while True:
-            try:
-                logger.info(
-                    "Connecting to SLAM correspondence stream at %s",
-                    self._server_addr,
-                )
-                with grpc.insecure_channel(self._server_addr) as channel:
-                    stub = slam_pb2_grpc.SlamServiceStub(channel)
-                    for correspondences in stub.GetCorrespondences(request):
-                        self._update_correspondence_cloud(correspondences)
-            except Exception as exc:
-                self._log_stream_exception("correspondence", exc)
-
-            self._sleep_before_retry("correspondence")
+        logger.info(
+            "Connecting to SLAM correspondence stream at %s",
+            self._server_addr,
+        )
+        with grpc.insecure_channel(self._server_addr) as channel:
+            stub = slam_pb2_grpc.SlamServiceStub(channel)
+            for correspondences in stub.GetCorrespondences(request):
+                if self._shutdown_event.is_set():
+                    break
+                self._update_correspondence_cloud(correspondences)
 
     def _stream_pose(self) -> None:
         request = slam_pb2.Empty()
 
-        while True:
-            try:
-                logger.info("Connecting to SLAM pose stream at %s", self._server_addr)
-                with grpc.insecure_channel(self._server_addr) as channel:
-                    stub = slam_pb2_grpc.SlamServiceStub(channel)
-                    while True:
-                        pose = stub.GetPose(request)
-                        self._update_pose(pose)
-                        time.sleep(DEFAULT_POSE_POLL_INTERVAL_SEC)
-            except Exception as exc:
-                self._log_stream_exception("pose", exc)
+        logger.info("Connecting to SLAM pose stream at %s", self._server_addr)
+        with grpc.insecure_channel(self._server_addr) as channel:
+            stub = slam_pb2_grpc.SlamServiceStub(channel)
+            while not self._shutdown_event.is_set():
+                pose = stub.GetPose(request)
+                self._update_pose(pose)
+                time.sleep(DEFAULT_POSE_POLL_INTERVAL_SEC)
 
-            self._sleep_before_retry("pose")
-
-    def _update_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
+    def _set_map_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(map_snapshot.points)
+        colors = to_viser_colors(points)
+
+        with self._map_lock:
+            self._map_points = points
+            self._map_colors = colors
+
         self._cloud.points = points
-        self._cloud.colors = to_viser_colors(points)
-        logger.info("Rendered map snapshot with %d points", len(points))
+        self._cloud.colors = colors
+        logger.info("Rendered initial map snapshot with %d points", len(points))
 
     def _update_scan_cloud(self, scan_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(scan_snapshot.points)
+        colors = to_viser_colors(points)
+
+        with self._map_lock:
+            self._map_points = np.concatenate((self._map_points, points), axis=0)
+            self._map_colors = np.concatenate((self._map_colors, colors), axis=0)
+            map_points = self._map_points
+            map_colors = self._map_colors
+
         self._scan_cloud.points = points
         self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))
-        logger.info("Rendered scan snapshot with %d points", len(points))
+        self._cloud.points = map_points
+        self._cloud.colors = map_colors
+        logger.info(
+            "Rendered transformed scan with %d points; accumulated map now has %d points",
+            len(points),
+            len(map_points),
+        )
 
     def _update_correspondence_cloud(
         self, correspondences: lidar_pb2.PointCloud3
@@ -262,13 +300,16 @@ class SlamViewerClient:
         logger.info("Rendered correspondence snapshot with %d points", len(points))
 
     def _update_pose(self, pose: slam_pb2.Pose3D) -> None:
-        self._pose_frame.position = np.array([pose.x, pose.y, pose.z], dtype=np.float32)
-        self._pose_frame.wxyz = euler_xyz_to_wxyz(pose.phi, pose.omega, pose.theta)
+        position = np.array([pose.x, pose.y, pose.z], dtype=np.float32)
+        rotation_wxyz = euler_xyz_to_wxyz(pose.phi, pose.omega, pose.theta)
+
+        self._pose_frame.position = position
+        self._pose_frame.wxyz = rotation_wxyz
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Subscribe to the mslam gRPC server and render the map in viser."
+        description="Subscribe to the mslam gRPC server and render map snapshots and transformed scans in viser."
     )
     parser.add_argument(
         "--server-addr",

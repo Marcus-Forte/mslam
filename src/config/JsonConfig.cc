@@ -57,6 +57,14 @@ void JsonConfig::load() {
   }
   config_.preprocessor.voxel_size =
       root["preprocessor"]["voxel_size"].asFloat();
+  if (!root["preprocessor"]["min_distance_to_center"].empty()) {
+    config_.preprocessor.min_distance_to_center =
+        root["preprocessor"]["min_distance_to_center"].asFloat();
+  }
+  if (config_.preprocessor.min_distance_to_center < 0.0F) {
+    throw std::runtime_error(
+        "Invalid preprocessor min_distance_to_center setting");
+  }
 
   // Map parameters
   if (root["map"]["resolution"].empty()) {

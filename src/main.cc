@@ -16,7 +16,7 @@
 #include <memory>
 #include <thread>
 
-const int g_init_scans = 5;
+const int g_init_scans = 10;
 const unsigned int g_default_playback_delay_ms = 10;
 
 namespace {
@@ -157,10 +157,12 @@ int main(int argc, char **argv) {
 
     if (init_scan_count < g_init_scans) {
       stage_timer.start();
-      map->addScan(*scan.points);
+      auto filtered_scan = preprocessor->removePointsNearCenter(scan);
+      map->addScan(*filtered_scan->points);
       const auto map_update_us = stage_timer.stop();
       init_scan_count++;
-      slam_server.updateScan(*scan.points);
+      slam_server.updateScan(*filtered_scan->points);
+      slam_server.updateTransformedScan(*filtered_scan->points);
       slam_server.updateMap(map->getPointCloudRepresentation());
       logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
                   init_scan_count, g_init_scans,
@@ -209,10 +211,24 @@ int main(int argc, char **argv) {
                   scan.points->size(), scan.timestamp);
 
       stage_timer.start();
-      auto filtered_scan = preprocessor->downsample(scan);
-      const auto preprocessor_us = stage_timer.stop();
-      logger->log(ILog::Level::INFO, "Downsampled scan to {} points",
-                  filtered_scan->points->size());
+      auto filtered_scan = preprocessor->removePointsNearCenter(scan);
+      const auto range_filter_us = stage_timer.stop();
+
+      logger->log(ILog::Level::INFO,
+                  "Removed near-center points: {} -> {} points",
+                  scan.points->size(), filtered_scan->points->size());
+
+      stage_timer.start();
+      filtered_scan = preprocessor->downsample(*filtered_scan);
+      const auto downsample_us = stage_timer.stop();
+      const auto preprocessor_us = range_filter_us + downsample_us;
+
+      logger->log(ILog::Level::INFO,
+                  "Preprocess benchmark. Range filter: {} us. Downsample: {} "
+                  "us",
+                  range_filter_us, downsample_us);
+      logger->log(ILog::Level::INFO, "Downsampled scan: {} -> {} points",
+                  filtered_scan->points->size(), filtered_scan->points->size());
 
       stage_timer.start();
       slam.Update(*filtered_scan);
@@ -222,22 +238,26 @@ int main(int argc, char **argv) {
 
       stage_timer.start();
       slam_server.updateCorrespondences(toPointCloud3(correspondences));
+      slam_server.updateScan(*filtered_scan->points);
+      slam_server.updatePose(slam.getPose());
 
       transformCloud(slam.getTransform(), *filtered_scan->points);
       const auto transform_us = stage_timer.stop();
 
-      stage_timer.start();
-      slam_server.updateScan(*filtered_scan->points);
       map->addScan(*filtered_scan->points);
-      slam_server.updateMap(map->getPointCloudRepresentation());
-      slam_server.updatePose(slam.getPose());
-      const auto publish_us = stage_timer.stop();
+
+      stage_timer.start();
+      slam_server.updateTransformedScan(*filtered_scan->points);
+      const auto transformed_scan_publish_us = stage_timer.stop();
+
+      stage_timer.start();
 
       logger->log(ILog::Level::INFO,
                   "Scan timing. Preprocess: {} us. Registration: {} us. "
-                  "Transform: {} us. Publish/Map: {} us. Total: {} us",
-                  preprocessor_us, registration_us, transform_us, publish_us,
-                  scan_timer.stop());
+                  "Transform: {} us. Publish transformed scan: {} us. "
+                  "Total: {} us",
+                  preprocessor_us, registration_us, transform_us,
+                  transformed_scan_publish_us, scan_timer.stop());
     }
   }
 

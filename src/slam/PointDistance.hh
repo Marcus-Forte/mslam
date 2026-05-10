@@ -84,14 +84,12 @@ struct Point2Distance {
     Eigen::Map<const Eigen::Vector2d> source{input};
     Eigen::Map<Eigen::Matrix<double, 3, 2>> jacobian_transposed{jacobian};
 
-    const Eigen::Matrix2d rotation = detail::rotation2D(x[2]);
     const Eigen::Matrix2d rotation_derivative =
         detail::rotation2DDerivative(x[2]);
-    const Eigen::Vector2d translated = source + Eigen::Vector2d{x[0], x[1]};
-    const Eigen::Vector2d d_theta = -rotation_derivative * translated;
+    const Eigen::Vector2d d_theta = -rotation_derivative * source;
 
-    jacobian_transposed.col(0) << -rotation(0, 0), -rotation(0, 1), d_theta.x();
-    jacobian_transposed.col(1) << -rotation(1, 0), -rotation(1, 1), d_theta.y();
+    jacobian_transposed.col(0) << -1.0, 0.0, d_theta.x();
+    jacobian_transposed.col(1) << 0.0, -1.0, d_theta.y();
   }
 
   Eigen::Affine2d transform_;
@@ -121,21 +119,16 @@ struct Point3Distance {
     Eigen::Map<Eigen::Matrix<double, 6, 3>> jacobian_transposed{jacobian};
 
     const auto rotation_terms = detail::rotation3DTerms(x[3], x[4], x[5]);
-    const Eigen::Vector3d translated =
-        source + Eigen::Vector3d{x[0], x[1], x[2]};
-    const Eigen::Vector3d d_roll = -rotation_terms.d_roll * translated;
-    const Eigen::Vector3d d_pitch = -rotation_terms.d_pitch * translated;
-    const Eigen::Vector3d d_yaw = -rotation_terms.d_yaw * translated;
+    const Eigen::Vector3d d_roll = -rotation_terms.d_roll * source;
+    const Eigen::Vector3d d_pitch = -rotation_terms.d_pitch * source;
+    const Eigen::Vector3d d_yaw = -rotation_terms.d_yaw * source;
 
-    jacobian_transposed.col(0) << -rotation_terms.rotation(0, 0),
-        -rotation_terms.rotation(0, 1), -rotation_terms.rotation(0, 2),
-        d_roll.x(), d_pitch.x(), d_yaw.x();
-    jacobian_transposed.col(1) << -rotation_terms.rotation(1, 0),
-        -rotation_terms.rotation(1, 1), -rotation_terms.rotation(1, 2),
-        d_roll.y(), d_pitch.y(), d_yaw.y();
-    jacobian_transposed.col(2) << -rotation_terms.rotation(2, 0),
-        -rotation_terms.rotation(2, 1), -rotation_terms.rotation(2, 2),
-        d_roll.z(), d_pitch.z(), d_yaw.z();
+    jacobian_transposed.col(0) << -1.0, 0.0, 0.0, d_roll.x(), d_pitch.x(),
+        d_yaw.x();
+    jacobian_transposed.col(1) << 0.0, -1.0, 0.0, d_roll.y(), d_pitch.y(),
+        d_yaw.y();
+    jacobian_transposed.col(2) << 0.0, 0.0, -1.0, d_roll.z(), d_pitch.z(),
+        d_yaw.z();
   }
 
   Eigen::Affine3d transform_;
@@ -167,24 +160,17 @@ struct Point3PlaneDistance {
                 double *jacobian) const {
     Eigen::Map<const Eigen::Vector3d> source{input};
     Eigen::Map<const Eigen::Vector3d> normal{input + 3};
-    Eigen::Map<const Eigen::Vector3d> target{measurement};
+    Eigen::Map<const Eigen::Vector3d> /*target*/ target{measurement};
     Eigen::Map<Eigen::Matrix<double, 6, 3>> jacobian_transposed{jacobian};
 
     const auto rotation_terms = detail::rotation3DTerms(x[3], x[4], x[5]);
-    const Eigen::Vector3d translated =
-        source + Eigen::Vector3d{x[0], x[1], x[2]};
-    const Eigen::Vector3d d_roll = -rotation_terms.d_roll * translated;
-    const Eigen::Vector3d d_pitch = -rotation_terms.d_pitch * translated;
-    const Eigen::Vector3d d_yaw = -rotation_terms.d_yaw * translated;
+    const Eigen::Vector3d d_roll = -rotation_terms.d_roll * source;
+    const Eigen::Vector3d d_pitch = -rotation_terms.d_pitch * source;
+    const Eigen::Vector3d d_yaw = -rotation_terms.d_yaw * source;
 
     Eigen::Matrix<double, 6, 1> signed_distance_jacobian;
-    signed_distance_jacobian << normal.dot(-rotation_terms.rotation.col(0)),
-        normal.dot(-rotation_terms.rotation.col(1)),
-        normal.dot(-rotation_terms.rotation.col(2)), normal.dot(d_roll),
-        normal.dot(d_pitch), normal.dot(d_yaw);
-
-    const double signed_distance = normal.dot(target - transform_ * source);
-    (void)signed_distance;
+    signed_distance_jacobian << -normal.x(), -normal.y(), -normal.z(),
+        normal.dot(d_roll), normal.dot(d_pitch), normal.dot(d_yaw);
 
     jacobian_transposed.col(0) = signed_distance_jacobian * normal.x();
     jacobian_transposed.col(1) = signed_distance_jacobian * normal.y();

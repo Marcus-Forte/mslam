@@ -8,5 +8,11 @@ target_link_libraries(test_point_metrics slam GTest::gtest_main)
 
 gtest_discover_tests(test_point_metrics)
 
+add_executable(test_preprocessor
+test_preprocessor.cc)
+target_link_libraries(test_preprocessor slam GTest::gtest_main)
+
+gtest_discover_tests(test_preprocessor)
+
 add_executable(mslam_draft draft.cc)
 target_link_libraries(mslam_draft moptim maps slam ILidar)

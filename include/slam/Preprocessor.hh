@@ -9,12 +9,23 @@ public:
   Preprocessor(const PreProcessor &config);
 
   /**
-   * @brief Downsamples the input
-   * \note the input will be moved to the output!
-   * @param input
-   * @return std::shared_ptr<msensor::Scan3D>
+   * @brief Removes near-center points and downsamples the input scan.
    */
-  std::shared_ptr<msensor::Scan3D> downsample(msensor::Scan3D &input);
+  std::shared_ptr<msensor::Scan3D>
+  preprocess(const msensor::Scan3D &input) const;
+
+  /**
+   * @brief Downsamples the input scan.
+   */
+  std::shared_ptr<msensor::Scan3D>
+  downsample(const msensor::Scan3D &input) const;
+
+  /**
+   * @brief Removes points that are closer to the scan origin than the
+   * configured minimum distance.
+   */
+  std::shared_ptr<msensor::Scan3D>
+  removePointsNearCenter(const msensor::Scan3D &input) const;
 
 private:
   PreProcessor config_;

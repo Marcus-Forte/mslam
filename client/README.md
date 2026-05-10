@@ -1,7 +1,7 @@
 # MSLAM client
 
-This client subscribes to the mslam gRPC server and renders map snapshots in
-viser.
+This client subscribes to the mslam gRPC server and renders map snapshots,
+transformed scans, correspondences, and poses in viser.
 
 Generate Python stubs when the SLAM or lidar proto files change:
 

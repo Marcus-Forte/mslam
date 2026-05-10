@@ -11,12 +11,12 @@ namespace {
 constexpr char g_default_slam_server_address[] = "0.0.0.0:50052";
 constexpr int g_max_grpc_message_size = 64 * 1024 * 1024;
 
-struct MapSnapshot {
-  mslam::PointCloud3 map;
+struct ScanSnapshot {
+  mslam::PointCloud3 scan;
   uint64_t version = 0;
 };
 
-struct ScanSnapshot {
+struct TransformedScanSnapshot {
   mslam::PointCloud3 scan;
   uint64_t version = 0;
 };
@@ -76,8 +76,6 @@ void SlamServer::updatePose(const Pose3D &pose) {
 void SlamServer::updateMap(const PointCloud3 &map) {
   std::scoped_lock lock(mutex_);
   map_ = map;
-  ++map_version_;
-  map_cv_.notify_all();
 }
 
 void SlamServer::updateScan(const PointCloud3 &scan) {
@@ -87,6 +85,13 @@ void SlamServer::updateScan(const PointCloud3 &scan) {
   scan_cv_.notify_all();
 }
 
+void SlamServer::updateTransformedScan(const PointCloud3 &scan) {
+  std::scoped_lock lock(mutex_);
+  transformed_scan_ = scan;
+  ++transformed_scan_version_;
+  transformed_scan_cv_.notify_all();
+}
+
 void SlamServer::updateCorrespondences(const PointCloud3 &correspondences) {
   std::scoped_lock lock(mutex_);
   correspondences_ = correspondences;
@@ -94,31 +99,10 @@ void SlamServer::updateCorrespondences(const PointCloud3 &correspondences) {
   correspondences_cv_.notify_all();
 }
 
-grpc::Status
-SlamServer::GetMap(grpc::ServerContext *context, const sensors::Empty *,
-                   grpc::ServerWriter<sensors::PointCloud3> *writer) {
-  uint64_t last_version = 0;
-  while (!context->IsCancelled()) {
-    MapSnapshot snapshot;
-    {
-      std::unique_lock lock(mutex_);
-      map_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                       [&]() { return map_version_ != last_version; });
-      if (map_version_ == last_version) {
-        continue;
-      }
-
-      snapshot.map = map_;
-      snapshot.version = map_version_;
-    }
-
-    last_version = snapshot.version;
-    auto response = toGRPC(snapshot.map);
-    if (!writer->Write(response)) {
-      break;
-    }
-  }
-
+grpc::Status SlamServer::GetMap(grpc::ServerContext *, const sensors::Empty *,
+                                sensors::PointCloud3 *response) {
+  std::scoped_lock lock(mutex_);
+  *response = toGRPC(map_);
   return grpc::Status::OK;
 }
 
@@ -138,6 +122,35 @@ SlamServer::GetScan(grpc::ServerContext *context, const sensors::Empty *,
 
       snapshot.scan = scan_;
       snapshot.version = scan_version_;
+    }
+
+    last_version = snapshot.version;
+    auto response = toGRPC(snapshot.scan);
+    if (!writer->Write(response)) {
+      break;
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status SlamServer::GetTransformedScan(
+    grpc::ServerContext *context, const sensors::Empty *,
+    grpc::ServerWriter<sensors::PointCloud3> *writer) {
+  uint64_t last_version = 0;
+  while (!context->IsCancelled()) {
+    TransformedScanSnapshot snapshot;
+    {
+      std::unique_lock lock(mutex_);
+      transformed_scan_cv_.wait_for(
+          lock, std::chrono::milliseconds(100),
+          [&]() { return transformed_scan_version_ != last_version; });
+      if (transformed_scan_version_ == last_version) {
+        continue;
+      }
+
+      snapshot.scan = transformed_scan_;
+      snapshot.version = transformed_scan_version_;
     }
 
     last_version = snapshot.version;

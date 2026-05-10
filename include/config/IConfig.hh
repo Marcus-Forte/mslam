@@ -51,7 +51,8 @@ struct SlamParameters {
  *
  */
 struct PreProcessor {
-  float voxel_size = 0.1; // input scan voxel downsampling
+  float voxel_size = 0.1;              // input scan voxel downsampling
+  float min_distance_to_center = 0.0F; // remove points closer than this
 };
 
 /**
@@ -91,6 +92,8 @@ struct SlamConfiguration {
        << "\n"
        << "# Preprocessor Parameters #" << "\n"
        << "Voxel Size: " << config.preprocessor.voxel_size << "\n"
+       << "Min Distance To Center: "
+       << config.preprocessor.min_distance_to_center << "\n"
        << "# SLAM Parameters #" << "\n"
        << "Optimizer Iterations: " << config.parameters.opt_iterations << "\n"
        << "Registration Iterations: " << config.parameters.reg_iterations

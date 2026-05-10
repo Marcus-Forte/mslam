@@ -21,7 +21,7 @@ service SlamService {
 	rpc GetScan(Empty) returns (stream PointCloud3);
 	rpc GetTransformedScan(Empty) returns (stream PointCloud3);
 	rpc GetCorrespondences(Empty) returns (stream PointCloud3);
-	rpc GetPose(Empty) returns (Pose3D);
+	rpc GetPose(Empty) returns (stream Pose3D);
 }
 
 

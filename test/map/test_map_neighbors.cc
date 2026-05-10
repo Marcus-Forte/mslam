@@ -33,20 +33,9 @@ TEST(TestKDTreeMapNeighbors, invalid_neighbor_count) {
   EXPECT_TRUE(map.getClosestNNeighbors({0.0F, 0.0F, 0.0F}, 0).empty());
 }
 
-TEST(TestKDTreeMapNeighbors, radius_neighbors) {
+TEST(TestKDTreeMapNeighbors, reports_zero_resolution) {
   KDTreeMap map;
-
-  PointCloud3 scan;
-  scan.emplace_back(0.1F, 0.1F, 0.0F);
-  scan.emplace_back(0.2F, 0.2F, 0.0F);
-  scan.emplace_back(0.8F, 0.8F, 0.0F);
-  map.addScan(scan);
-
-  const auto neighbors =
-      map.getClosestNeighborsRadius({0.0F, 0.0F, 0.0F}, 0.35F);
-  ASSERT_EQ(neighbors.size(), 2);
-  EXPECT_NEAR(neighbors[0].first.x, 0.1F, 1e-5F);
-  EXPECT_NEAR(neighbors[1].first.x, 0.2F, 1e-5F);
+  EXPECT_FLOAT_EQ(map.getResolution(), 0.0F);
 }
 
 TEST(TestOctreeMapNeighbors, stub_returns_single_neighbor) {
@@ -68,18 +57,7 @@ TEST(TestOctreeMapNeighbors, invalid_neighbor_count) {
   EXPECT_TRUE(map.getClosestNNeighbors({0.0F, 0.0F, 0.0F}, 0).empty());
 }
 
-TEST(TestOctreeMapNeighbors, radius_neighbors) {
+TEST(TestOctreeMapNeighbors, reports_voxel_resolution) {
   OctreeMap map(1.0F);
-
-  PointCloud3 scan;
-  scan.emplace_back(0.1F, 0.1F, 0.0F);
-  scan.emplace_back(0.2F, 0.2F, 0.0F);
-  scan.emplace_back(0.8F, 0.8F, 0.0F);
-  map.addScan(scan);
-
-  const auto neighbors =
-      map.getClosestNeighborsRadius({0.0F, 0.0F, 0.0F}, 0.35F);
-  ASSERT_EQ(neighbors.size(), 2);
-  EXPECT_NEAR(neighbors[0].first.x, 0.1F, 1e-5F);
-  EXPECT_NEAR(neighbors[1].first.x, 0.2F, 1e-5F);
+  EXPECT_FLOAT_EQ(map.getResolution(), 1.0F);
 }

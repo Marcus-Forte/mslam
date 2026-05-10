@@ -38,25 +38,12 @@ public:
                                                      int N) const = 0;
 
   /**
-   * @brief Return all neighbors within a search radius of the query point.
-   *
-   * Results should be ordered from nearest to farthest according to the same
-   * distance metric used by getClosestNeighbor(). Implementations should
-   * return an empty vector when radius <= 0 or when no candidates are found.
-   *
-   * @param query Query point in map coordinates.
-   * @param radius Search radius in map units.
-   * @return std::vector<Neighbor> All neighbors within the radius, ordered by
-   * distance.
-   */
-  virtual std::vector<Neighbor>
-  getClosestNeighborsRadius(const Point3 &query, float radius) const = 0;
-
-  /**
    * @brief Get a Point Cloud Representation. Copy might be made.
    *
    * @return PointCloud3
    */
   virtual const PointCloud3 &getPointCloudRepresentation() const = 0;
+
+  virtual const float getResolution() const = 0;
 };
 } // namespace mslam

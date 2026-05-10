@@ -15,7 +15,7 @@ add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
 link_libraries(ILidar IImu msensor::timing msensor)
 
-add_subdirectory(src/maps)
+add_subdirectory(src/map)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)
 

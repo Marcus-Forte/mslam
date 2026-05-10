@@ -19,15 +19,11 @@ public:
     return {};
   }
 
-  std::vector<Neighbor>
-  getClosestNeighborsRadius(const mslam::Point3 & /*query*/,
-                            float /*radius*/) const override {
-    return {};
-  }
-
   const mslam::PointCloud3 &getPointCloudRepresentation() const override {
     return points_;
   }
+
+  const float getResolution() const override { return 0.0F; }
 
 private:
   mslam::PointCloud3 points_;

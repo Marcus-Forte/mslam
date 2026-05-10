@@ -35,13 +35,13 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     return;
   }
 
-  logger_->log(ILog::Level::INFO, "delta: {} * [{}, {}, {}]", delta, imuData.gx,
-               imuData.gy, imuData.gz);
+  logger_->log(ILog::Level::DEBUG, "delta: {} * [{}, {}, {}]", delta,
+               imuData.gx, imuData.gy, imuData.gz);
   pose_[3] += delta * imuData.gx;
   pose_[4] += delta * imuData.gy;
   pose_[5] += delta * imuData.gz;
 
-  logger_->log(ILog::Level::INFO, "Predict");
+  logger_->log(ILog::Level::DEBUG, "Predict");
   logPose3D(logger_, pose_);
 }
 void Slam::Update(const msensor::Scan3D &lidarData) {
@@ -49,7 +49,7 @@ void Slam::Update(const msensor::Scan3D &lidarData) {
 
   pose_ = registration_.Align3D(pose_prior, *map_, *lidarData.points,
                                 RegistrationMetric3D::PointToPlane);
-  logger_->log(ILog::Level::INFO, "Update");
+  logger_->log(ILog::Level::DEBUG, "Update");
   logPose3D(logger_, pose_);
 }
 

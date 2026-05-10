@@ -11,11 +11,10 @@ public:
 
   void addScan(const PointCloud3 &points) override;
   const PointCloud3 &getPointCloudRepresentation() const override;
+  const float getResolution() const override;
   Neighbor getClosestNeighbor(const Point3 &query) const override;
   std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
                                              int N) const override;
-  std::vector<Neighbor> getClosestNeighborsRadius(const Point3 &query,
-                                                  float radius) const override;
 
 private:
   pcl::search::KdTree<pcl::PointXYZ> kdtree_;

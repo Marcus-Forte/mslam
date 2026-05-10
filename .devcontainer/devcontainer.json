@@ -21,6 +21,8 @@
 		}
 	},
 
+	"appPort": [50052],
+
 	"mounts": [
 		"source=mslam-app-cache,target=${containerWorkspaceFolder}/build,type=volume"
 	]

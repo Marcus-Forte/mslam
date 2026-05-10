@@ -22,6 +22,8 @@ const PointCloud3 &KDTreeMap::getPointCloudRepresentation() const {
   return *map_rep_;
 }
 
+const float KDTreeMap::getResolution() const { return 0.0F; }
+
 IMap::Neighbor KDTreeMap::getClosestNeighbor(const Point3 &query) const {
   pcl::Indices index(1);
   std::vector<float> sqr_distances(1);
@@ -40,28 +42,6 @@ std::vector<IMap::Neighbor> KDTreeMap::getClosestNNeighbors(const Point3 &query,
   pcl::Indices indices(static_cast<std::size_t>(N));
   std::vector<float> sqr_distances(static_cast<std::size_t>(N));
   const int found = kdtree_.nearestKSearch(query, N, indices, sqr_distances);
-  neighbors.reserve(static_cast<std::size_t>(found));
-
-  for (int i = 0; i < found; ++i) {
-    const auto &nearest =
-        map_rep_->points[indices[static_cast<std::size_t>(i)]];
-    neighbors.emplace_back(Point3{nearest.x, nearest.y, nearest.z},
-                           sqr_distances[static_cast<std::size_t>(i)]);
-  }
-
-  return neighbors;
-}
-
-std::vector<IMap::Neighbor>
-KDTreeMap::getClosestNeighborsRadius(const Point3 &query, float radius) const {
-  std::vector<IMap::Neighbor> neighbors;
-  if (radius <= 0.0F || map_rep_->empty()) {
-    return neighbors;
-  }
-
-  pcl::Indices indices;
-  std::vector<float> sqr_distances;
-  const int found = kdtree_.radiusSearch(query, radius, indices, sqr_distances);
   neighbors.reserve(static_cast<std::size_t>(found));
 
   for (int i = 0; i < found; ++i) {

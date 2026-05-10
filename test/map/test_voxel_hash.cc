@@ -147,27 +147,6 @@ TEST_F(TestVoxelHashMap, query_multiple_neighbors_invalid_count) {
   EXPECT_TRUE(neighbors.empty());
 }
 
-TEST_F(TestVoxelHashMap, query_neighbors_within_radius) {
-  map_ = std::make_unique<VoxelHashMap>(1.0, 5);
-
-  PointCloud3 scan;
-  scan.emplace_back(0.1, 0.1, 0.0);
-  scan.emplace_back(0.2, 0.2, 0.0);
-  scan.emplace_back(0.8, 0.8, 0.0);
-  scan.emplace_back(1.1, 1.1, 0.0);
-  map_->addScan(scan);
-
-  const auto neighbors =
-      map_->getClosestNeighborsRadius({0.0, 0.0, 0.0}, 0.35F);
-  ASSERT_EQ(neighbors.size(), 2);
-
-  EXPECT_NEAR(neighbors[0].first.x, 0.1, 1e-5);
-  EXPECT_NEAR(neighbors[0].first.y, 0.1, 1e-5);
-  EXPECT_NEAR(neighbors[1].first.x, 0.2, 1e-5);
-  EXPECT_NEAR(neighbors[1].first.y, 0.2, 1e-5);
-}
-
-TEST_F(TestVoxelHashMap, query_neighbors_invalid_radius) {
-  const auto neighbors = map_->getClosestNeighborsRadius({0.0, 0.0, 0.0}, 0.0F);
-  EXPECT_TRUE(neighbors.empty());
+TEST_F(TestVoxelHashMap, reports_voxel_resolution) {
+  EXPECT_FLOAT_EQ(map_->getResolution(), 0.1F);
 }

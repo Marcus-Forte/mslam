@@ -1,5 +1,4 @@
 #include "slam/Registration.hh"
-#include "AnalyticalCost.hh"
 #include "LevenbergMarquardt.hh"
 #include "NumericalCostForwardEuler.hh"
 #include "Timer.hh"
@@ -117,7 +116,7 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
       break;
     }
 
-    logger->log(ILog::Level::INFO,
+    logger->log(ILog::Level::DEBUG,
                 "Correspondence Search. Correspondences: {} / {}. Normal Est.: "
                 "{} us. Took: {} us",
                 last_map_correspondences.size(), scan.size(),
@@ -136,8 +135,8 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
     const auto status = lm.optimize(x.data());
 
     const auto optimization_us = stage_timer.stop();
-    logger->log(ILog::Level::INFO, "Opt. Took: {} us", optimization_us);
-    logger->log(ILog::Level::INFO, "Reg3D Iteration: {}/{}. Total: {} us",
+    logger->log(ILog::Level::DEBUG, "Opt. Took: {} us", optimization_us);
+    logger->log(ILog::Level::DEBUG, "Reg3D Iteration: {}/{}. Total: {} us",
                 i + 1, num_registration_iterations, iteration_timer.stop());
 
     if (status == moptim::Status::SMALL_DELTA) {
@@ -218,7 +217,7 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
 
     const auto delta = timer.stop();
     logger_->log(
-        ILog::Level::INFO,
+        ILog::Level::DEBUG,
         "Reg. Iteration: {}/ {}. Correspondences: {} / {}. Took: {} us", i + 1,
         num_registration_iterations_, map_correspondences.size(), scan.size(),
         delta);

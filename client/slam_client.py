@@ -17,11 +17,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_SERVER_ADDR = "127.0.0.1:50052"
 DEFAULT_VISER_PORT = 8080
 DEFAULT_POINT_SIZE = 0.03
-DEFAULT_MAP_POLL_INTERVAL_SEC = 1.0
-DEFAULT_POSE_POLL_INTERVAL_SEC = 0.1
-MAP_POINT_SIZE_SCALE = 0.2
-SCAN_POINT_SIZE_SCALE = 0.4
-CORRESPONDENCE_POINT_SIZE_SCALE = 0.55
+DEFAULT_MAIN_LOOP_INTERVAL_SEC = 0.1
+MAP_POINT_SIZE_SCALE = 0.1
+SCAN_POINT_SIZE_SCALE = 0.2
+CORRESPONDENCE_POINT_SIZE_SCALE = 0.2
 SCAN_COLOR = np.array([0, 255, 0], dtype=np.uint8)
 CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
 
@@ -152,7 +151,7 @@ class SlamViewerClient:
         pose_thread.start()
 
         while not self._shutdown_event.is_set():
-            time.sleep(DEFAULT_POSE_POLL_INTERVAL_SEC)
+            time.sleep(DEFAULT_MAIN_LOOP_INTERVAL_SEC)
 
         raise SystemExit(self._format_fatal_exception())
 
@@ -252,10 +251,10 @@ class SlamViewerClient:
         logger.info("Connecting to SLAM pose stream at %s", self._server_addr)
         with grpc.insecure_channel(self._server_addr) as channel:
             stub = slam_pb2_grpc.SlamServiceStub(channel)
-            while not self._shutdown_event.is_set():
-                pose = stub.GetPose(request)
+            for pose in stub.GetPose(request):
+                if self._shutdown_event.is_set():
+                    break
                 self._update_pose(pose)
-                time.sleep(DEFAULT_POSE_POLL_INTERVAL_SEC)
 
     def _set_map_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(map_snapshot.points)

@@ -45,8 +45,8 @@ private:
   GetCorrespondences(grpc::ServerContext *context, const sensors::Empty *,
                      grpc::ServerWriter<sensors::PointCloud3> *writer) override;
 
-  grpc::Status GetPose(grpc::ServerContext *, const sensors::Empty *,
-                       sensors::Pose3D *response) override;
+  grpc::Status GetPose(grpc::ServerContext *context, const sensors::Empty *,
+                       grpc::ServerWriter<sensors::Pose3D> *writer) override;
 
   std::shared_ptr<ILog> logger_;
   std::string address_;
@@ -55,6 +55,7 @@ private:
   mutable std::condition_variable scan_cv_;
   mutable std::condition_variable transformed_scan_cv_;
   mutable std::condition_variable correspondences_cv_;
+  mutable std::condition_variable pose_cv_;
   Pose3D pose_;
   PointCloud3 map_;
   PointCloud3 scan_;
@@ -63,6 +64,7 @@ private:
   uint64_t scan_version_ = 0;
   uint64_t transformed_scan_version_ = 0;
   uint64_t correspondences_version_ = 0;
+  uint64_t pose_version_ = 0;
 };
 
 } // namespace mslam

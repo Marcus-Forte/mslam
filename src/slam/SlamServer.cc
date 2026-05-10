@@ -26,6 +26,11 @@ struct CorrespondenceSnapshot {
   uint64_t version = 0;
 };
 
+struct PoseSnapshot {
+  mslam::Pose3D pose;
+  uint64_t version = 0;
+};
+
 } // namespace
 
 namespace mslam {
@@ -71,6 +76,8 @@ void SlamServer::stop() {
 void SlamServer::updatePose(const Pose3D &pose) {
   std::scoped_lock lock(mutex_);
   pose_ = pose;
+  ++pose_version_;
+  pose_cv_.notify_all();
 }
 
 void SlamServer::updateMap(const PointCloud3 &map) {
@@ -192,10 +199,31 @@ grpc::Status SlamServer::GetCorrespondences(
   return grpc::Status::OK;
 }
 
-grpc::Status SlamServer::GetPose(grpc::ServerContext *, const sensors::Empty *,
-                                 sensors::Pose3D *response) {
-  std::scoped_lock lock(mutex_);
-  *response = toGRPC(pose_);
+grpc::Status SlamServer::GetPose(grpc::ServerContext *context,
+                                 const sensors::Empty *,
+                                 grpc::ServerWriter<sensors::Pose3D> *writer) {
+  uint64_t last_version = 0;
+  while (!context->IsCancelled()) {
+    PoseSnapshot snapshot;
+    {
+      std::unique_lock lock(mutex_);
+      pose_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                        [&]() { return pose_version_ != last_version; });
+      if (pose_version_ == last_version) {
+        continue;
+      }
+
+      snapshot.pose = pose_;
+      snapshot.version = pose_version_;
+    }
+
+    last_version = snapshot.version;
+    auto response = toGRPC(snapshot.pose);
+    if (!writer->Write(response)) {
+      break;
+    }
+  }
+
   return grpc::Status::OK;
 }
 

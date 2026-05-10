@@ -1,7 +1,6 @@
 #include "map/VoxelHashMap.hh"
 
 #include <algorithm>
-#include <cmath>
 
 namespace mslam {
 
@@ -40,12 +39,29 @@ void VoxelHashMap::addScan(const PointCloud3 &scan) {
 }
 
 IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
-  const auto neighbors = getClosestNNeighbors(query, 1);
-  if (neighbors.empty()) {
-    return {{0, 0, 0}, std::numeric_limits<float>::max()};
+  const auto voxel = PointToVoxel(query, voxel_size_);
+  const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
+
+  IMap::Neighbor best_neighbor{{0, 0, 0}, std::numeric_limits<float>::max()};
+
+  for (const auto &voxel_shift : voxel_shifts_) {
+    const auto query_voxel = voxel + voxel_shift;
+    const auto search = map_.find(query_voxel);
+    if (search == map_.end()) {
+      continue;
+    }
+
+    const auto &bucket_points = search->second;
+    for (const auto &point : bucket_points.points) {
+      const float squared_distance =
+          (point.getVector3fMap() - query_eigen).squaredNorm();
+      if (squared_distance < best_neighbor.second) {
+        best_neighbor = {Point3{point.x, point.y, point.z}, squared_distance};
+      }
+    }
   }
 
-  return neighbors.front();
+  return best_neighbor;
 }
 
 std::vector<IMap::Neighbor>
@@ -84,46 +100,6 @@ VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
   return neighbors;
 }
 
-std::vector<IMap::Neighbor>
-VoxelHashMap::getClosestNeighborsRadius(const Point3 &query,
-                                        float radius) const {
-  std::vector<IMap::Neighbor> neighbors;
-  if (radius <= 0.0F) {
-    return neighbors;
-  }
-
-  const auto voxel = PointToVoxel(query, voxel_size_);
-  const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
-  const float squared_radius = radius * radius;
-  const int search_voxels =
-      std::max(0, static_cast<int>(std::ceil(radius / voxel_size_)));
-  const auto voxel_shifts = buildVoxelShifts(search_voxels);
-
-  for (const auto &voxel_shift : voxel_shifts) {
-    const auto query_voxel = voxel + voxel_shift;
-    auto search = map_.find(query_voxel);
-    if (search == map_.end()) {
-      continue;
-    }
-
-    const auto &bucket_points = search->second;
-    for (const auto &point : bucket_points.points) {
-      const float squared_distance =
-          (point.getVector3fMap() - query_eigen).squaredNorm();
-      if (squared_distance <= squared_radius) {
-        neighbors.emplace_back(Point3{point.x, point.y, point.z},
-                               squared_distance);
-      }
-    }
-  }
-
-  std::sort(
-      neighbors.begin(), neighbors.end(),
-      [](const auto &lhs, const auto &rhs) { return lhs.second < rhs.second; });
-
-  return neighbors;
-}
-
 /**
  * @brief Get a Point Cloud Representation. Copy might be made.
  *
@@ -135,13 +111,14 @@ const PointCloud3 &VoxelHashMap::getPointCloudRepresentation() const {
                           static_cast<size_t>(max_points_per_voxel_));
   std::for_each(map_.cbegin(), map_.cend(), [&](const auto &map_element) {
     const auto &voxel_buckets = map_element.second;
-    map_rep_.points.insert(map_rep_.points.begin(),
-                           voxel_buckets.points.cbegin(),
+    map_rep_.points.insert(map_rep_.points.end(), voxel_buckets.points.cbegin(),
                            voxel_buckets.points.cend());
   });
   // map_rep_.shrink_to_fit();
   return map_rep_;
 }
+
+const float VoxelHashMap::getResolution() const { return voxel_size_; }
 
 /**
  * @brief Set number of adjacent voxels from the query point to search for
@@ -152,7 +129,6 @@ const PointCloud3 &VoxelHashMap::getPointCloudRepresentation() const {
 void VoxelHashMap::setNumAdjacentVoxelSearch(int adjacent_voxels) {
   adjacent_voxels_ = adjacent_voxels;
   voxel_shifts_ = buildVoxelShifts(adjacent_voxels);
-  std::cout << "Shifts: " << voxel_shifts_.size() << std::endl;
 }
 
 } // namespace mslam

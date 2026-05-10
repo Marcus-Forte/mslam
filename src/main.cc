@@ -121,6 +121,8 @@ int main(int argc, char **argv) {
 
   auto preprocessor =
       std::make_shared<mslam::Preprocessor>(config.preprocessor);
+  logger->log(ILog::Level::INFO, "Using downsample filter: {}",
+              mslam::toString(config.preprocessor.downsample_filter));
   mslam::Slam slam(logger, config.parameters, map);
   slam_server.updatePose(slam.getPose());
 
@@ -155,24 +157,6 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    if (init_scan_count < g_init_scans) {
-      stage_timer.start();
-      auto filtered_scan = preprocessor->removePointsNearCenter(scan);
-      map->addScan(*filtered_scan->points);
-      const auto map_update_us = stage_timer.stop();
-      init_scan_count++;
-      slam_server.updateScan(*filtered_scan->points);
-      slam_server.updateTransformedScan(*filtered_scan->points);
-      slam_server.updateMap(map->getPointCloudRepresentation());
-      logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
-                  init_scan_count, g_init_scans,
-                  map->getPointCloudRepresentation().size());
-      logger->log(ILog::Level::INFO,
-                  "Init timing. Map update: {} us. Total: {} us", map_update_us,
-                  scan_timer.stop());
-      continue;
-    }
-
     if (config.with_imu) {
       static uint64_t last_imu_time = 0;
 
@@ -198,15 +182,25 @@ int main(int argc, char **argv) {
                     imu_predict_us);
       }
     }
-    if (config.with_lidar) {
-      static uint64_t last_scan_time = 0;
-      // print delta
-      if (last_scan_time != 0) {
-        logger->log(ILog::Level::INFO, "Scan delta: {} ms",
-                    (scan.timestamp - last_scan_time) * 1e-6);
-      }
-      last_scan_time = scan.timestamp;
 
+    if (init_scan_count < g_init_scans) {
+      stage_timer.start();
+      auto filtered_scan = preprocessor->removePointsNearCenter(scan);
+      map->addScan(*filtered_scan->points);
+      const auto map_update_us = stage_timer.stop();
+      init_scan_count++;
+      slam_server.updateScan(*filtered_scan->points);
+      slam_server.updateTransformedScan(*filtered_scan->points);
+      slam_server.updateMap(map->getPointCloudRepresentation());
+      logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
+                  init_scan_count, g_init_scans,
+                  map->getPointCloudRepresentation().size());
+      logger->log(ILog::Level::INFO,
+                  "Init timing. Map update: {} us. Total: {} us", map_update_us,
+                  scan_timer.stop());
+      continue;
+    }
+    if (config.with_lidar) {
       logger->log(ILog::Level::INFO, "Processing scan with {} points @ {}",
                   scan.points->size(), scan.timestamp);
 
@@ -228,7 +222,7 @@ int main(int argc, char **argv) {
                   "us",
                   range_filter_us, downsample_us);
       logger->log(ILog::Level::INFO, "Downsampled scan: {} -> {} points",
-                  filtered_scan->points->size(), filtered_scan->points->size());
+                  scan.points->size(), filtered_scan->points->size());
 
       stage_timer.start();
       slam.Update(*filtered_scan);
@@ -249,8 +243,6 @@ int main(int argc, char **argv) {
       stage_timer.start();
       slam_server.updateTransformedScan(*filtered_scan->points);
       const auto transformed_scan_publish_us = stage_timer.stop();
-
-      stage_timer.start();
 
       logger->log(ILog::Level::INFO,
                   "Scan timing. Preprocess: {} us. Registration: {} us. "

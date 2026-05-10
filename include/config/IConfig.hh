@@ -9,6 +9,7 @@ namespace mslam {
 
 enum class MapType { KdTree, Voxel };
 enum class RegistrationMetric3D { PointToPoint, PointToPlane };
+enum class DownsampleFilter { VoxelGrid, VoxelHash };
 
 inline std::string toString(ILog::Level level) {
   switch (level) {
@@ -36,6 +37,17 @@ inline std::string toString(RegistrationMetric3D metric) {
   throw std::runtime_error("Invalid 3D registration metric");
 }
 
+inline std::string toString(DownsampleFilter filter) {
+  switch (filter) {
+  case DownsampleFilter::VoxelGrid:
+    return "voxel_grid";
+  case DownsampleFilter::VoxelHash:
+    return "voxel_hash";
+  }
+
+  throw std::runtime_error("Invalid downsample filter");
+}
+
 /**
  * @brief Algorithm Paramters.
  *
@@ -53,6 +65,7 @@ struct SlamParameters {
 struct PreProcessor {
   float voxel_size = 0.1;              // input scan voxel downsampling
   float min_distance_to_center = 0.0F; // remove points closer than this
+  DownsampleFilter downsample_filter = DownsampleFilter::VoxelGrid;
 };
 
 /**
@@ -94,6 +107,8 @@ struct SlamConfiguration {
        << "Voxel Size: " << config.preprocessor.voxel_size << "\n"
        << "Min Distance To Center: "
        << config.preprocessor.min_distance_to_center << "\n"
+       << "Downsample Filter: "
+       << toString(config.preprocessor.downsample_filter) << "\n"
        << "# SLAM Parameters #" << "\n"
        << "Optimizer Iterations: " << config.parameters.opt_iterations << "\n"
        << "Registration Iterations: " << config.parameters.reg_iterations

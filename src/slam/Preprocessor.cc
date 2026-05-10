@@ -1,4 +1,8 @@
 #include "slam/Preprocessor.hh"
+#include "map/VoxelHashMap.hh"
+
+#include <Eigen/Geometry>
+#include <cmath>
 #include <pcl/filters/voxel_grid.h>
 
 namespace mslam {
@@ -23,6 +27,17 @@ Preprocessor::preprocess(const msensor::Scan3D &input) const {
 
 std::shared_ptr<msensor::Scan3D>
 Preprocessor::downsample(const msensor::Scan3D &input) const {
+  if (config_.downsample_filter == DownsampleFilter::VoxelHash) {
+    VoxelHashMap voxel_map(config_.voxel_size, 1);
+    voxel_map.addScan(*input.points);
+
+    auto filtered_scan = std::make_shared<msensor::Scan3D>();
+    filtered_scan->timestamp = input.timestamp;
+    *filtered_scan->points = voxel_map.getPointCloudRepresentation();
+    filtered_scan->points->is_dense = input.points->is_dense;
+    return filtered_scan;
+  }
+
   auto filtered_scan = std::make_shared<msensor::Scan3D>();
 
   pcl::VoxelGrid<pcl::PointXYZ> voxel_grid;

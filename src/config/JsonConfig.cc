@@ -22,6 +22,17 @@ ILog::Level parseLogLevel(const std::string &log_level) {
 
   throw std::runtime_error("Invalid log_level field: " + log_level);
 }
+
+mslam::DownsampleFilter parseDownsampleFilter(const std::string &filter) {
+  if (filter == "voxel_grid") {
+    return mslam::DownsampleFilter::VoxelGrid;
+  }
+  if (filter == "voxel_hash" || filter == "voxel_first_point") {
+    return mslam::DownsampleFilter::VoxelHash;
+  }
+
+  throw std::runtime_error("Invalid preprocessor downsample_filter: " + filter);
+}
 } // namespace
 
 JsonConfig::JsonConfig(const std::filesystem::path &config_file)
@@ -60,6 +71,10 @@ void JsonConfig::load() {
   if (!root["preprocessor"]["min_distance_to_center"].empty()) {
     config_.preprocessor.min_distance_to_center =
         root["preprocessor"]["min_distance_to_center"].asFloat();
+  }
+  if (!root["preprocessor"]["downsample_filter"].empty()) {
+    config_.preprocessor.downsample_filter = parseDownsampleFilter(
+        root["preprocessor"]["downsample_filter"].asString());
   }
   if (config_.preprocessor.min_distance_to_center < 0.0F) {
     throw std::runtime_error(

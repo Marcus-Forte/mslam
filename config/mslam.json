@@ -8,7 +8,8 @@
 
     "preprocessor": {
         "voxel_size": 0.1,
-        "min_distance_to_center": 0.8
+        "min_distance_to_center": 1.0,
+        "downsample_filter": "voxel_hash" // voxel_hash || voxel_grid
     },
     "map": {
         "resolution": 0.1,

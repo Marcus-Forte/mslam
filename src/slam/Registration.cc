@@ -1,4 +1,5 @@
 #include "slam/Registration.hh"
+#include "AnalyticalCost.hh"
 #include "LevenbergMarquardt.hh"
 #include "NumericalCostForwardEuler.hh"
 #include "Timer.hh"
@@ -74,6 +75,8 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
     last_map_correspondences.reserve(scan.size());
 
     uint64_t normal_estimation_us = 0;
+    uint64_t knn_us = 0;
+    Timer knn_timer;
     stage_timer.start();
     for (const auto &pt : scan) {
       const Eigen::Vector3d point_eigen{pt.x, pt.y, pt.z};
@@ -81,7 +84,9 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
 
       const Point3 query(transformed_scan_pt.x(), transformed_scan_pt.y(),
                          transformed_scan_pt.z());
+      knn_timer.start();
       const auto closest = map.getClosestNeighbor(query);
+      knn_us += knn_timer.stop();
       if (closest.second >=
           max_correspondence_distance * max_correspondence_distance) {
         continue;
@@ -117,9 +122,10 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
     }
 
     logger->log(ILog::Level::DEBUG,
-                "Correspondence Search. Correspondences: {} / {}. Normal Est.: "
+                "Correspondence Search. Correspondences: {} / {}. KNN: {} us. "
+                "Normal Est.: "
                 "{} us. Took: {} us",
-                last_map_correspondences.size(), scan.size(),
+                last_map_correspondences.size(), scan.size(), knn_us,
                 normal_estimation_us, correspondence_us);
 
     stage_timer.start();

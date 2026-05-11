@@ -7,10 +7,10 @@ namespace mslam {
 
 using Voxel3 = Eigen::Vector3i;
 
-inline Voxel3 PointToVoxel(const Point3 &point, float voxel_size) {
-  return {static_cast<int>(std::floor(point.x / voxel_size)),
-          static_cast<int>(std::floor(point.y / voxel_size)),
-          static_cast<int>(std::floor(point.z / voxel_size))};
+inline Voxel3 PointToVoxel(const Point3 &point, float inverse_voxel_size) {
+  return {static_cast<int>(std::floor(point.x * inverse_voxel_size)),
+          static_cast<int>(std::floor(point.y * inverse_voxel_size)),
+          static_cast<int>(std::floor(point.z * inverse_voxel_size))};
 }
 
 } // namespace mslam

@@ -1,15 +1,14 @@
 #include "slam/Registration.hh"
-#include "AnalyticalCost.hh"
 #include "LevenbergMarquardt.hh"
 #include "NumericalCostForwardEuler.hh"
 #include "Timer.hh"
 #include "common/Points.hh"
 #include "slam/Transform.hh"
+#include <Eigen/Eigenvalues>
+#include <limits>
 #include <memory>
 #include <optional>
-#include <pcl/features/normal_3d.h>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
+#include <unordered_map>
 
 #include "PointDistance.hh"
 
@@ -20,32 +19,66 @@ constexpr int g_normalEstimationNeighbors = 5;
 
 namespace {
 
+struct MapPointKey {
+  float x;
+  float y;
+  float z;
+
+  bool operator==(const MapPointKey &) const = default;
+};
+
+struct MapPointKeyHash {
+  std::size_t operator()(const MapPointKey &key) const {
+    const auto hash_x = std::hash<float>{}(key.x);
+    const auto hash_y = std::hash<float>{}(key.y);
+    const auto hash_z = std::hash<float>{}(key.z);
+
+    return hash_x ^ (hash_y << 1) ^ (hash_z << 2);
+  }
+};
+
+inline MapPointKey makeMapPointKey(const Point3 &point) {
+  return {point.x, point.y, point.z};
+}
+
 std::optional<Eigen::Vector3d>
-estimateSurfaceNormal(const IMap &map, const Point3 &query, int num_neighbors) {
-  const auto neighbors = map.getClosestNNeighbors(query, num_neighbors);
+estimateSurfaceNormal(const std::vector<IMap::Neighbor> &neighbors) {
   if (neighbors.size() < 3) {
     return std::nullopt;
   }
 
-  pcl::PointCloud<pcl::PointXYZ> neighborhood;
-  neighborhood.reserve(neighbors.size());
+  Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
   for (const auto &[point, _] : neighbors) {
-    neighborhood.emplace_back(point.x, point.y, point.z);
+    centroid += Eigen::Vector3d{point.x, point.y, point.z};
+  }
+  centroid /= static_cast<double>(neighbors.size());
+
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+  for (const auto &[point, _] : neighbors) {
+    const Eigen::Vector3d centered_point =
+        Eigen::Vector3d{point.x, point.y, point.z} - centroid;
+    covariance.noalias() += centered_point * centered_point.transpose();
   }
 
-  Eigen::Vector4f plane_parameters;
-  float curvature = 0.0f;
-  if (!pcl::computePointNormal(neighborhood, plane_parameters, curvature)) {
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(
+      covariance, Eigen::ComputeEigenvectors);
+  if (solver.info() != Eigen::Success) {
     return std::nullopt;
   }
 
-  Eigen::Vector3d normal = plane_parameters.head<3>().cast<double>();
+  Eigen::Vector3d normal = solver.eigenvectors().col(0);
   const double norm = normal.norm();
   if (norm <= std::numeric_limits<double>::epsilon()) {
     return std::nullopt;
   }
 
   return normal / norm;
+}
+
+std::optional<Eigen::Vector3d>
+estimateSurfaceNormal(const IMap &map, const Point3 &query, int num_neighbors) {
+  const auto neighbors = map.getClosestNNeighbors(query, num_neighbors);
+  return estimateSurfaceNormal(neighbors);
 }
 
 template <typename Model, int InputDim, bool UseNormals>
@@ -64,6 +97,12 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
   int small_delta_hits = 0;
   Timer iteration_timer;
   Timer stage_timer;
+  [[maybe_unused]] std::unordered_map<MapPointKey,
+                                      std::optional<Eigen::Vector3d>,
+                                      MapPointKeyHash> normal_cache;
+  if constexpr (UseNormals) {
+    normal_cache.reserve(scan.size());
+  }
 
   for (int i = 0; i < num_registration_iterations; ++i) {
     iteration_timer.start();
@@ -96,15 +135,19 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
       metric_input.template head<3>() << pt.x, pt.y, pt.z;
 
       if constexpr (UseNormals) {
-        Timer normal_timer;
-        normal_timer.start();
-        const auto normal = estimateSurfaceNormal(map, closest.first,
-                                                  g_normalEstimationNeighbors);
-        normal_estimation_us += normal_timer.stop();
-        if (!normal.has_value()) {
+        const auto cache_key = makeMapPointKey(closest.first);
+        auto [cache_it, inserted] = normal_cache.try_emplace(cache_key);
+        if (inserted) {
+          Timer normal_timer;
+          normal_timer.start();
+          cache_it->second = estimateSurfaceNormal(map, closest.first,
+                                                   g_normalEstimationNeighbors);
+          normal_estimation_us += normal_timer.stop();
+        }
+        if (!cache_it->second.has_value()) {
           continue;
         }
-        metric_input.template tail<3>() = *normal;
+        metric_input.template tail<3>() = *cache_it->second;
       }
 
       metric_inputs.push_back(metric_input);

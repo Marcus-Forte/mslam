@@ -21,6 +21,7 @@ public:
 
 private:
   float voxel_size_;
+  float inverse_voxel_size_;
   size_t max_points_per_voxel_;
   int adjacent_voxels_;
   std::vector<Voxel3> voxel_shifts_;

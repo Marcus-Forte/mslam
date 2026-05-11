@@ -2,10 +2,24 @@
 
 #include <algorithm>
 
+namespace {
+
+inline float squaredDistance(const mslam::Point3 &lhs,
+                             const mslam::Point3 &rhs) {
+  const float dx = lhs.x - rhs.x;
+  const float dy = lhs.y - rhs.y;
+  const float dz = lhs.z - rhs.z;
+  return dx * dx + dy * dy + dz * dz;
+}
+
+} // namespace
+
 namespace mslam {
 
 static std::vector<Voxel3> buildVoxelShifts(int adjacent_voxels) {
   std::vector<Voxel3> shifts;
+  const auto side_length = static_cast<size_t>(2 * adjacent_voxels + 1);
+  shifts.reserve(side_length * side_length * side_length);
   for (int dx = -adjacent_voxels; dx <= adjacent_voxels; ++dx)
     for (int dy = -adjacent_voxels; dy <= adjacent_voxels; ++dy)
       for (int dz = -adjacent_voxels; dz <= adjacent_voxels; ++dz)
@@ -14,33 +28,29 @@ static std::vector<Voxel3> buildVoxelShifts(int adjacent_voxels) {
 }
 
 VoxelHashMap::VoxelHashMap(float voxel_size, size_t max_points_per_voxel)
-    : voxel_size_(voxel_size), max_points_per_voxel_(max_points_per_voxel),
-      adjacent_voxels_(1), voxel_shifts_(buildVoxelShifts(1)) {}
+    : voxel_size_(voxel_size), inverse_voxel_size_(1.0F / voxel_size),
+      max_points_per_voxel_(max_points_per_voxel), adjacent_voxels_(1),
+      voxel_shifts_(buildVoxelShifts(1)) {}
 
 void VoxelHashMap::addScan(const PointCloud3 &scan) {
 
   for (const auto &point : scan.points) {
 
-    const auto voxel = PointToVoxel({point.x, point.y, point.z}, voxel_size_);
+    const auto voxel = PointToVoxel(point, inverse_voxel_size_);
 
-    auto search = map_.find(voxel);
-    if (search != map_.end()) {
-      auto &bucket = search->second;
-      if (bucket.points.size() != max_points_per_voxel_) {
-        bucket.points.emplace_back(point);
-      }
-    } else { // new bucket
-      PointCloud3 new_bucket;
-      new_bucket.points.reserve(max_points_per_voxel_);
-      new_bucket.points.emplace_back(point);
-      map_.insert({voxel, std::move(new_bucket)});
+    auto [it, inserted] = map_.try_emplace(voxel);
+    auto &bucket = it->second;
+    if (inserted) {
+      bucket.points.reserve(max_points_per_voxel_);
+    }
+    if (bucket.points.size() < max_points_per_voxel_) {
+      bucket.points.emplace_back(point);
     }
   }
 }
 
 IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
-  const auto voxel = PointToVoxel(query, voxel_size_);
-  const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
+  const auto voxel = PointToVoxel(query, inverse_voxel_size_);
 
   IMap::Neighbor best_neighbor{{0, 0, 0}, std::numeric_limits<float>::max()};
 
@@ -53,8 +63,7 @@ IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
 
     const auto &bucket_points = search->second;
     for (const auto &point : bucket_points.points) {
-      const float squared_distance =
-          (point.getVector3fMap() - query_eigen).squaredNorm();
+      const float squared_distance = squaredDistance(point, query);
       if (squared_distance < best_neighbor.second) {
         best_neighbor = {Point3{point.x, point.y, point.z}, squared_distance};
       }
@@ -71,31 +80,41 @@ VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
     return neighbors;
   }
 
-  const auto &voxel = PointToVoxel(query, voxel_size_);
+  const auto voxel = PointToVoxel(query, inverse_voxel_size_);
 
-  const Eigen::Vector3f query_eigen{query.x, query.y, query.z};
+  const size_t max_candidate_count =
+      voxel_shifts_.size() * max_points_per_voxel_;
+  neighbors.reserve(max_candidate_count);
 
   for (const auto &voxel_shift : voxel_shifts_) {
     const auto query_voxel = voxel + voxel_shift;
-    auto search = map_.find(query_voxel);
+    const auto search = map_.find(query_voxel);
     if (search != map_.end()) {
       const auto &bucket_points = search->second;
       for (const auto &point : bucket_points.points) {
-        const float squared_distance =
-            (point.getVector3fMap() - query_eigen).squaredNorm();
+        const float squared_distance = squaredDistance(point, query);
         neighbors.emplace_back(Point3{point.x, point.y, point.z},
                                squared_distance);
       }
     }
   }
 
+  const auto requested_count = static_cast<std::size_t>(N);
+  if (neighbors.size() <= requested_count) {
+    std::sort(neighbors.begin(), neighbors.end(),
+              [](const auto &lhs, const auto &rhs) {
+                return lhs.second < rhs.second;
+              });
+    return neighbors;
+  }
+
+  std::nth_element(
+      neighbors.begin(), neighbors.begin() + requested_count, neighbors.end(),
+      [](const auto &lhs, const auto &rhs) { return lhs.second < rhs.second; });
+  neighbors.resize(requested_count);
   std::sort(
       neighbors.begin(), neighbors.end(),
       [](const auto &lhs, const auto &rhs) { return lhs.second < rhs.second; });
-
-  if (neighbors.size() > static_cast<std::size_t>(N)) {
-    neighbors.resize(static_cast<std::size_t>(N));
-  }
 
   return neighbors;
 }
@@ -107,8 +126,11 @@ VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
  */
 const PointCloud3 &VoxelHashMap::getPointCloudRepresentation() const {
   map_rep_.points.clear();
-  map_rep_.points.reserve(map_.size() *
-                          static_cast<size_t>(max_points_per_voxel_));
+  size_t total_points = 0;
+  for (const auto &map_element : map_) {
+    total_points += map_element.second.points.size();
+  }
+  map_rep_.points.reserve(total_points);
   std::for_each(map_.cbegin(), map_.cend(), [&](const auto &map_element) {
     const auto &voxel_buckets = map_element.second;
     map_rep_.points.insert(map_rep_.points.end(), voxel_buckets.points.cbegin(),
@@ -127,6 +149,9 @@ const float VoxelHashMap::getResolution() const { return voxel_size_; }
  * @param adjacent_voxels
  */
 void VoxelHashMap::setNumAdjacentVoxelSearch(int adjacent_voxels) {
+  if (adjacent_voxels_ == adjacent_voxels) {
+    return;
+  }
   adjacent_voxels_ = adjacent_voxels;
   voxel_shifts_ = buildVoxelShifts(adjacent_voxels);
 }

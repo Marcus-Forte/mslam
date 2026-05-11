@@ -12,6 +12,7 @@ link_libraries(Eigen3::Eigen)
 # macros, so they must be applied globally to avoid ODR violations
 # between translation units that share Eigen template instantiations.
 add_compile_options(${PCL_COMPILE_OPTIONS})
+add_compile_options("-march=native")
 
 include(cmake/findGRPC.cmake)
 include(cmake/code_format.cmake)

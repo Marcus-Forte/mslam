@@ -1,5 +1,16 @@
 # mslam: Minimal Slam by Marcus
 
+## Configuration
+
+Check `config/mslam.json` for the current SLAM configuration. The main SLAM binary loads this JSON file at startup. The configuration includes: 
+- which sensors to use (IMU, LiDAR, camera)
+- sensor source (local or remote) (currently only remote supported)
+- logging level
+- map type (voxel or kdtree)
+- remote scanner address for live SLAM
+- scan preprocessing parameters (downsampling, deskewing)
+- map resolution
+
 ## Running playback
 
 Use the main SLAM binary with a recorded `.pbscan` file:
@@ -62,17 +73,11 @@ The runtime now logs timings for several parts of the SLAM pipeline, including:
 - scan transform
 - map and server publication
 
-## TODO
-- Have sensors store timestamp at time of sampling.
-- Finish voxel hashing
-- Implement point-to-line error model
-- Implement acceleration and velocity model
-
 ## Registering individual scans
 
-`register_scans` is a small utility for loading individual `.ply` scans and
+`register_scans2d` is a small utility for loading individual `.ply` scans and
 running pairwise registration experiments.
 
 ```bash
-./build/default/register_scans scan1.ply scan2.ply
+./build/default/register_scans2d scan1.ply scan2.ply
 ```

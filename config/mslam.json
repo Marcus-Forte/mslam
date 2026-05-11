@@ -2,7 +2,7 @@
     "imu": true,
     "lidar" : true,
     "camera": false,
-    "log_level": "info",
+    "log_level": "debug", // trace || debug || info || warning || error
     "map_type": "voxel", // kdtree || voxel
     "remote_scanner": "192.168.178.129:50051",
 

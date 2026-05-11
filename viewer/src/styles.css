@@ -253,3 +253,166 @@ h1 {
     min-height: 58vh;
   }
 }
+
+/* Cloud list */
+
+.cloud-list-section {
+  margin-top: 18px;
+}
+
+.section-label {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #816f5f;
+}
+
+.cloud-list {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  gap: 8px;
+}
+
+.cloud-empty {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: #9f9488;
+  font-style: italic;
+}
+
+.cloud-entry {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(243, 234, 220, 0.9);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cloud-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-visibility {
+  display: grid;
+  place-items: center;
+}
+
+.cloud-visibility input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.cloud-name {
+  flex: 1;
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cloud-points {
+  font-size: 0.72rem;
+  color: #816f5f;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cloud-btn {
+  appearance: none;
+  border: 0;
+  background: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 6px;
+  color: #50483f;
+  line-height: 1;
+  transition: color 120ms, background 120ms;
+  flex-shrink: 0;
+}
+
+.cloud-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1c1d1f;
+}
+
+.cloud-remove:hover {
+  color: #b84122;
+}
+
+.cloud-options {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.cloud-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cloud-option-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #816f5f;
+  min-width: 34px;
+  flex-shrink: 0;
+}
+
+.cloud-color-mode {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 3px 6px;
+  border: 1px solid rgba(28, 29, 31, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.cloud-color-picker {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(28, 29, 31, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cloud-size-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.cloud-size-value {
+  min-width: 3rem;
+  text-align: right;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.cloud-opacity-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.cloud-opacity-value {
+  min-width: 3rem;
+  text-align: right;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}

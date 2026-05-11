@@ -2,27 +2,35 @@ import "./styles.css";
 
 import {
   AxesHelper,
-  Box3,
   BufferAttribute,
   BufferGeometry,
   Color,
+  DepthTexture,
   Float32BufferAttribute,
   GridHelper,
   Group,
   Line,
   LineBasicMaterial,
+  Mesh,
+  NearestFilter,
+  OrthographicCamera,
   PerspectiveCamera,
+  PlaneGeometry,
   Points,
   PointsMaterial,
   Raycaster,
   Scene,
+  ShaderMaterial,
   SRGBColorSpace,
+  UnsignedIntType,
   Vector2,
   Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
+import { edlFragmentShader, edlVertexShader } from "./edlShader";
 
 function requireElement<T extends Element>(
   selector: string,
@@ -44,25 +52,27 @@ app.innerHTML = `
       <p class="eyebrow">MSLAM Viewer</p>
       <h1>PLY Loader</h1>
       <p class="lede">
-        Load a local <span>.ply</span> point cloud and inspect it directly in the browser.
+        Load one or more <span>.ply</span> point clouds and inspect them in the browser.
       </p>
 
       <label class="dropzone" for="ply-input" id="dropzone">
-        <input id="ply-input" type="file" accept=".ply" />
-        <strong>Choose a PLY file</strong>
-        <span>or drag one here</span>
+        <input id="ply-input" type="file" accept=".ply" multiple />
+        <strong>Choose PLY files</strong>
+        <span>or drag them here</span>
       </label>
 
-      <div class="controls-panel">
-        <label class="control" for="point-size">
-          <span>Point size</span>
-          <div class="control-row">
-            <input id="point-size" type="range" min="0.01" max="0.2" step="0.005" value="0.12" />
-            <output id="point-size-value">0.12</output>
-          </div>
-        </label>
+      <div class="cloud-list-section">
+        <p class="section-label">Loaded clouds</p>
+        <div class="cloud-list" id="cloud-list">
+          <p class="cloud-empty" id="cloud-empty">No clouds loaded</p>
+        </div>
+      </div>
 
+      <div class="controls-panel">
         <div class="tool-row">
+          <button id="edl-toggle" class="tool-button" type="button" aria-pressed="true">
+            EDL on
+          </button>
           <button id="ruler-toggle" class="tool-button" type="button" aria-pressed="false">
             Ruler off
           </button>
@@ -74,16 +84,12 @@ app.innerHTML = `
 
       <dl class="stats">
         <div>
-          <dt>File</dt>
-          <dd id="file-name">None loaded</dd>
+          <dt>Clouds</dt>
+          <dd id="cloud-count">0</dd>
         </div>
         <div>
-          <dt>Points</dt>
-          <dd id="point-count">0</dd>
-        </div>
-        <div>
-          <dt>Bounds</dt>
-          <dd id="bounds">-</dd>
+          <dt>Total points</dt>
+          <dd id="total-points">0</dd>
         </div>
         <div>
           <dt>Measure</dt>
@@ -106,11 +112,11 @@ app.innerHTML = `
 const canvas = requireElement<HTMLCanvasElement>("#viewer-canvas");
 const input = requireElement<HTMLInputElement>("#ply-input");
 const dropzone = requireElement<HTMLLabelElement>("#dropzone");
-const fileNameLabel = requireElement<HTMLElement>("#file-name");
-const pointCountLabel = requireElement<HTMLElement>("#point-count");
-const boundsLabel = requireElement<HTMLElement>("#bounds");
-const pointSizeInput = requireElement<HTMLInputElement>("#point-size");
-const pointSizeValue = requireElement<HTMLOutputElement>("#point-size-value");
+const cloudList = requireElement<HTMLDivElement>("#cloud-list");
+const cloudEmptyLabel = requireElement<HTMLElement>("#cloud-empty");
+const cloudCountLabel = requireElement<HTMLElement>("#cloud-count");
+const totalPointsLabel = requireElement<HTMLElement>("#total-points");
+const edlToggle = requireElement<HTMLButtonElement>("#edl-toggle");
 const rulerToggle = requireElement<HTMLButtonElement>("#ruler-toggle");
 const rulerClear = requireElement<HTMLButtonElement>("#ruler-clear");
 const rulerDistanceLabel = requireElement<HTMLElement>("#ruler-distance");
@@ -151,6 +157,37 @@ const loader = new PLYLoader();
 const raycaster = new Raycaster();
 const pointer = new Vector2();
 
+// ── EDL post-processing ──
+
+const edlRenderTarget = new WebGLRenderTarget(1, 1, {
+  minFilter: NearestFilter,
+  magFilter: NearestFilter,
+});
+edlRenderTarget.depthTexture = new DepthTexture(1, 1, UnsignedIntType);
+
+const edlMaterial = new ShaderMaterial({
+  uniforms: {
+    tColor: { value: edlRenderTarget.texture },
+    tDepth: { value: edlRenderTarget.depthTexture },
+    uScreenSize: { value: new Vector2(1, 1) },
+    uStrength: { value: 1.0 },
+    uRadius: { value: 1.5 },
+    uNear: { value: camera.near },
+    uFar: { value: camera.far },
+  },
+  vertexShader: edlVertexShader,
+  fragmentShader: edlFragmentShader,
+  depthWrite: false,
+  depthTest: false,
+});
+
+const edlScene = new Scene();
+const edlCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const edlQuad = new Mesh(new PlaneGeometry(2, 2), edlMaterial);
+edlScene.add(edlQuad);
+
+let edlEnabled = true;
+
 type RulerMeasurement = {
   start: Vector3;
   end: Vector3;
@@ -159,8 +196,31 @@ type RulerMeasurement = {
   label: HTMLDivElement;
 };
 
-let currentPointCloud: Points<BufferGeometry, PointsMaterial> | null = null;
-let currentPointSize = Number.parseFloat(pointSizeInput.value);
+type ColorMode = "height" | "flat";
+
+type CloudEntry = {
+  id: number;
+  name: string;
+  mesh: Points<BufferGeometry, PointsMaterial>;
+  geometry: BufferGeometry;
+  colorMode: ColorMode;
+  flatColor: string;
+  pointSize: number;
+  opacity: number;
+  visible: boolean;
+  pointCount: number;
+  element: HTMLElement;
+};
+
+const PRESET_COLORS = [
+  "#e57b45", "#2470a8", "#4caf50", "#9c27b0",
+  "#ff9800", "#00bcd4", "#f44336", "#795548",
+];
+const RULER_MARKER_SIZE = 0.025;
+const DEFAULT_POINT_SIZE = 0.04;
+
+let nextCloudId = 0;
+const clouds: CloudEntry[] = [];
 let rulerEnabled = false;
 let pointerDownPosition: { x: number; y: number } | null = null;
 let pendingRulerPoint: Vector3 | null = null;
@@ -168,20 +228,13 @@ const rulerMeasurements: RulerMeasurement[] = [];
 const pressedKeys = new Set<string>();
 let lastFrameTime = performance.now();
 
-raycaster.params.Points.threshold = Math.max(currentPointSize * 1.5, 0.02);
+raycaster.params.Points.threshold = 0.03;
 
-function setStatus(name: string, pointCount: number, bounds: Box3 | null): void {
-  fileNameLabel.textContent = name;
-  pointCountLabel.textContent = new Intl.NumberFormat().format(pointCount);
-
-  if (!bounds || bounds.isEmpty()) {
-    boundsLabel.textContent = "-";
-    return;
-  }
-
-  const size = new Vector3();
-  bounds.getSize(size);
-  boundsLabel.textContent = `${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;
+function updateStats(): void {
+  cloudCountLabel.textContent = String(clouds.length);
+  const total = clouds.reduce((sum, c) => sum + c.pointCount, 0);
+  totalPointsLabel.textContent = new Intl.NumberFormat().format(total);
+  cloudEmptyLabel.hidden = clouds.length > 0;
 }
 
 function setRulerDistance(distance: number | null): void {
@@ -240,13 +293,40 @@ function colorizeByHeight(geometry: BufferGeometry): void {
   geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
 }
 
-function focusCameraOnGeometry(geometry: BufferGeometry): void {
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
+function applyFlatColor(geometry: BufferGeometry, hex: string): void {
+  const color = new Color(hex);
+  const count = geometry.getAttribute("position").count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
+}
 
-  const bounds = geometry.boundingBox;
-  const sphere = geometry.boundingSphere;
-  if (!bounds || !sphere) {
+function applyCloudColor(entry: CloudEntry): void {
+  if (entry.colorMode === "height") {
+    colorizeByHeight(entry.geometry);
+  } else {
+    applyFlatColor(entry.geometry, entry.flatColor);
+  }
+  const colorAttr = entry.geometry.getAttribute("color");
+  if (colorAttr) {
+    (colorAttr as BufferAttribute).needsUpdate = true;
+  }
+}
+
+function updateRaycasterThreshold(): void {
+  const visibleSizes = clouds.filter((c) => c.visible).map((c) => c.pointSize);
+  const maxSize = visibleSizes.length > 0 ? Math.max(...visibleSizes) : DEFAULT_POINT_SIZE;
+  raycaster.params.Points.threshold = Math.max(maxSize * 1.5, 0.02);
+}
+
+function focusOnCloud(entry: CloudEntry): void {
+  entry.geometry.computeBoundingSphere();
+  const sphere = entry.geometry.boundingSphere;
+  if (!sphere) {
     return;
   }
 
@@ -264,26 +344,164 @@ function focusCameraOnGeometry(geometry: BufferGeometry): void {
   camera.far = Math.max(radius * 50, 100);
   camera.updateProjectionMatrix();
   controls.update();
-
-  setStatus(fileNameLabel.textContent ?? "Loaded file", geometry.getAttribute("position").count, bounds);
 }
 
-function disposeCurrentPointCloud(): void {
-  disposeGroupObjects(pointCloudGroup);
-  currentPointCloud = null;
+function createCloudElement(entry: CloudEntry): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "cloud-entry";
+  el.innerHTML = `
+    <div class="cloud-header">
+      <label class="cloud-visibility">
+        <input type="checkbox" ${entry.visible ? "checked" : ""} />
+      </label>
+      <span class="cloud-name" title="${entry.name}">${entry.name}</span>
+      <span class="cloud-points">${new Intl.NumberFormat().format(entry.pointCount)} pts</span>
+      <button class="cloud-btn cloud-focus" type="button" title="Focus camera">\u2295</button>
+      <button class="cloud-btn cloud-remove" type="button" title="Remove">\u00d7</button>
+    </div>
+    <div class="cloud-options">
+      <div class="cloud-option-row">
+        <span class="cloud-option-label">Color</span>
+        <select class="cloud-color-mode">
+          <option value="height"${entry.colorMode === "height" ? " selected" : ""}>Height gradient</option>
+          <option value="flat"${entry.colorMode === "flat" ? " selected" : ""}>Flat color</option>
+        </select>
+        <input type="color" class="cloud-color-picker" value="${entry.flatColor}" />
+      </div>
+      <div class="cloud-option-row">
+        <span class="cloud-option-label">Size</span>
+        <input type="range" class="cloud-size-slider" min="0.005" max="0.2" step="0.005" value="${entry.pointSize}" />
+        <output class="cloud-size-value">${entry.pointSize.toFixed(3)}</output>
+      </div>
+      <div class="cloud-option-row">
+        <span class="cloud-option-label">Alpha</span>
+        <input type="range" class="cloud-opacity-slider" min="0.05" max="1" step="0.05" value="${entry.opacity}" />
+        <output class="cloud-opacity-value">${Math.round(entry.opacity * 100)}%</output>
+      </div>
+    </div>
+  `;
+
+  const checkbox = el.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  checkbox.addEventListener("change", () => {
+    entry.visible = checkbox.checked;
+    entry.mesh.visible = checkbox.checked;
+    updateRaycasterThreshold();
+  });
+
+  const colorModeSelect = el.querySelector<HTMLSelectElement>(".cloud-color-mode")!;
+  const colorPicker = el.querySelector<HTMLInputElement>(".cloud-color-picker")!;
+  colorPicker.style.display = entry.colorMode === "flat" ? "" : "none";
+
+  colorModeSelect.addEventListener("change", () => {
+    entry.colorMode = colorModeSelect.value as ColorMode;
+    colorPicker.style.display = entry.colorMode === "flat" ? "" : "none";
+    applyCloudColor(entry);
+  });
+
+  colorPicker.addEventListener("input", () => {
+    entry.flatColor = colorPicker.value;
+    if (entry.colorMode === "flat") {
+      applyCloudColor(entry);
+    }
+  });
+
+  const sizeSlider = el.querySelector<HTMLInputElement>(".cloud-size-slider")!;
+  const sizeOutput = el.querySelector<HTMLOutputElement>(".cloud-size-value")!;
+  sizeSlider.addEventListener("input", () => {
+    const size = Number.parseFloat(sizeSlider.value);
+    entry.pointSize = size;
+    entry.mesh.material.size = size;
+    entry.mesh.material.needsUpdate = true;
+    sizeOutput.textContent = size.toFixed(3);
+    updateRaycasterThreshold();
+  });
+
+  const opacitySlider = el.querySelector<HTMLInputElement>(".cloud-opacity-slider")!;
+  const opacityOutput = el.querySelector<HTMLOutputElement>(".cloud-opacity-value")!;
+  opacitySlider.addEventListener("input", () => {
+    const alpha = Number.parseFloat(opacitySlider.value);
+    entry.opacity = alpha;
+    entry.mesh.material.opacity = alpha;
+    entry.mesh.material.alphaHash = alpha < 1;
+    entry.mesh.material.needsUpdate = true;
+    opacityOutput.textContent = `${Math.round(alpha * 100)}%`;
+  });
+
+  el.querySelector(".cloud-focus")!.addEventListener("click", () => {
+    focusOnCloud(entry);
+  });
+
+  el.querySelector(".cloud-remove")!.addEventListener("click", () => {
+    removeCloud(entry.id);
+  });
+
+  return el;
 }
 
-function updatePointSize(pointSize: number): void {
-  currentPointSize = pointSize;
-  pointSizeValue.textContent = pointSize.toFixed(3);
-  raycaster.params.Points.threshold = Math.max(pointSize * 1.5, 0.02);
+function addCloud(file: File): void {
+  file.arrayBuffer().then((buffer) => {
+    const geometry = loader.parse(buffer);
+    colorizeByHeight(geometry);
 
-  if (currentPointCloud) {
-    currentPointCloud.material.size = pointSize;
-    currentPointCloud.material.needsUpdate = true;
+    const id = nextCloudId;
+    nextCloudId += 1;
+
+    const pointSize = DEFAULT_POINT_SIZE;
+    const opacity = 1;
+    const material = new PointsMaterial({
+      size: pointSize,
+      vertexColors: true,
+      sizeAttenuation: true,
+    });
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "void main() {",
+        "void main() {\n  vec2 c = 2.0 * gl_PointCoord - 1.0;\n  if (dot(c, c) > 1.0) discard;",
+      );
+    };
+
+    const mesh = new Points(geometry, material);
+    pointCloudGroup.add(mesh);
+
+    const entry: CloudEntry = {
+      id,
+      name: file.name,
+      mesh,
+      geometry,
+      colorMode: "height",
+      flatColor: PRESET_COLORS[id % PRESET_COLORS.length],
+      pointSize,
+      opacity,
+      visible: true,
+      pointCount: geometry.getAttribute("position").count,
+      element: document.createElement("div"),
+    };
+
+    entry.element = createCloudElement(entry);
+    cloudList.appendChild(entry.element);
+    clouds.push(entry);
+    updateStats();
+    updateRaycasterThreshold();
+  }).catch((error: unknown) => {
+    console.error(error);
+    window.alert(`Failed to load ${file.name}. Check that the file is valid PLY.`);
+  });
+}
+
+function removeCloud(id: number): void {
+  const index = clouds.findIndex((c) => c.id === id);
+  if (index === -1) {
+    return;
   }
 
-  renderRulers();
+  const entry = clouds[index];
+  pointCloudGroup.remove(entry.mesh);
+  entry.geometry.dispose();
+  entry.mesh.material.dispose();
+  entry.element.remove();
+  clouds.splice(index, 1);
+  updateStats();
+  updateRaycasterThreshold();
 }
 
 function setRulerEnabled(enabled: boolean): void {
@@ -331,7 +549,7 @@ function renderRulers(): void {
     ]);
     const markerMaterial = new PointsMaterial({
       color: "#b84122",
-      size: currentPointSize * 2.2,
+      size: RULER_MARKER_SIZE,
       sizeAttenuation: true,
     });
     rulerGroup.add(new Points(markerGeometry, markerMaterial));
@@ -348,7 +566,7 @@ function renderRulers(): void {
     const pendingGeometry = new BufferGeometry().setFromPoints([pendingRulerPoint]);
     const pendingMaterial = new PointsMaterial({
       color: "#b84122",
-      size: currentPointSize * 2.2,
+      size: RULER_MARKER_SIZE,
       sizeAttenuation: true,
     });
     rulerGroup.add(new Points(pendingGeometry, pendingMaterial));
@@ -372,31 +590,40 @@ function clearRulers(): void {
 }
 
 function getPickedPoint(event: MouseEvent): Vector3 | null {
-  if (!currentPointCloud) {
-    return null;
-  }
-
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
   raycaster.setFromCamera(pointer, camera);
-  const intersections = raycaster.intersectObject(currentPointCloud);
-  const closest = intersections[0];
-  if (!closest || closest.index === undefined) {
-    return null;
+
+  let best: { point: Vector3; distance: number } | null = null;
+  for (const cloud of clouds) {
+    if (!cloud.visible) {
+      continue;
+    }
+
+    const hits = raycaster.intersectObject(cloud.mesh);
+    if (hits.length === 0 || hits[0].index === undefined) {
+      continue;
+    }
+
+    const positions = cloud.geometry.getAttribute("position");
+    if (!(positions instanceof BufferAttribute)) {
+      continue;
+    }
+
+    const point = new Vector3(
+      positions.getX(hits[0].index),
+      positions.getY(hits[0].index),
+      positions.getZ(hits[0].index),
+    ).applyMatrix4(cloud.mesh.matrixWorld);
+
+    if (!best || hits[0].distance < best.distance) {
+      best = { point, distance: hits[0].distance };
+    }
   }
 
-  const positions = currentPointCloud.geometry.getAttribute("position");
-  if (!(positions instanceof BufferAttribute)) {
-    return null;
-  }
-
-  return new Vector3(
-    positions.getX(closest.index),
-    positions.getY(closest.index),
-    positions.getZ(closest.index),
-  ).applyMatrix4(currentPointCloud.matrixWorld);
+  return best?.point ?? null;
 }
 
 function shouldHandleKeyboardNavigation(): boolean {
@@ -491,47 +718,24 @@ function pickPoint(event: PointerEvent): void {
   renderRulers();
 }
 
-function loadPlyFile(file: File): void {
-  file.arrayBuffer().then((buffer) => {
-    const geometry = loader.parse(buffer);
-    geometry.computeVertexNormals();
-    colorizeByHeight(geometry);
-
-    const material = new PointsMaterial({
-      size: currentPointSize,
-      vertexColors: true,
-      sizeAttenuation: true,
-    });
-
-    const points = new Points(geometry, material);
-    disposeCurrentPointCloud();
-    clearRulers();
-    pointCloudGroup.add(points);
-    currentPointCloud = points;
-
-    fileNameLabel.textContent = file.name;
-    focusCameraOnGeometry(geometry);
-  }).catch((error: unknown) => {
-    console.error(error);
-    window.alert("Failed to load PLY file. Check that the file is valid ASCII or binary PLY.");
-  });
-}
-
 function handleFileSelection(fileList: FileList | null): void {
-  const file = fileList?.[0];
-  if (!file) {
+  if (!fileList || fileList.length === 0) {
     return;
   }
 
-  loadPlyFile(file);
+  for (const file of fileList) {
+    addCloud(file);
+  }
 }
 
 input.addEventListener("change", () => {
   handleFileSelection(input.files);
 });
 
-pointSizeInput.addEventListener("input", () => {
-  updatePointSize(Number.parseFloat(pointSizeInput.value));
+edlToggle.addEventListener("click", () => {
+  edlEnabled = !edlEnabled;
+  edlToggle.textContent = edlEnabled ? "EDL on" : "EDL off";
+  edlToggle.setAttribute("aria-pressed", String(edlEnabled));
 });
 
 rulerToggle.addEventListener("click", () => {
@@ -617,17 +821,21 @@ function resize(): void {
   }
 
   const { clientWidth, clientHeight } = frame;
+  const dpr = renderer.getPixelRatio();
+  const w = Math.floor(clientWidth * dpr);
+  const h = Math.floor(clientHeight * dpr);
   camera.aspect = clientWidth / Math.max(clientHeight, 1);
   camera.updateProjectionMatrix();
   renderer.setSize(clientWidth, clientHeight, false);
+  edlRenderTarget.setSize(w, h);
+  edlMaterial.uniforms.uScreenSize.value.set(w, h);
   updateRulerLabels();
 }
 
 window.addEventListener("resize", resize);
 resize();
-setStatus("None loaded", 0, null);
+updateStats();
 setRulerDistance(null);
-updatePointSize(currentPointSize);
 setRulerEnabled(false);
 
 function render(): void {
@@ -638,7 +846,18 @@ function render(): void {
   updateKeyboardNavigation(deltaSeconds);
   controls.update();
   updateRulerLabels();
-  renderer.render(scene, camera);
+
+  if (edlEnabled) {
+    edlMaterial.uniforms.uNear.value = camera.near;
+    edlMaterial.uniforms.uFar.value = camera.far;
+    renderer.setRenderTarget(edlRenderTarget);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.render(edlScene, edlCamera);
+  } else {
+    renderer.render(scene, camera);
+  }
+
   window.requestAnimationFrame(render);
 }
 

@@ -7,6 +7,12 @@ find_package(Eigen3 REQUIRED)
 find_package(jsoncpp REQUIRED)
 link_libraries(Eigen3::Eigen)
 
+# PCL injects arch-specific flags (e.g. -march=native, -mavx2) via
+# PCL_COMPILE_OPTIONS. These affect Eigen's alignment / vectorisation
+# macros, so they must be applied globally to avoid ODR violations
+# between translation units that share Eigen template instantiations.
+add_compile_options(${PCL_COMPILE_OPTIONS})
+
 include(cmake/findGRPC.cmake)
 include(cmake/code_format.cmake)
 

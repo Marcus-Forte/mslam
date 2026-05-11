@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 import lidar_pb2 as lidar__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nslam.proto\x12\x07sensors\x1a\x0blidar.proto\"\x07\n\x05\x45mpty\"T\n\x06Pose3D\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\x12\x0b\n\x03phi\x18\x04 \x01(\x01\x12\r\n\x05omega\x18\x05 \x01(\x01\x12\r\n\x05theta\x18\x06 \x01(\x01\x32\x9a\x02\n\x0bSlamService\x12.\n\x06GetMap\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud3\x12\x31\n\x07GetScan\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetTransformedScan\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetCorrespondences\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12,\n\x07GetPose\x12\x0e.sensors.Empty\x1a\x0f.sensors.Pose3D0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nslam.proto\x12\x07sensors\x1a\x0blidar.proto\"\x07\n\x05\x45mpty\"T\n\x06Pose3D\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\x12\x0b\n\x03phi\x18\x04 \x01(\x01\x12\r\n\x05omega\x18\x05 \x01(\x01\x12\r\n\x05theta\x18\x06 \x01(\x01\x32\xd6\x02\n\x0bSlamService\x12.\n\x06GetMap\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud3\x12:\n\x10GetMapIncrements\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12\x31\n\x07GetScan\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetTransformedScan\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetCorrespondences\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12,\n\x07GetPose\x12\x0e.sensors.Empty\x1a\x0f.sensors.Pose3D0\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,5 +37,5 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_POSE3D']._serialized_start=45
   _globals['_POSE3D']._serialized_end=129
   _globals['_SLAMSERVICE']._serialized_start=132
-  _globals['_SLAMSERVICE']._serialized_end=414
+  _globals['_SLAMSERVICE']._serialized_end=474
 # @@protoc_insertion_point(module_scope)

@@ -5,7 +5,7 @@
 using namespace mslam;
 
 TEST(TestKDTreeMapNeighbors, query_multiple_neighbors) {
-  KDTreeMap map;
+  KDTreeMap map(0.01F);
 
   PointCloud3 scan;
   scan.emplace_back(0.1F, 0.1F, 0.0F);
@@ -29,13 +29,8 @@ TEST(TestKDTreeMapNeighbors, query_multiple_neighbors) {
 }
 
 TEST(TestKDTreeMapNeighbors, invalid_neighbor_count) {
-  KDTreeMap map;
+  KDTreeMap map(0.01F);
   EXPECT_TRUE(map.getClosestNNeighbors({0.0F, 0.0F, 0.0F}, 0).empty());
-}
-
-TEST(TestKDTreeMapNeighbors, reports_zero_resolution) {
-  KDTreeMap map;
-  EXPECT_FLOAT_EQ(map.getResolution(), 0.0F);
 }
 
 TEST(TestOctreeMapNeighbors, stub_returns_single_neighbor) {
@@ -55,9 +50,4 @@ TEST(TestOctreeMapNeighbors, stub_returns_single_neighbor) {
 TEST(TestOctreeMapNeighbors, invalid_neighbor_count) {
   OctreeMap map(1.0F);
   EXPECT_TRUE(map.getClosestNNeighbors({0.0F, 0.0F, 0.0F}, 0).empty());
-}
-
-TEST(TestOctreeMapNeighbors, reports_voxel_resolution) {
-  OctreeMap map(1.0F);
-  EXPECT_FLOAT_EQ(map.getResolution(), 1.0F);
 }

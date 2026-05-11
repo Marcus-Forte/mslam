@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
   }
 
   /// Add the first scan as a map
-  auto map = std::make_shared<mslam::KDTreeMap>();
+  auto map = std::make_shared<mslam::KDTreeMap>(0.1F);
   map->addScan(scans[0]);
 
   mslam::Registration registration(50, 3, 0.5, logger);

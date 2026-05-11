@@ -72,7 +72,7 @@ void SlamServer::stop() {
   }
 
   stopping_.store(true);
-  scan_cv_.notify_all();
+  map_increment_cv_.notify_all();
   transformed_scan_cv_.notify_all();
   correspondences_cv_.notify_all();
   pose_cv_.notify_all();
@@ -93,11 +93,11 @@ void SlamServer::updateMap(const PointCloud3 &map) {
   map_ = map;
 }
 
-void SlamServer::updateScan(const PointCloud3 &scan) {
+void SlamServer::updateMapIncrement(const PointCloud3 &increment) {
   std::scoped_lock lock(mutex_);
-  scan_ = scan;
-  ++scan_version_;
-  scan_cv_.notify_all();
+  map_increment_ = increment;
+  ++map_increment_version_;
+  map_increment_cv_.notify_all();
 }
 
 void SlamServer::updateTransformedScan(const PointCloud3 &scan) {
@@ -122,29 +122,29 @@ grpc::Status SlamServer::GetMap(grpc::ServerContext *, const sensors::Empty *,
 }
 
 grpc::Status
-SlamServer::GetScan(grpc::ServerContext *context, const sensors::Empty *,
-                    grpc::ServerWriter<sensors::PointCloud3> *writer) {
+SlamServer::GetMapIncrements(grpc::ServerContext *context,
+                             const sensors::Empty *,
+                             grpc::ServerWriter<sensors::PointCloud3> *writer) {
   uint64_t last_version = 0;
   while (!context->IsCancelled() && !stopping_.load()) {
-    ScanSnapshot snapshot;
+    PointCloud3 snapshot;
     {
       std::unique_lock lock(mutex_);
-      scan_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
-        return stopping_.load() || scan_version_ != last_version;
+      map_increment_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+        return stopping_.load() || map_increment_version_ != last_version;
       });
       if (stopping_.load()) {
         break;
       }
-      if (scan_version_ == last_version) {
+      if (map_increment_version_ == last_version) {
         continue;
       }
 
-      snapshot.scan = scan_;
-      snapshot.version = scan_version_;
+      snapshot = map_increment_;
+      last_version = map_increment_version_;
     }
 
-    last_version = snapshot.version;
-    auto response = toGRPC(snapshot.scan);
+    auto response = toGRPC(snapshot);
     if (!writer->Write(response)) {
       break;
     }

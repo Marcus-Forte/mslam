@@ -146,7 +146,3 @@ TEST_F(TestVoxelHashMap, query_multiple_neighbors_invalid_count) {
   const auto neighbors = map_->getClosestNNeighbors({0.0, 0.0, 0.0}, 0);
   EXPECT_TRUE(neighbors.empty());
 }
-
-TEST_F(TestVoxelHashMap, reports_voxel_resolution) {
-  EXPECT_FLOAT_EQ(map_->getResolution(), 0.1F);
-}

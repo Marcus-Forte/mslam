@@ -6,13 +6,20 @@
 namespace mslam {
 class IMap {
 public:
+  /**
+   * @brief A neighbor in the map.
+   *
+   * A neighbor consists of a point in the map and its associated distance
+   * metric (squared distance).
+   */
   using Neighbor = std::pair<Point3, float>;
   /**
    * @brief Add points to the map.
    *
-   * @param points
+   * @param scan Points to be added to the map.
+   * @return PointCloud3 The subset of points that were actually inserted.
    */
-  virtual void addScan(const PointCloud3 &scan) = 0;
+  virtual PointCloud3 addScan(const PointCloud3 &scan) = 0;
 
   /**
    * @brief Return the single closest neighbor to the query point.
@@ -43,7 +50,5 @@ public:
    * @return PointCloud3
    */
   virtual const PointCloud3 &getPointCloudRepresentation() const = 0;
-
-  virtual const float getResolution() const = 0;
 };
 } // namespace mslam

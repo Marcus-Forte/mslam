@@ -8,12 +8,11 @@ class OctreeMap : public IMap {
 public:
   OctreeMap(float voxel_size);
 
-  void addScan(const PointCloud3 &scan) override;
+  PointCloud3 addScan(const PointCloud3 &scan) override;
   Neighbor getClosestNeighbor(const Point3 &query) const override;
   std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
                                              int N) const override;
   const PointCloud3 &getPointCloudRepresentation() const override;
-  const float getResolution() const override;
 
 private:
   mutable pcl::octree::OctreePointCloudSearch<Point3> octree_;

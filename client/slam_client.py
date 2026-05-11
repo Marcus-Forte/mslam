@@ -28,6 +28,7 @@ MAP_POINT_SIZE_SCALE = 0.1
 SCAN_POINT_SIZE_SCALE = 0.2
 CORRESPONDENCE_POINT_SIZE_SCALE = 0.2
 SCAN_COLOR = np.array([0, 255, 0], dtype=np.uint8)
+TRANSFORMED_SCAN_COLOR = np.array([180, 180, 255], dtype=np.uint8)
 CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
 
 
@@ -105,9 +106,12 @@ class SlamViewerClient:
         self._fatal_exception: BaseException | None = None
         self._fatal_exception_lock = threading.Lock()
         self._map_lock = threading.Lock()
+        self._transformed_scan_lock = threading.Lock()
         self._viser: Any = viser
         self._map_points = np.empty((0, 3), dtype=np.float32)
         self._map_colors = np.empty((0, 3), dtype=np.uint8)
+        self._accumulated_scan_points = np.empty((0, 3), dtype=np.float32)
+        self._accumulated_scan_colors = np.empty((0, 3), dtype=np.uint8)
         self._viser_server = viser.ViserServer(port=viser_port)
         self._viser_server.scene.set_background_image(
             np.zeros((1, 1, 3), dtype=np.uint8)
@@ -121,6 +125,13 @@ class SlamViewerClient:
         )
         self._scan_cloud = self._viser_server.scene.add_point_cloud(
             name="/slam/scan",
+            points=np.empty((0, 3), dtype=np.float32),
+            colors=np.empty((0, 3), dtype=np.uint8),
+            point_size=point_size * SCAN_POINT_SIZE_SCALE,
+            point_shape="rounded",
+        )
+        self._accumulated_scan_cloud = self._viser_server.scene.add_point_cloud(
+            name="/slam/accumulated_scans",
             points=np.empty((0, 3), dtype=np.float32),
             colors=np.empty((0, 3), dtype=np.uint8),
             point_size=point_size * SCAN_POINT_SIZE_SCALE,
@@ -144,6 +155,9 @@ class SlamViewerClient:
 
     def run(self) -> None:
         map_thread = threading.Thread(target=self._run_stream_map, daemon=True)
+        map_increment_thread = threading.Thread(
+            target=self._run_stream_map_increments, daemon=True
+        )
         scan_thread = threading.Thread(
             target=self._run_stream_transformed_scan, daemon=True
         )
@@ -152,6 +166,7 @@ class SlamViewerClient:
         )
         pose_thread = threading.Thread(target=self._run_stream_pose, daemon=True)
         map_thread.start()
+        map_increment_thread.start()
         scan_thread.start()
         correspondence_thread.start()
         pose_thread.start()
@@ -206,6 +221,9 @@ class SlamViewerClient:
     def _run_stream_map(self) -> None:
         self._run_stream("map", self._stream_map)
 
+    def _run_stream_map_increments(self) -> None:
+        self._run_stream("map increments", self._stream_map_increments)
+
     def _run_stream_transformed_scan(self) -> None:
         self._run_stream("transformed scan", self._stream_transformed_scan)
 
@@ -222,6 +240,20 @@ class SlamViewerClient:
         with grpc.insecure_channel(self._server_addr) as channel:
             stub = slam_pb2_grpc.SlamServiceStub(channel)
             self._set_map_cloud(stub.GetMap(request))
+
+    def _stream_map_increments(self) -> None:
+        request = slam_pb2.Empty()
+
+        logger.info(
+            "Connecting to SLAM map increments stream at %s",
+            self._server_addr,
+        )
+        with grpc.insecure_channel(self._server_addr) as channel:
+            stub = slam_pb2_grpc.SlamServiceStub(channel)
+            for increment in stub.GetMapIncrements(request):
+                if self._shutdown_event.is_set():
+                    break
+                self._append_map_increment(increment)
 
     def _stream_transformed_scan(self) -> None:
         request = slam_pb2.Empty()
@@ -274,8 +306,8 @@ class SlamViewerClient:
         self._cloud.colors = colors
         logger.info("Rendered initial map snapshot with %d points", len(points))
 
-    def _update_scan_cloud(self, scan_snapshot: lidar_pb2.PointCloud3) -> None:
-        points = to_viser_points(scan_snapshot.points)
+    def _append_map_increment(self, increment: lidar_pb2.PointCloud3) -> None:
+        points = to_viser_points(increment.points)
         colors = to_viser_colors(points)
 
         with self._map_lock:
@@ -284,14 +316,37 @@ class SlamViewerClient:
             map_points = self._map_points
             map_colors = self._map_colors
 
-        self._scan_cloud.points = points
-        self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))
         self._cloud.points = map_points
         self._cloud.colors = map_colors
         logger.info(
-            "Rendered transformed scan with %d points; accumulated map now has %d points",
+            "Appended %d map increment points; map now has %d points",
             len(points),
             len(map_points),
+        )
+
+    def _update_scan_cloud(self, scan_snapshot: lidar_pb2.PointCloud3) -> None:
+        points = to_viser_points(scan_snapshot.points)
+        colors = to_viser_colors(points)
+
+        self._scan_cloud.points = points
+        self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))
+
+        with self._transformed_scan_lock:
+            self._accumulated_scan_points = np.concatenate(
+                (self._accumulated_scan_points, points), axis=0
+            )
+            self._accumulated_scan_colors = np.concatenate(
+                (self._accumulated_scan_colors, colors), axis=0
+            )
+            acc_points = self._accumulated_scan_points
+            acc_colors = self._accumulated_scan_colors
+
+        self._accumulated_scan_cloud.points = acc_points
+        self._accumulated_scan_cloud.colors = acc_colors
+        logger.info(
+            "Rendered transformed scan with %d points; accumulated scans now %d points",
+            len(points),
+            len(acc_points),
         )
 
     def _update_correspondence_cloud(

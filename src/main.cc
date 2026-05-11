@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
     reinterpret_cast<mslam::VoxelHashMap *>(map.get())
         ->setNumAdjacentVoxelSearch(1); /// \todo add configurable?
   } else {
-    map = std::make_shared<mslam::KDTreeMap>();
+    map = std::make_shared<mslam::KDTreeMap>(config.map_parameters.resolution);
   }
 
   mslam::SlamServer slam_server(logger);
@@ -221,17 +221,19 @@ int main(int argc, char **argv) {
       stage_timer.start();
       auto filtered_scan = preprocessor->removePointsNearCenter(scan);
       point_cloud_exporter.addTransformedScan(*filtered_scan->points);
-      map->addScan(*filtered_scan->points);
+      stage_timer.start();
+      auto map_increment = map->addScan(*filtered_scan->points);
       const auto map_update_us = stage_timer.stop();
       init_scan_count++;
-      slam_server.updateScan(*filtered_scan->points);
+
       slam_server.updateTransformedScan(*filtered_scan->points);
+      slam_server.updateMapIncrement(map_increment);
       slam_server.updateMap(map->getPointCloudRepresentation());
       logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
                   init_scan_count, g_init_scans,
                   map->getPointCloudRepresentation().size());
       logger->log(ILog::Level::INFO,
-                  "Init timing. Map update: {} us. Total: {} us", map_update_us,
+                  "Init timing. addScan: {} us. Total: {} us", map_update_us,
                   scan_timer.stop());
       continue;
     }
@@ -267,7 +269,7 @@ int main(int argc, char **argv) {
 
       stage_timer.start();
       slam_server.updateCorrespondences(toPointCloud3(correspondences));
-      slam_server.updateScan(*filtered_scan->points);
+
       slam_server.updatePose(slam.getPose());
 
       transformCloud(slam.getTransform(), *filtered_scan->points);
@@ -275,18 +277,22 @@ int main(int argc, char **argv) {
 
       point_cloud_exporter.addTransformedScan(*filtered_scan->points);
 
-      map->addScan(*filtered_scan->points);
+      stage_timer.start();
+      auto map_increment = map->addScan(*filtered_scan->points);
+      const auto add_scan_us = stage_timer.stop();
 
       stage_timer.start();
       slam_server.updateTransformedScan(*filtered_scan->points);
+      slam_server.updateMapIncrement(map_increment);
       const auto transformed_scan_publish_us = stage_timer.stop();
 
-      logger->log(ILog::Level::INFO,
-                  "Scan timing. Preprocess: {} us. Registration: {} us. "
-                  "Transform: {} us. Publish transformed scan: {} us. "
-                  "Total: {} us",
-                  preprocessor_us, registration_us, transform_us,
-                  transformed_scan_publish_us, scan_timer.stop());
+      logger->log(
+          ILog::Level::INFO,
+          "Scan timing. Preprocess: {} us. Registration: {} us. "
+          "Transform: {} us. addScan: {} us. Publish transformed scan: {} us. "
+          "Total: {} us",
+          preprocessor_us, registration_us, transform_us, add_scan_us,
+          transformed_scan_publish_us, scan_timer.stop());
     }
   }
 

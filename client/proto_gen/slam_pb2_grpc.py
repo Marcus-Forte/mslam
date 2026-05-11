@@ -40,6 +40,11 @@ class SlamServiceStub(object):
                 request_serializer=slam__pb2.Empty.SerializeToString,
                 response_deserializer=lidar__pb2.PointCloud3.FromString,
                 _registered_method=True)
+        self.GetMapIncrements = channel.unary_stream(
+                '/sensors.SlamService/GetMapIncrements',
+                request_serializer=slam__pb2.Empty.SerializeToString,
+                response_deserializer=lidar__pb2.PointCloud3.FromString,
+                _registered_method=True)
         self.GetScan = channel.unary_stream(
                 '/sensors.SlamService/GetScan',
                 request_serializer=slam__pb2.Empty.SerializeToString,
@@ -66,6 +71,12 @@ class SlamServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def GetMap(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetMapIncrements(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -100,6 +111,11 @@ def add_SlamServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GetMap': grpc.unary_unary_rpc_method_handler(
                     servicer.GetMap,
+                    request_deserializer=slam__pb2.Empty.FromString,
+                    response_serializer=lidar__pb2.PointCloud3.SerializeToString,
+            ),
+            'GetMapIncrements': grpc.unary_stream_rpc_method_handler(
+                    servicer.GetMapIncrements,
                     request_deserializer=slam__pb2.Empty.FromString,
                     response_serializer=lidar__pb2.PointCloud3.SerializeToString,
             ),
@@ -149,6 +165,33 @@ class SlamService(object):
             request,
             target,
             '/sensors.SlamService/GetMap',
+            slam__pb2.Empty.SerializeToString,
+            lidar__pb2.PointCloud3.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetMapIncrements(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/sensors.SlamService/GetMapIncrements',
             slam__pb2.Empty.SerializeToString,
             lidar__pb2.PointCloud3.FromString,
             options,

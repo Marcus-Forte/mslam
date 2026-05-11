@@ -10,12 +10,13 @@ OctreeMap::OctreeMap(float voxel_size)
   map_centers_rep = pcl::make_shared<PointCloudT>();
 }
 
-void OctreeMap::addScan(const PointCloud3 &scan) {
+PointCloud3 OctreeMap::addScan(const PointCloud3 &scan) {
   *map_rep_ += scan;
   /// \todo octree supports adding points at a time, but how to get the right
   /// indices from neighbor search?
   octree_.setInputCloud(map_rep_);
   octree_.addPointsFromInputCloud();
+  return scan;
 }
 
 /// \todo If query is 3x beyond points, how to indicate to caller?
@@ -41,7 +42,5 @@ const PointCloud3 &OctreeMap::getPointCloudRepresentation() const {
   octree_.getOccupiedVoxelCenters(map_centers_rep->points);
   return *map_centers_rep;
 }
-
-const float OctreeMap::getResolution() const { return voxel_size_; }
 
 } // namespace mslam

@@ -8,7 +8,9 @@ namespace {
 
 class StaticMap final : public mslam::IMap {
 public:
-  void addScan(const mslam::PointCloud3 & /*scan*/) override {}
+  mslam::PointCloud3 addScan(const mslam::PointCloud3 &scan) override {
+    return scan;
+  }
 
   Neighbor getClosestNeighbor(const mslam::Point3 &query) const override {
     return {query, 0.0F};
@@ -22,8 +24,6 @@ public:
   const mslam::PointCloud3 &getPointCloudRepresentation() const override {
     return points_;
   }
-
-  const float getResolution() const override { return 0.0F; }
 
 private:
   mslam::PointCloud3 points_;

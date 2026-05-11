@@ -2,7 +2,6 @@
 #include "pcl/memory.h"
 #include "pcl/point_cloud.h"
 #include "pcl/types.h"
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree.h>
 #include <vector>
 
@@ -10,19 +9,20 @@ using PointCloudT = pcl::PointCloud<pcl::PointXYZ>;
 
 namespace mslam {
 
-KDTreeMap::KDTreeMap() { map_rep_ = pcl::make_shared<PointCloudT>(); }
+KDTreeMap::KDTreeMap(float resolution)
+    : voxel_map_(resolution, 1), map_rep_(pcl::make_shared<PointCloudT>()) {}
 
-void KDTreeMap::addScan(const PointCloud3 &pointcloud) {
-  *map_rep_ += pointcloud;
+PointCloud3 KDTreeMap::addScan(const PointCloud3 &pointcloud) {
+  auto added = voxel_map_.addScan(pointcloud);
 
+  *map_rep_ += added;
   kdtree_.setInputCloud(map_rep_);
+  return added;
 }
 
 const PointCloud3 &KDTreeMap::getPointCloudRepresentation() const {
   return *map_rep_;
 }
-
-const float KDTreeMap::getResolution() const { return 0.0F; }
 
 IMap::Neighbor KDTreeMap::getClosestNeighbor(const Point3 &query) const {
   pcl::Indices index(1);

@@ -1,22 +1,23 @@
 #pragma once
 
 #include "map/IMap.hh"
+#include "map/VoxelHashMap.hh"
 #include <pcl/point_cloud.h>
 #include <pcl/search/kdtree.h>
 
 namespace mslam {
 class KDTreeMap : public IMap {
 public:
-  KDTreeMap();
+  explicit KDTreeMap(float resolution);
 
-  void addScan(const PointCloud3 &points) override;
+  PointCloud3 addScan(const PointCloud3 &points) override;
   const PointCloud3 &getPointCloudRepresentation() const override;
-  const float getResolution() const override;
   Neighbor getClosestNeighbor(const Point3 &query) const override;
   std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
                                              int N) const override;
 
 private:
+  VoxelHashMap voxel_map_;
   pcl::search::KdTree<pcl::PointXYZ> kdtree_;
   PointCloud3::Ptr map_rep_;
 };

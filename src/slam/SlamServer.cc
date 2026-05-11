@@ -83,28 +83,28 @@ void SlamServer::stop() {
 }
 
 void SlamServer::updatePose(const Pose3D &pose) {
-  std::scoped_lock lock(mutex_);
+  std::scoped_lock lock(pose_mutex_);
   pose_ = pose;
   ++pose_version_;
   pose_cv_.notify_all();
 }
 
 void SlamServer::updateMapIncrement(const PointCloud3 &increment) {
-  std::scoped_lock lock(mutex_);
+  std::scoped_lock lock(map_increment_mutex_);
   map_increment_ = increment;
   ++map_increment_version_;
   map_increment_cv_.notify_all();
 }
 
 void SlamServer::updateTransformedScan(const PointCloud3 &scan) {
-  std::scoped_lock lock(mutex_);
+  std::scoped_lock lock(transformed_scan_mutex_);
   transformed_scan_ = scan;
   ++transformed_scan_version_;
   transformed_scan_cv_.notify_all();
 }
 
 void SlamServer::updateCorrespondences(const PointCloud3 &correspondences) {
-  std::scoped_lock lock(mutex_);
+  std::scoped_lock lock(correspondences_mutex_);
   correspondences_ = correspondences;
   ++correspondences_version_;
   correspondences_cv_.notify_all();
@@ -124,7 +124,7 @@ SlamServer::GetMapIncrements(grpc::ServerContext *context,
   while (!context->IsCancelled() && !stopping_.load()) {
     PointCloud3 snapshot;
     {
-      std::unique_lock lock(mutex_);
+      std::unique_lock lock(map_increment_mutex_);
       map_increment_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
         return stopping_.load() || map_increment_version_ != last_version;
       });
@@ -155,7 +155,7 @@ grpc::Status SlamServer::GetTransformedScan(
   while (!context->IsCancelled() && !stopping_.load()) {
     TransformedScanSnapshot snapshot;
     {
-      std::unique_lock lock(mutex_);
+      std::unique_lock lock(transformed_scan_mutex_);
       transformed_scan_cv_.wait_for(
           lock, std::chrono::milliseconds(100), [&]() {
             return stopping_.load() ||
@@ -189,7 +189,7 @@ grpc::Status SlamServer::GetCorrespondences(
   while (!context->IsCancelled() && !stopping_.load()) {
     CorrespondenceSnapshot snapshot;
     {
-      std::unique_lock lock(mutex_);
+      std::unique_lock lock(correspondences_mutex_);
       correspondences_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
         return stopping_.load() || correspondences_version_ != last_version;
       });
@@ -221,7 +221,7 @@ grpc::Status SlamServer::GetPose(grpc::ServerContext *context,
   while (!context->IsCancelled() && !stopping_.load()) {
     PoseSnapshot snapshot;
     {
-      std::unique_lock lock(mutex_);
+      std::unique_lock lock(pose_mutex_);
       pose_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
         return stopping_.load() || pose_version_ != last_version;
       });

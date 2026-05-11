@@ -55,7 +55,11 @@ private:
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
   std::atomic<bool> stopping_{false};
-  mutable std::mutex mutex_;
+
+  mutable std::mutex map_increment_mutex_;
+  mutable std::mutex transformed_scan_mutex_;
+  mutable std::mutex correspondences_mutex_;
+  mutable std::mutex pose_mutex_;
 
   mutable std::condition_variable map_increment_cv_;
   mutable std::condition_variable transformed_scan_cv_;

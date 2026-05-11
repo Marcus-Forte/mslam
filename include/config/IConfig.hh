@@ -10,6 +10,7 @@ namespace mslam {
 enum class MapType { KdTree, Voxel };
 enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
+enum class DeskewMode { Off, ConstantVelocity, Imu };
 
 inline std::string toString(ILog::Level level) {
   switch (level) {
@@ -68,6 +69,9 @@ struct PreProcessor {
   float voxel_size = 0.1;              // input scan voxel downsampling
   float min_distance_to_center = 0.0F; // remove points closer than this
   DownsampleFilter downsample_filter = DownsampleFilter::VoxelGrid;
+  unsigned int points_per_second =
+      0; // lidar scan rate (pts/s), used for deskewing
+  DeskewMode deskew_mode = DeskewMode::Off;
 };
 
 /**

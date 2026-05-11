@@ -24,21 +24,19 @@ DEFAULT_SERVER_ADDR = "127.0.0.1:50052"
 DEFAULT_VISER_PORT = 8080
 DEFAULT_POINT_SIZE = 0.03
 DEFAULT_MAIN_LOOP_INTERVAL_SEC = 0.1
-MAP_POINT_SIZE_SCALE = 0.1
+MAP_POINT_SIZE_SCALE = 0.5
 SCAN_POINT_SIZE_SCALE = 0.2
 CORRESPONDENCE_POINT_SIZE_SCALE = 0.2
+MAX_ACCUMULATED_SCAN_POINTS = 500_000
 SCAN_COLOR = np.array([0, 255, 0], dtype=np.uint8)
 TRANSFORMED_SCAN_COLOR = np.array([180, 180, 255], dtype=np.uint8)
 CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
 
 
 def to_viser_points(points: Sequence[lidar_pb2.Point3]) -> np.ndarray:
-    arr = np.empty((len(points), 3), dtype=np.float32)
-    for i, point in enumerate(points):
-        arr[i, 0] = point.x
-        arr[i, 1] = point.y
-        arr[i, 2] = point.z
-    return arr
+    if not points:
+        return np.empty((0, 3), dtype=np.float32)
+    return np.array([(p.x, p.y, p.z) for p in points], dtype=np.float32)
 
 
 def to_viser_colors(points: np.ndarray) -> np.ndarray:
@@ -108,10 +106,11 @@ class SlamViewerClient:
         self._map_lock = threading.Lock()
         self._transformed_scan_lock = threading.Lock()
         self._viser: Any = viser
-        self._map_points = np.empty((0, 3), dtype=np.float32)
-        self._map_colors = np.empty((0, 3), dtype=np.uint8)
-        self._accumulated_scan_points = np.empty((0, 3), dtype=np.float32)
-        self._accumulated_scan_colors = np.empty((0, 3), dtype=np.uint8)
+        self._map_point_chunks: list[np.ndarray] = []
+        self._map_color_chunks: list[np.ndarray] = []
+        self._accumulated_scan_chunks: list[np.ndarray] = []
+        self._accumulated_scan_color_chunks: list[np.ndarray] = []
+        self._accumulated_scan_count = 0
         self._viser_server = viser.ViserServer(port=viser_port)
         self._viser_server.scene.set_background_image(
             np.zeros((1, 1, 3), dtype=np.uint8)
@@ -299,8 +298,8 @@ class SlamViewerClient:
         colors = to_viser_colors(points)
 
         with self._map_lock:
-            self._map_points = points
-            self._map_colors = colors
+            self._map_point_chunks = [points]
+            self._map_color_chunks = [colors]
 
         self._cloud.points = points
         self._cloud.colors = colors
@@ -311,10 +310,10 @@ class SlamViewerClient:
         colors = to_viser_colors(points)
 
         with self._map_lock:
-            self._map_points = np.concatenate((self._map_points, points), axis=0)
-            self._map_colors = np.concatenate((self._map_colors, colors), axis=0)
-            map_points = self._map_points
-            map_colors = self._map_colors
+            self._map_point_chunks.append(points)
+            self._map_color_chunks.append(colors)
+            map_points = np.concatenate(self._map_point_chunks, axis=0)
+            map_colors = np.concatenate(self._map_color_chunks, axis=0)
 
         self._cloud.points = map_points
         self._cloud.colors = map_colors
@@ -332,14 +331,18 @@ class SlamViewerClient:
         self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))
 
         with self._transformed_scan_lock:
-            self._accumulated_scan_points = np.concatenate(
-                (self._accumulated_scan_points, points), axis=0
-            )
-            self._accumulated_scan_colors = np.concatenate(
-                (self._accumulated_scan_colors, colors), axis=0
-            )
-            acc_points = self._accumulated_scan_points
-            acc_colors = self._accumulated_scan_colors
+            self._accumulated_scan_chunks.append(points)
+            self._accumulated_scan_color_chunks.append(colors)
+            self._accumulated_scan_count += len(points)
+
+            # Trim oldest chunks when over budget
+            while self._accumulated_scan_count > MAX_ACCUMULATED_SCAN_POINTS and len(self._accumulated_scan_chunks) > 1:
+                removed = self._accumulated_scan_chunks.pop(0)
+                self._accumulated_scan_color_chunks.pop(0)
+                self._accumulated_scan_count -= len(removed)
+
+            acc_points = np.concatenate(self._accumulated_scan_chunks, axis=0)
+            acc_colors = np.concatenate(self._accumulated_scan_color_chunks, axis=0)
 
         self._accumulated_scan_cloud.points = acc_points
         self._accumulated_scan_cloud.colors = acc_colors

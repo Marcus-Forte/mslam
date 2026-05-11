@@ -161,6 +161,10 @@ int main(int argc, char **argv) {
   Timer scan_timer;
   Timer stage_timer;
 
+  Eigen::Affine3d last_pose = Eigen::Affine3d::Identity();
+  Eigen::Affine3d last_delta = Eigen::Affine3d::Identity();
+  Eigen::Affine3d pre_imu_pose = Eigen::Affine3d::Identity();
+
   while (!g_should_stop.load()) {
 
     const auto scani = lidar_sensor->getScan();
@@ -193,6 +197,7 @@ int main(int argc, char **argv) {
 
     if (config.with_imu) {
       static uint64_t last_imu_time = 0;
+      pre_imu_pose = slam.getTransform();
 
       while (true) {
         const auto imudata = imu_sensor->getImuData();
@@ -210,6 +215,7 @@ int main(int argc, char **argv) {
         slam.Predict(*imudata);
         const auto imu_predict_us = stage_timer.stop();
         slam_server.updatePose(slam.getPose());
+
         logger->log(ILog::Level::DEBUG, "IMU predict took: {} us",
                     imu_predict_us);
       }
@@ -239,6 +245,28 @@ int main(int argc, char **argv) {
                   "Processing Lidar scan with {} points @ {}",
                   scan.points->size(), scan.timestamp);
 
+      // Deskew the raw scan before any filtering/downsampling,
+      // since point index maps to acquisition time.
+      if (config.preprocessor.deskew_mode != mslam::DeskewMode::Off) {
+        stage_timer.start();
+        std::shared_ptr<msensor::Scan3D> deskewed;
+        if (config.preprocessor.deskew_mode == mslam::DeskewMode::Imu &&
+            config.with_imu) {
+          const Eigen::Affine3d imu_delta =
+              pre_imu_pose.inverse() * slam.getTransform();
+          deskewed = preprocessor->deskewImu(scan, imu_delta);
+        } else {
+          deskewed = preprocessor->deskew(scan, last_delta);
+        }
+        const auto deskew_us = stage_timer.stop();
+        logger->log(ILog::Level::DEBUG, "Deskew took: {} us (mode: {})",
+                    deskew_us,
+                    config.preprocessor.deskew_mode == mslam::DeskewMode::Imu
+                        ? "imu"
+                        : "constant_velocity");
+        scan = *deskewed;
+      }
+
       stage_timer.start();
       auto filtered_scan = preprocessor->removePointsNearCenter(scan);
       const auto range_filter_us = stage_timer.stop();
@@ -262,6 +290,11 @@ int main(int argc, char **argv) {
       stage_timer.start();
       slam.Update(*filtered_scan);
       const auto registration_us = stage_timer.stop();
+
+      // Update last_delta for next frame's deskew
+      const Eigen::Affine3d new_pose = slam.getTransform();
+      last_delta = last_pose.inverse() * new_pose;
+      last_pose = new_pose;
 
       const auto &correspondences = slam.getLastMapCorrespondences();
 

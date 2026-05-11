@@ -20,7 +20,7 @@ include(cmake/code_format.cmake)
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
-link_libraries(ILidar IImu msensor::timing msensor)
+link_libraries(msensor::msensor)
 
 add_subdirectory(src/map)
 add_subdirectory(src/config)
@@ -28,7 +28,7 @@ add_subdirectory(src/slam)
 
 add_executable(mslam
 src/main.cc)
-target_link_libraries(mslam maps slam mslam::config sensors_server)
+target_link_libraries(mslam maps slam mslam::config)
 
 
 add_executable(register_scans

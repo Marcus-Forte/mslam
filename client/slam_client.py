@@ -1,13 +1,19 @@
 import argparse
 import logging
+import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from typing import Sequence
 
 import grpc
 import numpy as np
+
+PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
+if str(PROTO_GEN_DIR) not in sys.path:
+    sys.path.insert(0, str(PROTO_GEN_DIR))
 
 from proto_gen import lidar_pb2, slam_pb2, slam_pb2_grpc
 

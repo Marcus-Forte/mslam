@@ -1,6 +1,6 @@
 ---
 description: Coding guidelines and best practices for the mslam project
-applyTo: '*.cs|*.ts|*.js|*.py'
+applyTo: '*.cs|*.ts|*.js|*.py|*.cc|*.h'
 ---
 
 # Coding Guidelines

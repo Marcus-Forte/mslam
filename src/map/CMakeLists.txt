@@ -5,4 +5,4 @@ add_library(maps
   Voxel.cc
 )
 target_include_directories(maps PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(maps pcl_filters)
+target_link_libraries(maps PUBLIC tsl::robin_map)

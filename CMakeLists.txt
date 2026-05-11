@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 find_package(PCL REQUIRED COMPONENTS kdtree search filters io)
 find_package(Eigen3 REQUIRED)
 find_package(jsoncpp REQUIRED)
+
 link_libraries(Eigen3::Eigen)
 
 # PCL injects arch-specific flags (e.g. -march=native, -mavx2) via
@@ -17,6 +18,7 @@ add_compile_options("-march=native")
 include(cmake/findGRPC.cmake)
 include(cmake/code_format.cmake)
 
+add_subdirectory(third_party/robin-map)
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)

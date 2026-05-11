@@ -40,9 +40,8 @@ PointCloud3 VoxelHashMap::addScan(const PointCloud3 &scan) {
 
     const auto voxel = PointToVoxel(point, inverse_voxel_size_);
 
-    auto [it, inserted] = map_.try_emplace(voxel);
-    auto &bucket = it->second;
-    if (inserted) {
+    auto &bucket = map_[voxel];
+    if (bucket.points.empty()) {
       bucket.points.reserve(max_points_per_voxel_);
     }
     if (bucket.points.size() < max_points_per_voxel_) {

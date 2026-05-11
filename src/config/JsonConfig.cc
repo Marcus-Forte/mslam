@@ -7,6 +7,9 @@ namespace mslam {
 
 namespace {
 ILog::Level parseLogLevel(const std::string &log_level) {
+  if (log_level == "trace") {
+    return ILog::Level::TRACE;
+  }
   if (log_level == "debug") {
     return ILog::Level::DEBUG;
   }

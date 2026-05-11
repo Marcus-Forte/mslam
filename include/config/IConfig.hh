@@ -13,6 +13,8 @@ enum class DownsampleFilter { VoxelGrid, VoxelHash };
 
 inline std::string toString(ILog::Level level) {
   switch (level) {
+  case ILog::Level::TRACE:
+    return "TRACE";
   case ILog::Level::DEBUG:
     return "DEBUG";
   case ILog::Level::INFO:

@@ -3,6 +3,7 @@
 #include "Voxel.hh"
 #include "map/IMap.hh"
 #include <Eigen/Dense>
+#include <tsl/robin_map.h>
 
 namespace mslam {
 
@@ -25,7 +26,8 @@ private:
   int adjacent_voxels_;
   std::vector<Voxel3> voxel_shifts_;
 
-  std::unordered_map<Voxel3, PointCloud3> map_;
+  // tsl::robin_map is faster than std::unordered_map.
+  tsl::robin_map<Voxel3, PointCloud3> map_;
   PointCloud3 map_rep_;
 };
 

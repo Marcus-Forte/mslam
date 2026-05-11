@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
     map = std::make_shared<mslam::KDTreeMap>(config.map_parameters.resolution);
   }
 
-  mslam::SlamServer slam_server(logger);
+  mslam::SlamServer slam_server(logger, map);
   slam_server.start();
 
   // Create sensor readers.
@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
 
   auto preprocessor =
       std::make_shared<mslam::Preprocessor>(config.preprocessor);
-  logger->log(ILog::Level::INFO, "Using downsample filter: {}",
+  logger->log(ILog::Level::DEBUG, "Using downsample filter: {}",
               mslam::toString(config.preprocessor.downsample_filter));
   mslam::Slam slam(logger, config.parameters, map);
   slam_server.updatePose(slam.getPose());
@@ -199,20 +199,18 @@ int main(int argc, char **argv) {
         if (!imudata.has_value()) {
           break;
         }
-        if (last_imu_time != 0) {
-          logger->log(ILog::Level::INFO, "IMU delta: {} ms",
-                      (imudata->timestamp - last_imu_time) * 1e-6);
-        }
-        last_imu_time = imudata->timestamp;
 
-        logger->log(ILog::Level::INFO, "Processing IMU with @ {}",
-                    imudata->timestamp);
+        logger->log(ILog::Level::INFO, "Processing IMU @ {}, delta {} ms",
+                    imudata->timestamp,
+                    (imudata->timestamp - last_imu_time) * 1e-6);
+
+        last_imu_time = imudata->timestamp;
 
         stage_timer.start();
         slam.Predict(*imudata);
         const auto imu_predict_us = stage_timer.stop();
         slam_server.updatePose(slam.getPose());
-        logger->log(ILog::Level::INFO, "IMU predict took: {} us",
+        logger->log(ILog::Level::DEBUG, "IMU predict took: {} us",
                     imu_predict_us);
       }
     }
@@ -228,7 +226,6 @@ int main(int argc, char **argv) {
 
       slam_server.updateTransformedScan(*filtered_scan->points);
       slam_server.updateMapIncrement(map_increment);
-      slam_server.updateMap(map->getPointCloudRepresentation());
       logger->log(ILog::Level::INFO, "Init scan {}/{}. Map points: {}",
                   init_scan_count, g_init_scans,
                   map->getPointCloudRepresentation().size());
@@ -238,14 +235,15 @@ int main(int argc, char **argv) {
       continue;
     }
     if (config.with_lidar) {
-      logger->log(ILog::Level::INFO, "Processing scan with {} points @ {}",
+      logger->log(ILog::Level::INFO,
+                  "Processing Lidar scan with {} points @ {}",
                   scan.points->size(), scan.timestamp);
 
       stage_timer.start();
       auto filtered_scan = preprocessor->removePointsNearCenter(scan);
       const auto range_filter_us = stage_timer.stop();
 
-      logger->log(ILog::Level::INFO,
+      logger->log(ILog::Level::DEBUG,
                   "Removed near-center points: {} -> {} points",
                   scan.points->size(), filtered_scan->points->size());
 
@@ -254,11 +252,11 @@ int main(int argc, char **argv) {
       const auto downsample_us = stage_timer.stop();
       const auto preprocessor_us = range_filter_us + downsample_us;
 
-      logger->log(ILog::Level::INFO,
+      logger->log(ILog::Level::DEBUG,
                   "Preprocess benchmark. Range filter: {} us. Downsample: {} "
                   "us",
                   range_filter_us, downsample_us);
-      logger->log(ILog::Level::INFO, "Downsampled scan: {} -> {} points",
+      logger->log(ILog::Level::DEBUG, "Downsampled scan: {} -> {} points",
                   scan.points->size(), filtered_scan->points->size());
 
       stage_timer.start();
@@ -288,7 +286,7 @@ int main(int argc, char **argv) {
 
       logger->log(
           ILog::Level::INFO,
-          "Scan timing. Preprocess: {} us. Registration: {} us. "
+          "Slam timing. Preprocess: {} us. Registration: {} us. "
           "Transform: {} us. addScan: {} us. Publish transformed scan: {} us. "
           "Total: {} us",
           preprocessor_us, registration_us, transform_us, add_scan_us,

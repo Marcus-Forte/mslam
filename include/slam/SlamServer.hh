@@ -3,6 +3,7 @@
 #include "ILog.hh"
 #include "common/Points.hh"
 #include "common/Pose.hh"
+#include "map/IMap.hh"
 #include "slam.grpc.pb.h"
 #include <atomic>
 #include <condition_variable>
@@ -15,7 +16,8 @@ namespace mslam {
 
 class SlamServer : public sensors::SlamService::Service {
 public:
-  explicit SlamServer(std::shared_ptr<ILog> logger, std::string address = {});
+  explicit SlamServer(std::shared_ptr<ILog> logger, std::shared_ptr<IMap> map,
+                      std::string address = {});
   ~SlamServer();
 
   SlamServer(const SlamServer &) = delete;
@@ -25,7 +27,6 @@ public:
   void stop();
 
   void updatePose(const Pose3D &pose);
-  void updateMap(const PointCloud3 &map);
   void updateMapIncrement(const PointCloud3 &increment);
   void updateTransformedScan(const PointCloud3 &scan);
   void updateCorrespondences(const PointCloud3 &correspondences);
@@ -50,6 +51,7 @@ private:
                        grpc::ServerWriter<sensors::Pose3D> *writer) override;
 
   std::shared_ptr<ILog> logger_;
+  std::shared_ptr<IMap> map_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
   std::atomic<bool> stopping_{false};
@@ -60,7 +62,6 @@ private:
   mutable std::condition_variable correspondences_cv_;
   mutable std::condition_variable pose_cv_;
   Pose3D pose_;
-  PointCloud3 map_;
   PointCloud3 map_increment_;
   PointCloud3 transformed_scan_;
   PointCloud3 correspondences_;

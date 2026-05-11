@@ -35,8 +35,9 @@ struct PoseSnapshot {
 
 namespace mslam {
 
-SlamServer::SlamServer(std::shared_ptr<ILog> logger, std::string address)
-    : logger_(std::move(logger)),
+SlamServer::SlamServer(std::shared_ptr<ILog> logger, std::shared_ptr<IMap> map,
+                       std::string address)
+    : logger_(std::move(logger)), map_(std::move(map)),
       address_(address.empty() ? g_default_slam_server_address : address),
       pose_(Pose3D::Zero()) {}
 
@@ -88,11 +89,6 @@ void SlamServer::updatePose(const Pose3D &pose) {
   pose_cv_.notify_all();
 }
 
-void SlamServer::updateMap(const PointCloud3 &map) {
-  std::scoped_lock lock(mutex_);
-  map_ = map;
-}
-
 void SlamServer::updateMapIncrement(const PointCloud3 &increment) {
   std::scoped_lock lock(mutex_);
   map_increment_ = increment;
@@ -116,8 +112,7 @@ void SlamServer::updateCorrespondences(const PointCloud3 &correspondences) {
 
 grpc::Status SlamServer::GetMap(grpc::ServerContext *, const sensors::Empty *,
                                 sensors::PointCloud3 *response) {
-  std::scoped_lock lock(mutex_);
-  *response = toGRPC(map_);
+  *response = toGRPC(map_->getPointCloudRepresentation());
   return grpc::Status::OK;
 }
 

@@ -3,8 +3,9 @@
 
 namespace {
 void logPose3D(const std::shared_ptr<ILog> &logger, const mslam::Pose3D &pose) {
-  logger->log(ILog::Level::INFO, "{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}",
-              pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]);
+  logger->log(ILog::Level::INFO,
+              "Pose: {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", pose[0],
+              pose[1], pose[2], pose[3], pose[4], pose[5]);
 }
 } // namespace
 namespace mslam {

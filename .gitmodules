@@ -4,3 +4,7 @@
 [submodule "third_party/msensor"]
 	path = third_party/msensor
 	url = https://github.com/Marcus-Forte/msensor.git
+[submodule "third_party/robin-map"]
+	path = third_party/robin-map
+	url = https://github.com/Tessil/robin-map.git
+	branch = v1.4.1

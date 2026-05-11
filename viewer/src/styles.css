@@ -403,16 +403,3 @@ h1 {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
-
-.cloud-opacity-slider {
-  flex: 1;
-  min-width: 0;
-}
-
-.cloud-opacity-value {
-  min-width: 3rem;
-  text-align: right;
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}

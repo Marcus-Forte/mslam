@@ -1,4 +1,5 @@
 #include "slam/RecordingSensorPlayer.hh"
+#include "conversions.hh"
 #include "timing/timing.hh"
 #include <thread>
 
@@ -92,17 +93,7 @@ RecordingSensorPlayer::fromEntryToImu(const sensors::RecordingEntry &entry) {
 
 std::shared_ptr<msensor::Scan3DI>
 RecordingSensorPlayer::fromEntryScan3D(const sensors::RecordingEntry &entry) {
-  auto scan = std::make_shared<msensor::Scan3DI>();
-  for (const auto &pt : entry.scan().points()) {
-    msensor::Point3I point;
-    point.x = pt.x();
-    point.y = pt.y();
-    point.z = pt.z();
-    point.intensity = 0.0f;
-    scan->points->emplace_back(point);
-  }
-  scan->timestamp = entry.scan().timestamp();
-  return scan;
+  return fromProtobuf(entry.scan());
 }
 
 } // namespace mslam

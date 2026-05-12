@@ -24,6 +24,10 @@ add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
 link_libraries(msensor::msensor)
 
+# Keep the full msensor subproject out of the default build, but include the
+# recorder binary so the top-level install target can stage it.
+set_property(TARGET remote_recorder PROPERTY EXCLUDE_FROM_ALL FALSE)
+
 add_subdirectory(src/map)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)
@@ -37,7 +41,6 @@ add_executable(register_scans2d
 src/register_scans2d.cc)
 target_link_libraries(register_scans2d maps slam mslam::config)
 
-# Remote recoder comes from msensor
 install(TARGETS mslam remote_recorder DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 

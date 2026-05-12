@@ -6,7 +6,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from typing import Sequence
 
 import grpc
 import numpy as np
@@ -33,10 +32,17 @@ TRANSFORMED_SCAN_COLOR = np.array([180, 180, 255], dtype=np.uint8)
 CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
 
 
-def to_viser_points(points: Sequence[lidar_pb2.Point3]) -> np.ndarray:
-    if not points:
+def to_viser_points(point_cloud: lidar_pb2.PointCloud3) -> np.ndarray:
+    if len(point_cloud.x) == 0:
         return np.empty((0, 3), dtype=np.float32)
-    return np.array([(p.x, p.y, p.z) for p in points], dtype=np.float32)
+
+    if len(point_cloud.x) != len(point_cloud.y) or len(point_cloud.x) != len(point_cloud.z):
+        raise ValueError("PointCloud3 contains mismatched x/y/z array lengths")
+
+    x = np.asarray(point_cloud.x, dtype=np.float32)
+    y = np.asarray(point_cloud.y, dtype=np.float32)
+    z = np.asarray(point_cloud.z, dtype=np.float32)
+    return np.column_stack((x, y, z))
 
 
 def to_viser_colors(points: np.ndarray) -> np.ndarray:
@@ -294,7 +300,7 @@ class SlamViewerClient:
                 self._update_pose(pose)
 
     def _set_map_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
-        points = to_viser_points(map_snapshot.points)
+        points = to_viser_points(map_snapshot)
         colors = to_viser_colors(points)
 
         with self._map_lock:
@@ -306,7 +312,7 @@ class SlamViewerClient:
         logger.info("Rendered initial map snapshot with %d points", len(points))
 
     def _append_map_increment(self, increment: lidar_pb2.PointCloud3) -> None:
-        points = to_viser_points(increment.points)
+        points = to_viser_points(increment)
         colors = to_viser_colors(points)
 
         with self._map_lock:
@@ -324,7 +330,7 @@ class SlamViewerClient:
         )
 
     def _update_scan_cloud(self, scan_snapshot: lidar_pb2.PointCloud3) -> None:
-        points = to_viser_points(scan_snapshot.points)
+        points = to_viser_points(scan_snapshot)
         colors = to_viser_colors(points)
 
         self._scan_cloud.points = points
@@ -355,7 +361,7 @@ class SlamViewerClient:
     def _update_correspondence_cloud(
         self, correspondences: lidar_pb2.PointCloud3
     ) -> None:
-        points = to_viser_points(correspondences.points)
+        points = to_viser_points(correspondences)
         self._correspondence_cloud.points = points
         self._correspondence_cloud.colors = np.tile(
             CORRESPONDENCE_COLOR, (len(points), 1)

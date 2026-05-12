@@ -1,6 +1,7 @@
 #include "slam/SlamServer.hh"
 
 #include "Conversion.hh"
+#include "slam/Slam.hh"
 
 #include <chrono>
 #include <cstdlib>
@@ -243,6 +244,33 @@ grpc::Status SlamServer::GetPose(grpc::ServerContext *context,
     }
   }
 
+  return grpc::Status::OK;
+}
+
+void SlamServer::setSlam(Slam *slam) { slam_ = slam; }
+
+grpc::Status SlamServer::Stop(grpc::ServerContext *, const sensors::Empty *,
+                              sensors::Empty *) {
+  if (slam_) {
+    slam_->stopProcessing();
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status SlamServer::Start(grpc::ServerContext *, const sensors::Empty *,
+                               sensors::Empty *) {
+  if (slam_) {
+    slam_->startProcessing();
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status SlamServer::Reset(grpc::ServerContext *, const sensors::Empty *,
+                               sensors::Empty *) {
+  if (slam_) {
+    slam_->reset();
+    updatePose(slam_->getPose());
+  }
   return grpc::Status::OK;
 }
 

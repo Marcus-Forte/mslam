@@ -139,6 +139,11 @@ const PointCloud3 &VoxelHashMap::getPointCloudRepresentation() const {
  * for low numbers.
  * @param adjacent_voxels
  */
+void VoxelHashMap::clear() {
+  map_.clear();
+  map_rep_.points.clear();
+}
+
 void VoxelHashMap::setNumAdjacentVoxelSearch(int adjacent_voxels) {
   if (adjacent_voxels_ == adjacent_voxels) {
     return;

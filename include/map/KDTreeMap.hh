@@ -12,6 +12,7 @@ public:
 
   PointCloud3 addScan(const PointCloud3 &points) override;
   const PointCloud3 &getPointCloudRepresentation() const override;
+  void clear() override;
   Neighbor getClosestNeighbor(const Point3 &query) const override;
   std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
                                              int N) const override;

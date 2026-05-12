@@ -53,4 +53,8 @@ std::vector<IMap::Neighbor> KDTreeMap::getClosestNNeighbors(const Point3 &query,
 
   return neighbors;
 }
+void KDTreeMap::clear() {
+  voxel_map_.clear();
+  map_rep_->clear();
+}
 } // namespace mslam

@@ -158,6 +158,38 @@ class SlamViewerClient:
             wxyz=(1.0, 0.0, 0.0, 0.0),
         )
 
+        self._grpc_channel = grpc.insecure_channel(self._server_addr)
+        self._control_stub = slam_pb2_grpc.SlamServiceStub(self._grpc_channel)
+
+        start_button = self._viser_server.gui.add_button("Start")
+        stop_button = self._viser_server.gui.add_button("Stop")
+        reset_button = self._viser_server.gui.add_button("Reset")
+
+        @start_button.on_click
+        def _on_start(_: Any) -> None:
+            try:
+                self._control_stub.Start(slam_pb2.Empty())
+                logger.info("Sent Start command")
+            except grpc.RpcError as exc:
+                logger.error("Start RPC failed: %s", exc)
+
+        @stop_button.on_click
+        def _on_stop(_: Any) -> None:
+            try:
+                self._control_stub.Stop(slam_pb2.Empty())
+                logger.info("Sent Stop command")
+            except grpc.RpcError as exc:
+                logger.error("Stop RPC failed: %s", exc)
+
+        @reset_button.on_click
+        def _on_reset(_: Any) -> None:
+            try:
+                self._control_stub.Reset(slam_pb2.Empty())
+                self._clear_local_clouds()
+                logger.info("Sent Reset command")
+            except grpc.RpcError as exc:
+                logger.error("Reset RPC failed: %s", exc)
+
     def run(self) -> None:
         map_thread = threading.Thread(target=self._run_stream_map, daemon=True)
         map_increment_thread = threading.Thread(
@@ -211,6 +243,32 @@ class SlamViewerClient:
             return
 
         logger.exception("SLAM %s stream crashed", stream_name)
+
+    def _clear_local_clouds(self) -> None:
+        empty_points = np.empty((0, 3), dtype=np.float32)
+        empty_colors = np.empty((0, 3), dtype=np.uint8)
+
+        with self._map_lock:
+            self._map_point_chunks.clear()
+            self._map_color_chunks.clear()
+        self._cloud.points = empty_points
+        self._cloud.colors = empty_colors
+
+        with self._transformed_scan_lock:
+            self._accumulated_scan_chunks.clear()
+            self._accumulated_scan_color_chunks.clear()
+            self._accumulated_scan_count = 0
+        self._accumulated_scan_cloud.points = empty_points
+        self._accumulated_scan_cloud.colors = empty_colors
+
+        self._scan_cloud.points = empty_points
+        self._scan_cloud.colors = empty_colors
+
+        self._correspondence_cloud.points = empty_points
+        self._correspondence_cloud.colors = empty_colors
+
+        self._pose_frame.position = (0.0, 0.0, 0.0)
+        self._pose_frame.wxyz = (1.0, 0.0, 0.0, 0.0)
 
     def _run_stream(
         self,

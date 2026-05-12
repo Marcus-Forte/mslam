@@ -14,6 +14,8 @@
 
 namespace mslam {
 
+class Slam;
+
 class SlamServer : public sensors::SlamService::Service {
 public:
   explicit SlamServer(std::shared_ptr<ILog> logger, std::shared_ptr<IMap> map,
@@ -25,6 +27,8 @@ public:
 
   void start();
   void stop();
+
+  void setSlam(Slam *slam);
 
   void updatePose(const Pose3D &pose);
   void updateMapIncrement(const PointCloud3 &increment);
@@ -50,11 +54,21 @@ private:
   grpc::Status GetPose(grpc::ServerContext *context, const sensors::Empty *,
                        grpc::ServerWriter<sensors::Pose3D> *writer) override;
 
+  grpc::Status Stop(grpc::ServerContext *, const sensors::Empty *,
+                    sensors::Empty *response) override;
+
+  grpc::Status Start(grpc::ServerContext *, const sensors::Empty *,
+                     sensors::Empty *response) override;
+
+  grpc::Status Reset(grpc::ServerContext *, const sensors::Empty *,
+                     sensors::Empty *response) override;
+
   std::shared_ptr<ILog> logger_;
   std::shared_ptr<IMap> map_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
   std::atomic<bool> stopping_{false};
+  Slam *slam_{nullptr};
 
   mutable std::mutex map_increment_mutex_;
   mutable std::mutex transformed_scan_mutex_;

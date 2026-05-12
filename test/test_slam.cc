@@ -25,6 +25,8 @@ public:
     return points_;
   }
 
+  void clear() override { points_.points.clear(); }
+
 private:
   mslam::PointCloud3 points_;
 };
@@ -32,7 +34,7 @@ private:
 TEST(Slam, PredictIntegratesAllAngularAxes) {
   auto logger = std::make_shared<NullLogger>();
   auto map = std::make_shared<StaticMap>();
-  mslam::Slam slam(logger, mslam::SlamParameters{}, map);
+  mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
 
   msensor::IMUData imu{};
   imu.timestamp = 1'000'000'000ULL;

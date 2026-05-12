@@ -45,11 +45,6 @@ class SlamServiceStub(object):
                 request_serializer=slam__pb2.Empty.SerializeToString,
                 response_deserializer=lidar__pb2.PointCloud3.FromString,
                 _registered_method=True)
-        self.GetScan = channel.unary_stream(
-                '/sensors.SlamService/GetScan',
-                request_serializer=slam__pb2.Empty.SerializeToString,
-                response_deserializer=lidar__pb2.PointCloud3.FromString,
-                _registered_method=True)
         self.GetTransformedScan = channel.unary_stream(
                 '/sensors.SlamService/GetTransformedScan',
                 request_serializer=slam__pb2.Empty.SerializeToString,
@@ -65,6 +60,21 @@ class SlamServiceStub(object):
                 request_serializer=slam__pb2.Empty.SerializeToString,
                 response_deserializer=slam__pb2.Pose3D.FromString,
                 _registered_method=True)
+        self.Stop = channel.unary_unary(
+                '/sensors.SlamService/Stop',
+                request_serializer=slam__pb2.Empty.SerializeToString,
+                response_deserializer=slam__pb2.Empty.FromString,
+                _registered_method=True)
+        self.Start = channel.unary_unary(
+                '/sensors.SlamService/Start',
+                request_serializer=slam__pb2.Empty.SerializeToString,
+                response_deserializer=slam__pb2.Empty.FromString,
+                _registered_method=True)
+        self.Reset = channel.unary_unary(
+                '/sensors.SlamService/Reset',
+                request_serializer=slam__pb2.Empty.SerializeToString,
+                response_deserializer=slam__pb2.Empty.FromString,
+                _registered_method=True)
 
 
 class SlamServiceServicer(object):
@@ -77,12 +87,6 @@ class SlamServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetMapIncrements(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetScan(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -106,6 +110,24 @@ class SlamServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Stop(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Start(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Reset(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SlamServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -116,11 +138,6 @@ def add_SlamServiceServicer_to_server(servicer, server):
             ),
             'GetMapIncrements': grpc.unary_stream_rpc_method_handler(
                     servicer.GetMapIncrements,
-                    request_deserializer=slam__pb2.Empty.FromString,
-                    response_serializer=lidar__pb2.PointCloud3.SerializeToString,
-            ),
-            'GetScan': grpc.unary_stream_rpc_method_handler(
-                    servicer.GetScan,
                     request_deserializer=slam__pb2.Empty.FromString,
                     response_serializer=lidar__pb2.PointCloud3.SerializeToString,
             ),
@@ -138,6 +155,21 @@ def add_SlamServiceServicer_to_server(servicer, server):
                     servicer.GetPose,
                     request_deserializer=slam__pb2.Empty.FromString,
                     response_serializer=slam__pb2.Pose3D.SerializeToString,
+            ),
+            'Stop': grpc.unary_unary_rpc_method_handler(
+                    servicer.Stop,
+                    request_deserializer=slam__pb2.Empty.FromString,
+                    response_serializer=slam__pb2.Empty.SerializeToString,
+            ),
+            'Start': grpc.unary_unary_rpc_method_handler(
+                    servicer.Start,
+                    request_deserializer=slam__pb2.Empty.FromString,
+                    response_serializer=slam__pb2.Empty.SerializeToString,
+            ),
+            'Reset': grpc.unary_unary_rpc_method_handler(
+                    servicer.Reset,
+                    request_deserializer=slam__pb2.Empty.FromString,
+                    response_serializer=slam__pb2.Empty.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -192,33 +224,6 @@ class SlamService(object):
             request,
             target,
             '/sensors.SlamService/GetMapIncrements',
-            slam__pb2.Empty.SerializeToString,
-            lidar__pb2.PointCloud3.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetScan(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/sensors.SlamService/GetScan',
             slam__pb2.Empty.SerializeToString,
             lidar__pb2.PointCloud3.FromString,
             options,
@@ -302,6 +307,87 @@ class SlamService(object):
             '/sensors.SlamService/GetPose',
             slam__pb2.Empty.SerializeToString,
             slam__pb2.Pose3D.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Stop(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sensors.SlamService/Stop',
+            slam__pb2.Empty.SerializeToString,
+            slam__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Start(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sensors.SlamService/Start',
+            slam__pb2.Empty.SerializeToString,
+            slam__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Reset(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sensors.SlamService/Reset',
+            slam__pb2.Empty.SerializeToString,
+            slam__pb2.Empty.FromString,
             options,
             channel_credentials,
             insecure,

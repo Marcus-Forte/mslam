@@ -13,6 +13,7 @@ public:
   std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
                                              int N) const override;
   const PointCloud3 &getPointCloudRepresentation() const override;
+  void clear() override;
 
 private:
   mutable pcl::octree::OctreePointCloudSearch<Point3> octree_;

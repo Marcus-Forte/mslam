@@ -50,5 +50,10 @@ public:
    * @return PointCloud3
    */
   virtual const PointCloud3 &getPointCloudRepresentation() const = 0;
+
+  /**
+   * @brief Remove all points from the map.
+   */
+  virtual void clear() = 0;
 };
 } // namespace mslam

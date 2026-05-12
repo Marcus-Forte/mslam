@@ -43,4 +43,10 @@ const PointCloud3 &OctreeMap::getPointCloudRepresentation() const {
   return *map_centers_rep;
 }
 
+void OctreeMap::clear() {
+  octree_.deleteTree();
+  map_rep_->clear();
+  map_centers_rep->clear();
+}
+
 } // namespace mslam

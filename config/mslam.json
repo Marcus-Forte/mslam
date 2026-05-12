@@ -4,11 +4,11 @@
     "camera": false,
     "log_level": "debug", // trace || debug || info || warning || error
     "map_type": "voxel", // kdtree || voxel
-    "remote_scanner": "192.168.178.129:50051",
+    "remote_scanner": "192.168.178.129:50051", // ignored if .pbscan is used
 
     "preprocessor": {
         "voxel_size": 0.1,
-        "min_distance_to_center": 1.0,
+        "min_distance_to_center": 0.5,
         "downsample_filter": "voxel_hash", // voxel_hash || voxel_grid
         "points_per_second": 200000,
         "deskew": "off" // off || constant_velocity || imu

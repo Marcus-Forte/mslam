@@ -1,7 +1,7 @@
 #pragma once
 
-#include "interface/IImu.hh"
-#include "interface/ILidar.hh"
+#include "msensor/interface/IImu.hh"
+#include "msensor/interface/ILidar.hh"
 
 namespace mslam {
 

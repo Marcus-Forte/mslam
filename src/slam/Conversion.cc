@@ -15,7 +15,7 @@ sensors::Pose3D toGRPC(const Pose3D &pose) {
 
 sensors::PointCloud3 toGRPC(const PointCloud3 &map) {
   sensors::PointCloud3 msg;
-  msg.set_timestamp(0);
+  msg.mutable_header()->set_timestamp(0);
 
   auto *x = msg.mutable_x();
   auto *y = msg.mutable_y();

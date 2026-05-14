@@ -22,7 +22,7 @@ TEST(Preprocessor, RemovesPointsCloserThanConfiguredCenterDistance) {
 
   mslam::Preprocessor preprocessor(config);
   msensor::Scan3D input;
-  input.timestamp = 1234;
+  input.header.timestamp = 1234;
   input.points->push_back(makePoint(0.0F, 0.0F, 0.0F));
   input.points->push_back(makePoint(0.5F, 0.0F, 0.0F));
   input.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
@@ -30,7 +30,7 @@ TEST(Preprocessor, RemovesPointsCloserThanConfiguredCenterDistance) {
 
   const auto filtered = preprocessor.removePointsNearCenter(input);
 
-  ASSERT_EQ(filtered->timestamp, input.timestamp);
+  ASSERT_EQ(filtered->header.timestamp, input.header.timestamp);
   ASSERT_EQ(filtered->points->size(), 2U);
   EXPECT_FLOAT_EQ(filtered->points->at(0).x, 1.0F);
   EXPECT_FLOAT_EQ(filtered->points->at(1).z, -1.2F);
@@ -43,14 +43,14 @@ TEST(Preprocessor, DownsampleCanKeepOriginalPointPositions) {
 
   mslam::Preprocessor preprocessor(config);
   msensor::Scan3D input;
-  input.timestamp = 55U;
+  input.header.timestamp = 55U;
   input.points->push_back(makePoint(0.1F, 0.2F, 0.3F));
   input.points->push_back(makePoint(0.8F, 0.7F, 0.6F));
   input.points->push_back(makePoint(1.2F, 1.3F, 1.4F));
 
   const auto filtered = preprocessor.downsample(input);
 
-  ASSERT_EQ(filtered->timestamp, input.timestamp);
+  ASSERT_EQ(filtered->header.timestamp, input.header.timestamp);
   ASSERT_EQ(filtered->points->size(), 2U);
   EXPECT_TRUE(std::any_of(filtered->points->cbegin(), filtered->points->cend(),
                           [](const auto &point) {
@@ -72,7 +72,7 @@ TEST(Preprocessor, DeskewIsIdentityWhenMotionIsIdentity) {
 
   mslam::Preprocessor preprocessor(config);
   msensor::Scan3D scan;
-  scan.timestamp = 0;
+  scan.header.timestamp = 0;
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
   scan.points->push_back(makePoint(0.0F, 1.0F, 0.0F));
   scan.points->push_back(makePoint(0.0F, 0.0F, 1.0F));
@@ -93,7 +93,7 @@ TEST(Preprocessor, DeskewCompensatesPureTranslation) {
 
   mslam::Preprocessor preprocessor(config);
   msensor::Scan3D scan;
-  scan.timestamp = 0;
+  scan.header.timestamp = 0;
   scan.points->push_back(makePoint(0.0F, 0.0F, 0.0F));
   scan.points->push_back(makePoint(0.0F, 0.0F, 0.0F));
 
@@ -119,7 +119,7 @@ TEST(Preprocessor, DeskewCompensatesPureRotation) {
 
   mslam::Preprocessor preprocessor(config);
   msensor::Scan3D scan;
-  scan.timestamp = 0;
+  scan.header.timestamp = 0;
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
 
@@ -146,7 +146,7 @@ TEST(Preprocessor, DeskewThrowsWhenPointsPerSecondIsZero) {
 
   mslam::Preprocessor preprocessor(config);
   msensor::Scan3D scan;
-  scan.timestamp = 0;
+  scan.header.timestamp = 0;
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
 
   const Eigen::Affine3d delta = Eigen::Affine3d::Identity();

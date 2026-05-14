@@ -47,11 +47,11 @@ void Slam::ResetPose() {
 void Slam::Predict(const msensor::IMUData &imuData) {
   static uint64_t last_timestamp = std::numeric_limits<uint64_t>::max();
 
-  const auto delta = (static_cast<double>(imuData.timestamp) -
+  const auto delta = (static_cast<double>(imuData.header.timestamp) -
                       static_cast<double>(last_timestamp)) *
                      1e-9;
 
-  last_timestamp = imuData.timestamp;
+  last_timestamp = imuData.header.timestamp;
 
   if (delta < 0) {
     logger_->log(ILog::Level::WARNING, "IMU Loopback detected.");
@@ -166,7 +166,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
     msensor::Scan3D scan;
     scan.points->reserve(scani->points->size());
-    scan.timestamp = scani->timestamp;
+    scan.header = scani->header;
     for (const auto &pt : *scani->points) {
       scan.points->emplace_back(pt.x, pt.y, pt.z);
     }
@@ -186,11 +186,13 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
           break;
         }
 
-        logger_->log(ILog::Level::INFO, "Processing IMU @ {}, delta {} ms",
-                     imudata->timestamp,
-                     (imudata->timestamp - last_imu_time) * 1e-6);
+        logger_->log(ILog::Level::INFO,
+                     "Processing IMU @ {}, delta {} ms, seq nr {}",
+                     imudata->header.timestamp,
+                     (imudata->header.timestamp - last_imu_time) * 1e-6,
+                     imudata->header.sequence_number);
 
-        last_imu_time = imudata->timestamp;
+        last_imu_time = imudata->header.timestamp;
 
         stage_timer.start();
         Predict(*imudata);
@@ -204,6 +206,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
     if (init_scan_count < g_init_scans) {
       stage_timer.start();
+
       auto filtered_scan = preprocessor_.removePointsNearCenter(scan);
       exporter.addTransformedScan(*filtered_scan->points);
       stage_timer.start();
@@ -223,8 +226,9 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
     }
     if (config_.with_lidar) {
       logger_->log(ILog::Level::INFO,
-                   "Processing Lidar scan with {} points @ {}",
-                   scan.points->size(), scan.timestamp);
+                   "Processing Lidar scan with {} points @ {}, seq nr {}",
+                   scan.points->size(), scan.header.timestamp,
+                   scan.header.sequence_number);
 
       if (config_.preprocessor.deskew_mode != DeskewMode::Off) {
         stage_timer.start();

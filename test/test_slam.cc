@@ -37,13 +37,13 @@ TEST(Slam, PredictIntegratesAllAngularAxes) {
   mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
 
   msensor::IMUData imu{};
-  imu.timestamp = 1'000'000'000ULL;
+  imu.header.timestamp = 1'000'000'000ULL;
   slam.Predict(imu);
 
   imu.gx = 1.5F;
   imu.gy = -0.5F;
   imu.gz = 0.25F;
-  imu.timestamp = 2'000'000'000ULL;
+  imu.header.timestamp = 2'000'000'000ULL;
   slam.Predict(imu);
 
   const auto pose = slam.getPose();

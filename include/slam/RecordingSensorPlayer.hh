@@ -2,9 +2,9 @@
 
 #include "ILog.hh"
 #include "config/IConfig.hh"
-#include "interface/IImu.hh"
-#include "interface/ILidar.hh"
-#include "recorder/scan_player.hh"
+#include "msensor/interface/IImu.hh"
+#include "msensor/interface/ILidar.hh"
+#include "msensor/recorder/scan_player.hh"
 #include <filesystem>
 #include <queue>
 

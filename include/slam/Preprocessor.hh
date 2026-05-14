@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config/IConfig.hh"
-#include "interface/ILidar.hh"
+#include "msensor/interface/ILidar.hh"
 
 #include <Eigen/Dense>
 

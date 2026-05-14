@@ -1,6 +1,6 @@
 #include "slam/RecordingSensorPlayer.hh"
-#include "conversions.hh"
-#include "timing/timing.hh"
+#include "msensor/conversions/conversions.hh"
+#include "msensor/timing/timing.hh"
 #include <thread>
 
 namespace mslam {
@@ -86,9 +86,7 @@ bool RecordingSensorPlayer::fillUntilScanAvailable() {
 
 msensor::IMUData
 RecordingSensorPlayer::fromEntryToImu(const sensors::RecordingEntry &entry) {
-  return {entry.imu().ax(),       entry.imu().ay(), entry.imu().az(),
-          entry.imu().gx(),       entry.imu().gy(), entry.imu().gz(),
-          entry.imu().timestamp()};
+  return fromProtobuf(entry.imu());
 }
 
 std::shared_ptr<msensor::Scan3DI>

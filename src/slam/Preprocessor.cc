@@ -24,7 +24,7 @@ Preprocessor::downsample(const msensor::Scan3D &input) const {
     voxel_map.addScan(*input.points);
 
     auto filtered_scan = std::make_shared<msensor::Scan3D>();
-    filtered_scan->timestamp = input.timestamp;
+    filtered_scan->header.timestamp = input.header.timestamp;
     *filtered_scan->points = voxel_map.getPointCloudRepresentation();
     filtered_scan->points->is_dense = input.points->is_dense;
     return filtered_scan;
@@ -39,14 +39,14 @@ Preprocessor::downsample(const msensor::Scan3D &input) const {
   voxel_grid.setInputCloud(input.points);
   voxel_grid.filter(*filtered_scan->points);
 
-  filtered_scan->timestamp = input.timestamp;
+  filtered_scan->header.timestamp = input.header.timestamp;
   return filtered_scan;
 }
 
 std::shared_ptr<msensor::Scan3D>
 Preprocessor::removePointsNearCenter(const msensor::Scan3D &input) const {
   auto filtered_scan = std::make_shared<msensor::Scan3D>();
-  filtered_scan->timestamp = input.timestamp;
+  filtered_scan->header.timestamp = input.header.timestamp;
 
   const float min_distance_squared =
       config_.min_distance_to_center * config_.min_distance_to_center;
@@ -75,7 +75,7 @@ Preprocessor::deskew(const msensor::Scan3D &scan,
   const std::size_t num_points = scan.points->size();
   if (num_points == 0) {
     auto result = std::make_shared<msensor::Scan3D>();
-    result->timestamp = scan.timestamp;
+    result->header.timestamp = scan.header.timestamp;
     return result;
   }
 
@@ -83,7 +83,7 @@ Preprocessor::deskew(const msensor::Scan3D &scan,
   const auto omega = se3Log(relative_motion);
 
   auto result = std::make_shared<msensor::Scan3D>();
-  result->timestamp = scan.timestamp;
+  result->header.timestamp = scan.header.timestamp;
   result->points->resize(num_points);
   result->points->is_dense = scan.points->is_dense;
 

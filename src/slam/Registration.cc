@@ -1,8 +1,8 @@
 #include "slam/Registration.hh"
-#include "LevenbergMarquardt.hh"
-#include "NumericalCostForwardEuler.hh"
 #include "Timer.hh"
 #include "common/Points.hh"
+#include "moptim/LevenbergMarquardt.h"
+#include "moptim/NumericalCostForwardEuler.h"
 #include "slam/Transform.hh"
 #include <Eigen/Eigenvalues>
 #include <limits>

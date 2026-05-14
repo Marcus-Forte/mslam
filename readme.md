@@ -11,6 +11,24 @@ Check `config/mslam.json` for the current SLAM configuration. The main SLAM bina
 - scan preprocessing parameters (downsampling, deskewing)
 - map resolution
 
+## Docker
+
+Build and run from the repository root:
+
+```bash
+docker build -f docker/Dockerfile -t mslam .
+docker run -it --rm -v ./config/:/config/ mslam mslam -c /config/mslam.json
+```
+
+If you want a custom configuration, mount your JSON file into the container and
+pass that path with `-c`.
+
+For the Python viewer client.
+```bash
+docker build -f docker/DockerfileViewer -t mslam-viewer .
+docker run --rm -it mslam-viewer --server-addr <address>
+```
+
 ## Running playback
 
 Use the main SLAM binary with a recorded `.pbscan` file:

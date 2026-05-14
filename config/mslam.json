@@ -20,7 +20,7 @@
 
     "slam": {
         "optimizer_iterations": 5,
-        "reg_iterations": 3,
+        "reg_iterations": 5,
         "max_correspondence_distance": 0.2
     }
 }

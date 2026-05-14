@@ -185,8 +185,9 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud &scan,
 
     const auto optimization_us = stage_timer.stop();
     logger->log(ILog::Level::DEBUG, "Opt. Took: {} us", optimization_us);
-    logger->log(ILog::Level::DEBUG, "Reg3D Iteration: {}/{}. Total: {} us",
-                i + 1, num_registration_iterations, iteration_timer.stop());
+    logger->log(ILog::Level::DEBUG,
+                "Registration Iteration: {}/{}. Total: {} us", i + 1,
+                num_registration_iterations, iteration_timer.stop());
 
     if (status == moptim::Status::SMALL_DELTA) {
       small_delta_hits++;

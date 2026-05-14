@@ -5,9 +5,9 @@
             "name": "default",
             "displayName": "default",
             "toolchainFile": "/opt/toolchains/native.cmake",
-            "binaryDir": "${workspaceFolder}/build/${presetName}",
+            "binaryDir": "build/${presetName}",
             "generator": "Ninja",
-            "installDir": "${workspaceFolder}/build/${presetName}/install",
+            "installDir": "build/${presetName}/install",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }

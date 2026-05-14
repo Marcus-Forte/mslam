@@ -1,0 +1,9 @@
+FROM astral/uv:python3.14-trixie-slim
+
+COPY ./client /app
+
+WORKDIR /app
+
+RUN uv sync
+
+ENTRYPOINT ["uv", "run", "slam_client.py"]

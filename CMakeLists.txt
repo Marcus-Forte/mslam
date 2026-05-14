@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(mslam)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 find_package(PCL REQUIRED COMPONENTS kdtree search filters io)
 find_package(Eigen3 REQUIRED)
@@ -41,7 +43,23 @@ add_executable(register_scans2d
 src/register_scans2d.cc)
 target_link_libraries(register_scans2d maps slam mslam::config)
 
-install(TARGETS mslam remote_recorder DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(
+	TARGETS mslam remote_recorder
+	DESTINATION ${CMAKE_INSTALL_BINDIR}
+	RUNTIME_DEPENDENCY_SET mslam_runtime_targets
+)
+
+install(
+	RUNTIME_DEPENDENCY_SET mslam_runtime_targets
+	PRE_INCLUDE_REGEXES "."
+	POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+	DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(
+	FILES ${CMAKE_CURRENT_SOURCE_DIR}/config/mslam.json
+	DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
+)
 
 
 ## Testing ##

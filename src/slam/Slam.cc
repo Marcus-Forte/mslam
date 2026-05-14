@@ -34,8 +34,8 @@ std::atomic<bool> Slam::should_stop_{false};
 Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamConfiguration &config,
            const std::shared_ptr<IMap> &map)
     : logger_(logger), config_(config), preprocessor_(config.preprocessor),
-      registration_(config.parameters.opt_iterations,
-                    config.parameters.reg_iterations,
+      registration_(config.parameters.reg_iterations,
+                    config.parameters.opt_iterations,
                     config.parameters.max_correspondence_distance, logger),
       map_(map) {
   ResetPose();

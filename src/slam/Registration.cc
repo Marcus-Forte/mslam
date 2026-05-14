@@ -3,6 +3,7 @@
 #include "common/Points.hh"
 #include "moptim/LevenbergMarquardt.h"
 #include "moptim/NumericalCostForwardEuler.h"
+#include "slam/CorrespondenceFinder.hh"
 #include "slam/Transform.hh"
 #include <Eigen/Eigenvalues>
 #include <limits>
@@ -81,6 +82,62 @@ estimateSurfaceNormal(const IMap &map, const Point &query, int num_neighbors) {
   return estimateSurfaceNormal(neighbors);
 }
 
+void updateMapCorrespondencePoints(const Correspondences &correspondences,
+                                   VectorPoint3d &map_points) {
+  map_points.clear();
+  map_points.reserve(correspondences.size());
+
+  for (const auto &correspondence : correspondences) {
+    const auto &map_point = correspondence.second;
+    map_points.emplace_back(map_point.x, map_point.y, map_point.z);
+  }
+}
+
+template <int InputDim, bool UseNormals>
+uint64_t buildMetricInputs(
+    const IMap &map, const Correspondences &correspondences,
+    std::vector<Eigen::Matrix<double, InputDim, 1>> &metric_inputs,
+    VectorPoint3d &map_points) {
+  metric_inputs.clear();
+  metric_inputs.reserve(correspondences.size());
+  map_points.clear();
+  map_points.reserve(correspondences.size());
+
+  uint64_t normal_estimation_us = 0;
+  [[maybe_unused]] std::unordered_map<MapPointKey,
+                                      std::optional<Eigen::Vector3d>,
+                                      MapPointKeyHash> normal_cache;
+  if constexpr (UseNormals) {
+    normal_cache.reserve(correspondences.size());
+  }
+
+  for (const auto &[scan_point, map_point] : correspondences) {
+    Eigen::Matrix<double, InputDim, 1> metric_input;
+    metric_input.template head<3>() << scan_point.x, scan_point.y, scan_point.z;
+
+    if constexpr (UseNormals) {
+      const auto cache_key = makeMapPointKey(map_point);
+      auto [cache_it, inserted] = normal_cache.try_emplace(cache_key);
+      if (inserted) {
+        Timer normal_timer;
+        normal_timer.start();
+        cache_it->second =
+            estimateSurfaceNormal(map, map_point, g_normalEstimationNeighbors);
+        normal_estimation_us += normal_timer.stop();
+      }
+      if (!cache_it->second.has_value()) {
+        continue;
+      }
+      metric_input.template tail<3>() = *cache_it->second;
+    }
+
+    metric_inputs.push_back(metric_input);
+    map_points.emplace_back(map_point.x, map_point.y, map_point.z);
+  }
+
+  return normal_estimation_us;
+}
+
 template <typename Model, int InputDim, bool UseNormals>
 Pose3D
 align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud &scan,
@@ -90,70 +147,36 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud &scan,
                   const std::shared_ptr<ILog> &logger) {
   std::vector<Eigen::Matrix<double, InputDim, 1>> metric_inputs;
 
-  Eigen::VectorXd x(6);
-  x << pose[0], pose[1], pose[2], pose[3], pose[4], pose[5];
+  Eigen::VectorXd x{{pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]}};
   Eigen::Affine3d transform;
+  CorrespondenceFinder correspondence_finder(logger);
 
   int small_delta_hits = 0;
   Timer iteration_timer;
   Timer stage_timer;
-  [[maybe_unused]] std::unordered_map<MapPointKey,
-                                      std::optional<Eigen::Vector3d>,
-                                      MapPointKeyHash> normal_cache;
-  if constexpr (UseNormals) {
-    normal_cache.reserve(scan.size());
-  }
+
+  PointCloud transformed_scan;
+  transformed_scan.resize(scan.size());
 
   for (int i = 0; i < num_registration_iterations; ++i) {
     iteration_timer.start();
     transform = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
 
-    metric_inputs.clear();
-    last_map_correspondences.clear();
-    metric_inputs.reserve(scan.size());
-    last_map_correspondences.reserve(scan.size());
-
-    uint64_t normal_estimation_us = 0;
-    uint64_t knn_us = 0;
-    Timer knn_timer;
-    stage_timer.start();
-    for (const auto &pt : scan) {
+    for (std::size_t index = 0; index < scan.size(); ++index) {
+      const auto &pt = scan[index];
       const Eigen::Vector3d point_eigen{pt.x, pt.y, pt.z};
-      const Eigen::Vector3d transformed_scan_pt = transform * point_eigen;
-
-      const Point query(transformed_scan_pt.x(), transformed_scan_pt.y(),
-                        transformed_scan_pt.z());
-      knn_timer.start();
-      const auto closest = map.getClosestNeighbor(query);
-      knn_us += knn_timer.stop();
-      if (closest.second >=
-          max_correspondence_distance * max_correspondence_distance) {
-        continue;
-      }
-
-      Eigen::Matrix<double, InputDim, 1> metric_input;
-      metric_input.template head<3>() << pt.x, pt.y, pt.z;
-
-      if constexpr (UseNormals) {
-        const auto cache_key = makeMapPointKey(closest.first);
-        auto [cache_it, inserted] = normal_cache.try_emplace(cache_key);
-        if (inserted) {
-          Timer normal_timer;
-          normal_timer.start();
-          cache_it->second = estimateSurfaceNormal(map, closest.first,
-                                                   g_normalEstimationNeighbors);
-          normal_estimation_us += normal_timer.stop();
-        }
-        if (!cache_it->second.has_value()) {
-          continue;
-        }
-        metric_input.template tail<3>() = *cache_it->second;
-      }
-
-      metric_inputs.push_back(metric_input);
-      last_map_correspondences.emplace_back(closest.first.x, closest.first.y,
-                                            closest.first.z);
+      const Eigen::Vector3d transformed_point = transform * point_eigen;
+      transformed_scan[index].x = transformed_point.x();
+      transformed_scan[index].y = transformed_point.y();
+      transformed_scan[index].z = transformed_point.z();
     }
+    // transformCloud(transform, transformed_scan);
+
+    stage_timer.start();
+    const auto correspondences = correspondence_finder.find(
+        map, scan, transformed_scan, max_correspondence_distance);
+    const auto normal_estimation_us = buildMetricInputs<InputDim, UseNormals>(
+        map, correspondences, metric_inputs, last_map_correspondences);
 
     const auto correspondence_us = stage_timer.stop();
 
@@ -165,10 +188,9 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud &scan,
     }
 
     logger->log(ILog::Level::DEBUG,
-                "Correspondence Search. Correspondences: {} / {}. KNN: {} us. "
-                "Normal Est.: "
+                "Correspondence Search. Correspondences: {} / {}. Normal Est.: "
                 "{} us. Took: {} us",
-                last_map_correspondences.size(), scan.size(), knn_us,
+                last_map_correspondences.size(), scan.size(),
                 normal_estimation_us, correspondence_us);
 
     stage_timer.start();

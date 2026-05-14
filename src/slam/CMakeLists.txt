@@ -1,5 +1,6 @@
 add_library(slam 
 Registration.cc
+CorrespondenceFinder.cc
 Transform.cc
 Preprocessor.cc
 PointCloudExporter.cc

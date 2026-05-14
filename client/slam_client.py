@@ -132,9 +132,7 @@ class SlamViewerClient:
         self._accumulated_scan_color_chunks: list[np.ndarray] = []
         self._accumulated_scan_count = 0
         self._viser_server = viser.ViserServer(port=viser_port)
-        self._viser_server.scene.set_background_image(
-            np.zeros((1, 1, 3), dtype=np.uint8)
-        )
+        self._viser_server.scene.set_background_image(np.zeros((1, 1, 3), dtype=np.uint8))
         self._cloud = self._viser_server.scene.add_point_cloud(
             name="/slam/map",
             points=np.empty((0, 3), dtype=np.float32),
@@ -206,19 +204,13 @@ class SlamViewerClient:
 
     def run(self) -> None:
         map_thread = threading.Thread(target=self._run_stream_map, daemon=True)
-        map_increment_thread = threading.Thread(
-            target=self._run_stream_map_increments, daemon=True
-        )
-        scan_thread = threading.Thread(
-            target=self._run_stream_transformed_scan, daemon=True
-        )
-        correspondence_thread = threading.Thread(
-            target=self._run_stream_correspondences, daemon=True
-        )
+        map_increment_thread = threading.Thread(target=self._run_stream_map_increments, daemon=True)
+        scan_thread = threading.Thread(target=self._run_stream_transformed_scan, daemon=True)
+        correspondence_thread = threading.Thread(target=self._run_stream_correspondences, daemon=True)
         pose_thread = threading.Thread(target=self._run_stream_pose, daemon=True)
         map_thread.start()
         map_increment_thread.start()
-        scan_thread.start()
+        # scan_thread.start()
         correspondence_thread.start()
         pose_thread.start()
 
@@ -233,10 +225,7 @@ class SlamViewerClient:
             return "SLAM viewer stopped unexpectedly."
 
         if isinstance(exc, grpc.RpcError):
-            return (
-                "SLAM stream failed: "
-                f"{exc.code().name} - {exc.details()}"
-            )
+            return f"SLAM stream failed: {exc.code().name} - {exc.details()}"
 
         return f"SLAM stream crashed: {exc}"
 
@@ -436,14 +425,10 @@ class SlamViewerClient:
             len(acc_points),
         )
 
-    def _update_correspondence_cloud(
-        self, correspondences: lidar_pb2.PointCloud3
-    ) -> None:
+    def _update_correspondence_cloud(self, correspondences: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(correspondences)
         self._correspondence_cloud.points = points
-        self._correspondence_cloud.colors = np.tile(
-            CORRESPONDENCE_COLOR, (len(points), 1)
-        )
+        self._correspondence_cloud.colors = np.tile(CORRESPONDENCE_COLOR, (len(points), 1))
         logger.info("Rendered correspondence snapshot with %d points", len(points))
 
     def _update_pose(self, pose: slam_pb2.Pose3D) -> None:

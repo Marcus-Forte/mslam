@@ -2,3 +2,6 @@ build/
 __pycache__/
 .cache/
 .venv/
+
+# ignore *.pbscan JUST at the root of the repo
+/*.pbscan

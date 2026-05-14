@@ -25,19 +25,24 @@ def rainbow_colormap(values: np.ndarray) -> np.ndarray:
     b = np.zeros_like(values)
 
     m = i <= 1
-    r[m] = n[m]; b[m] = 1.0
+    r[m] = n[m]
+    b[m] = 1.0
 
     m = i == 2
-    g[m] = n[m]; b[m] = 1.0
+    g[m] = n[m]
+    b[m] = 1.0
 
     m = i == 3
-    g[m] = 1.0; b[m] = n[m]
+    g[m] = 1.0
+    b[m] = n[m]
 
     m = i == 4
-    r[m] = n[m]; g[m] = 1.0
+    r[m] = n[m]
+    g[m] = 1.0
 
     m = i >= 5
-    r[m] = 1.0; g[m] = n[m]
+    r[m] = 1.0
+    g[m] = n[m]
 
     colors = np.empty((len(values), 3), dtype=np.uint8)
     colors[:, 0] = (r * 255.0).clip(0, 255).astype(np.uint8)

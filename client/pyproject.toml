@@ -1,7 +1,7 @@
 [project]
 name = "mslam_client"
 version = "0.1.0"
-description = "MSLAM client library"
+description = "Mslam client for visualization"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -9,6 +9,10 @@ dependencies = [
     "grpcio-tools==1.78.0",
     "opencv-python>=4.12.0.88",
     "ruff>=0.15.5",
-    "viser>=1.0.27"
+    "trimesh==3.21.7",
+    "viser==1.0.16",
 ]
 
+[tool.ruff]
+line-length = 120
+exclude = ["proto_gen"]

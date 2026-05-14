@@ -1,9 +1,11 @@
 #include "slam/Slam.hh"
 #include "Timer.hh"
+#include "slam/CorrespondenceFinder.hh"
 #include "slam/PointCloudExporter.hh"
 #include "slam/RecordingSensorPlayer.hh"
 #include "slam/SlamServer.hh"
 #include "slam/Transform.hh"
+#include "slam/registration/PointToPlaneRegistration.hh"
 
 #include <csignal>
 #include <thread>
@@ -34,9 +36,10 @@ std::atomic<bool> Slam::should_stop_{false};
 Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamConfiguration &config,
            const std::shared_ptr<IMap> &map)
     : logger_(logger), config_(config), preprocessor_(config.preprocessor),
-      registration_(config.parameters.reg_iterations,
-                    config.parameters.opt_iterations,
-                    config.parameters.max_correspondence_distance, logger),
+      registration_(std::make_unique<PointToPlaneRegistration>(
+          config.parameters.reg_iterations, config.parameters.opt_iterations,
+          config.parameters.max_correspondence_distance, logger,
+          std::make_shared<CorrespondenceFinder>(logger))),
       map_(map) {
   ResetPose();
 }
@@ -78,8 +81,7 @@ void Slam::Predict(const msensor::IMUData &imuData) {
 void Slam::Update(const Scan &lidarData) {
   const auto pose_prior = pose_;
 
-  pose_ = registration_.Align3D(pose_prior, *map_, *lidarData.points,
-                                RegistrationMetric3D::PointToPlane);
+  pose_ = registration_->Align(pose_prior, *map_, *lidarData.points);
   logger_->log(ILog::Level::DEBUG, "Update");
   logPose3D(logger_, pose_);
 }
@@ -88,10 +90,6 @@ mslam::Pose3D Slam::getPose() const { return pose_; }
 
 Eigen::Affine3d Slam::getTransform() const {
   return toAffine(pose_[0], pose_[1], pose_[2], pose_[3], pose_[4], pose_[5]);
-}
-
-const VectorPoint3d &Slam::getLastMapCorrespondences() const {
-  return registration_.getLastMapCorrespondences();
 }
 
 void Slam::startProcessing() {
@@ -274,11 +272,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       last_delta = last_pose.inverse() * new_pose;
       last_pose = new_pose;
 
-      const auto &correspondences = getLastMapCorrespondences();
-
       stage_timer.start();
-      server.updateCorrespondences(toPointCloud3(correspondences));
-
       server.updatePose(getPose());
 
       transformCloud(getTransform(), *filtered_scan->points);

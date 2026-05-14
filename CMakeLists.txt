@@ -39,7 +39,7 @@ src/main.cc)
 target_link_libraries(mslam maps slam mslam::config)
 
 
-add_executable(register_scans2d
+add_executable(register_scans2d EXCLUDE_FROM_ALL
 src/register_scans2d.cc)
 target_link_libraries(register_scans2d maps slam mslam::config)
 

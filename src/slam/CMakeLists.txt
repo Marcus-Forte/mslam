@@ -1,6 +1,8 @@
 add_library(slam 
-Registration.cc
+PointToPointRegistration.cc
+PointToPlaneRegistration.cc
 CorrespondenceFinder.cc
+NormalEstimator.cc
 Transform.cc
 Preprocessor.cc
 PointCloudExporter.cc

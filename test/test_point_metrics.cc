@@ -1,4 +1,4 @@
-#include "../src/slam/PointDistance.hh"
+#include "slam/registration/PointDistance.hh"
 
 #include <Eigen/Dense>
 #include <gtest/gtest.h>

@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
   auto map = std::make_shared<mslam::KDTreeMap>(0.1F);
   map->addScan(scans[0]);
 
-  mslam::Registration registration(50, 3, 0.5, logger);
+  mslam::IRegistration registration(50, 3, 0.5, logger);
 
   mslam::Pose2D pose{0, 0, 0};
 

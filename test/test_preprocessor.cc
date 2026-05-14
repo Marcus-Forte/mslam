@@ -7,8 +7,8 @@
 
 namespace {
 
-msensor::Point3 makePoint(float x, float y, float z) {
-  msensor::Point3 point;
+mslam::Point makePoint(float x, float y, float z) {
+  mslam::Point point;
   point.x = x;
   point.y = y;
   point.z = z;
@@ -21,7 +21,7 @@ TEST(Preprocessor, RemovesPointsCloserThanConfiguredCenterDistance) {
   config.min_distance_to_center = 1.0F;
 
   mslam::Preprocessor preprocessor(config);
-  msensor::Scan3D input;
+  mslam::Scan input;
   input.header.timestamp = 1234;
   input.points->push_back(makePoint(0.0F, 0.0F, 0.0F));
   input.points->push_back(makePoint(0.5F, 0.0F, 0.0F));
@@ -42,7 +42,7 @@ TEST(Preprocessor, DownsampleCanKeepOriginalPointPositions) {
   config.downsample_filter = mslam::DownsampleFilter::VoxelHash;
 
   mslam::Preprocessor preprocessor(config);
-  msensor::Scan3D input;
+  mslam::Scan input;
   input.header.timestamp = 55U;
   input.points->push_back(makePoint(0.1F, 0.2F, 0.3F));
   input.points->push_back(makePoint(0.8F, 0.7F, 0.6F));
@@ -71,7 +71,7 @@ TEST(Preprocessor, DeskewIsIdentityWhenMotionIsIdentity) {
   config.points_per_second = 100000;
 
   mslam::Preprocessor preprocessor(config);
-  msensor::Scan3D scan;
+  mslam::Scan scan;
   scan.header.timestamp = 0;
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
   scan.points->push_back(makePoint(0.0F, 1.0F, 0.0F));
@@ -92,7 +92,7 @@ TEST(Preprocessor, DeskewCompensatesPureTranslation) {
   config.points_per_second = 2; // 2 pts/s => each point 0.5s apart
 
   mslam::Preprocessor preprocessor(config);
-  msensor::Scan3D scan;
+  mslam::Scan scan;
   scan.header.timestamp = 0;
   scan.points->push_back(makePoint(0.0F, 0.0F, 0.0F));
   scan.points->push_back(makePoint(0.0F, 0.0F, 0.0F));
@@ -118,7 +118,7 @@ TEST(Preprocessor, DeskewCompensatesPureRotation) {
   config.points_per_second = 2;
 
   mslam::Preprocessor preprocessor(config);
-  msensor::Scan3D scan;
+  mslam::Scan scan;
   scan.header.timestamp = 0;
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
@@ -145,7 +145,7 @@ TEST(Preprocessor, DeskewThrowsWhenPointsPerSecondIsZero) {
   config.points_per_second = 0;
 
   mslam::Preprocessor preprocessor(config);
-  msensor::Scan3D scan;
+  mslam::Scan scan;
   scan.header.timestamp = 0;
   scan.points->push_back(makePoint(1.0F, 0.0F, 0.0F));
 

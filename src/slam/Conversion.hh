@@ -7,6 +7,6 @@
 namespace mslam {
 
 sensors::Pose3D toGRPC(const Pose3D &pose);
-sensors::PointCloud3 toGRPC(const PointCloud3 &map);
+sensors::PointCloud3 toGRPC(const PointCloud &map);
 
 } // namespace mslam

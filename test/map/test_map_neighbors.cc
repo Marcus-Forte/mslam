@@ -7,7 +7,7 @@ using namespace mslam;
 TEST(TestKDTreeMapNeighbors, query_multiple_neighbors) {
   KDTreeMap map(0.01F);
 
-  PointCloud3 scan;
+  PointCloud scan;
   scan.emplace_back(0.1F, 0.1F, 0.0F);
   scan.emplace_back(0.2F, 0.2F, 0.0F);
   scan.emplace_back(0.8F, 0.8F, 0.0F);
@@ -36,7 +36,7 @@ TEST(TestKDTreeMapNeighbors, invalid_neighbor_count) {
 TEST(TestOctreeMapNeighbors, stub_returns_single_neighbor) {
   OctreeMap map(1.0F);
 
-  PointCloud3 scan;
+  PointCloud scan;
   scan.emplace_back(0.1F, 0.1F, 0.0F);
   scan.emplace_back(0.8F, 0.8F, 0.0F);
   map.addScan(scan);

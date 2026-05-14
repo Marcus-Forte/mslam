@@ -1,18 +1,16 @@
 #include "map/KDTreeMap.hh"
+#include "common/Points.hh"
 #include "pcl/memory.h"
-#include "pcl/point_cloud.h"
 #include "pcl/types.h"
 #include <pcl/kdtree/kdtree.h>
 #include <vector>
 
-using PointCloudT = pcl::PointCloud<pcl::PointXYZ>;
-
 namespace mslam {
 
 KDTreeMap::KDTreeMap(float resolution)
-    : voxel_map_(resolution, 1), map_rep_(pcl::make_shared<PointCloudT>()) {}
+    : voxel_map_(resolution, 1), map_rep_(pcl::make_shared<PointCloud>()) {}
 
-PointCloud3 KDTreeMap::addScan(const PointCloud3 &pointcloud) {
+PointCloud KDTreeMap::addScan(const PointCloud &pointcloud) {
   auto added = voxel_map_.addScan(pointcloud);
 
   *map_rep_ += added;
@@ -20,11 +18,11 @@ PointCloud3 KDTreeMap::addScan(const PointCloud3 &pointcloud) {
   return added;
 }
 
-const PointCloud3 &KDTreeMap::getPointCloudRepresentation() const {
+const PointCloud &KDTreeMap::getPointCloudRepresentation() const {
   return *map_rep_;
 }
 
-IMap::Neighbor KDTreeMap::getClosestNeighbor(const Point3 &query) const {
+IMap::Neighbor KDTreeMap::getClosestNeighbor(const Point &query) const {
   pcl::Indices index(1);
   std::vector<float> sqr_distances(1);
   kdtree_.nearestKSearch(query, 1, index, sqr_distances);
@@ -32,7 +30,7 @@ IMap::Neighbor KDTreeMap::getClosestNeighbor(const Point3 &query) const {
   return {{nearest.x, nearest.y, nearest.z}, sqr_distances[0]};
 }
 
-std::vector<IMap::Neighbor> KDTreeMap::getClosestNNeighbors(const Point3 &query,
+std::vector<IMap::Neighbor> KDTreeMap::getClosestNNeighbors(const Point &query,
                                                             int N) const {
   std::vector<IMap::Neighbor> neighbors;
   if (N <= 0 || map_rep_->empty()) {
@@ -47,7 +45,7 @@ std::vector<IMap::Neighbor> KDTreeMap::getClosestNNeighbors(const Point3 &query,
   for (int i = 0; i < found; ++i) {
     const auto &nearest =
         map_rep_->points[indices[static_cast<std::size_t>(i)]];
-    neighbors.emplace_back(Point3{nearest.x, nearest.y, nearest.z},
+    neighbors.emplace_back(Point{nearest.x, nearest.y, nearest.z},
                            sqr_distances[static_cast<std::size_t>(i)]);
   }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "msensor/interface/ILidar.hh"
+#include "common/Points.hh"
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <cmath>
@@ -10,10 +10,10 @@ Eigen::Affine3d toAffine(double x, double y, double z, double rx, double ry,
                          double rz);
 
 void transformCloud(const Eigen::Affine3d &transform,
-                    msensor::PointCloud3 &cloud_out);
+                    mslam::PointCloud &cloud_out);
 
 void transformCloud(const Eigen::Affine2d &transform,
-                    msensor::PointCloud3 &cloud_out);
+                    mslam::PointCloud &cloud_out);
 
 /// @brief Skew-symmetric matrix from a 3-vector.
 inline Eigen::Matrix3d hat(const Eigen::Vector3d &v) {

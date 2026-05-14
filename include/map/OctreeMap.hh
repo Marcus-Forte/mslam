@@ -8,18 +8,18 @@ class OctreeMap : public IMap {
 public:
   OctreeMap(float voxel_size);
 
-  PointCloud3 addScan(const PointCloud3 &scan) override;
-  Neighbor getClosestNeighbor(const Point3 &query) const override;
-  std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
+  PointCloud addScan(const PointCloud &scan) override;
+  Neighbor getClosestNeighbor(const Point &query) const override;
+  std::vector<Neighbor> getClosestNNeighbors(const Point &query,
                                              int N) const override;
-  const PointCloud3 &getPointCloudRepresentation() const override;
+  const PointCloud &getPointCloudRepresentation() const override;
   void clear() override;
 
 private:
-  mutable pcl::octree::OctreePointCloudSearch<Point3> octree_;
+  mutable pcl::octree::OctreePointCloudSearch<Point> octree_;
   float voxel_size_;
-  PointCloud3::Ptr map_rep_;
-  PointCloud3::Ptr map_centers_rep;
+  PointCloud::Ptr map_rep_;
+  PointCloud::Ptr map_centers_rep;
 };
 
 } // namespace mslam

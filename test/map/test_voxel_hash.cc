@@ -14,7 +14,7 @@ protected:
 TEST_F(TestVoxelHashMap, test_max_points_per_bucket) {
 
   for (int i = 0; i < 10; ++i) {
-    PointCloud3 scan;
+    PointCloud scan;
     scan.emplace_back(0.5, 0.5, 0.5);
     map_->addScan(scan);
   }
@@ -32,7 +32,7 @@ TEST_F(TestVoxelHashMap, test_max_points_per_bucket) {
 
 TEST_F(TestVoxelHashMap, query_point_inside_voxel_corners) {
   map_ = std::make_unique<VoxelHashMap>(1.0, 5);
-  PointCloud3 scan;
+  PointCloud scan;
   scan.emplace_back(0.9, 0.9, 0.0);
   scan.emplace_back(0.1, 0.1, 0.0);
   scan.emplace_back(0.1, 0.9, 0.0);
@@ -69,7 +69,7 @@ TEST_F(TestVoxelHashMap, query_point_inside_voxel_corners) {
 TEST_F(TestVoxelHashMap, query_point_outside_voxel_corners) {
   map_ = std::make_unique<VoxelHashMap>(1.0, 5);
 
-  PointCloud3 scan;
+  PointCloud scan;
   scan.emplace_back(0.9, 0.9, 0.0);
   scan.emplace_back(0.1, 0.1, 0.0);
   scan.emplace_back(0.1, 0.9, 0.0);
@@ -94,7 +94,7 @@ TEST_F(TestVoxelHashMap, query_point_outside_voxel_corners) {
 TEST_F(TestVoxelHashMap, query_point_adjacent_voxels) {
   map_ = std::make_unique<VoxelHashMap>(1.0, 5);
 
-  PointCloud3 scan;
+  PointCloud scan;
   scan.emplace_back(0.5, 0.5, 0.0);
 
   map_->setNumAdjacentVoxelSearch(1);
@@ -119,7 +119,7 @@ TEST_F(TestVoxelHashMap, query_point_adjacent_voxels) {
 TEST_F(TestVoxelHashMap, query_multiple_closest_neighbors) {
   map_ = std::make_unique<VoxelHashMap>(1.0, 5);
 
-  PointCloud3 scan;
+  PointCloud scan;
   scan.emplace_back(0.1, 0.1, 0.0);
   scan.emplace_back(0.2, 0.2, 0.0);
   scan.emplace_back(0.8, 0.8, 0.0);

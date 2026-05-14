@@ -10,6 +10,8 @@ from typing import Any
 import grpc
 import numpy as np
 
+from colormap import rainbow_colormap
+
 PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
 if str(PROTO_GEN_DIR) not in sys.path:
     sys.path.insert(0, str(PROTO_GEN_DIR))
@@ -60,6 +62,18 @@ def to_viser_colors(points: np.ndarray) -> np.ndarray:
     colors[:, 1] = np.clip(255.0 * (1.0 - np.abs(normalized - 0.5) * 2.0), 0, 255).astype(np.uint8)
     colors[:, 2] = np.clip(255.0 * (1.0 - normalized), 0, 255).astype(np.uint8)
     return colors
+
+
+def intensity_to_colors(point_cloud: lidar_pb2.PointCloud3, num_points: int) -> np.ndarray | None:
+    """Return rainbow colors derived from intensity, or None if unavailable."""
+    if len(point_cloud.intensity) != num_points or num_points == 0:
+        return None
+
+    intensity = np.asarray(point_cloud.intensity, dtype=np.float32)
+    i_min = float(intensity.min())
+    i_max = float(intensity.max())
+    normalized = 1.0 - (intensity - i_min) / max(i_max - i_min, 1e-6)
+    return rainbow_colormap(normalized)
 
 
 def euler_xyz_to_wxyz(rx: float, ry: float, rz: float) -> np.ndarray:
@@ -359,7 +373,9 @@ class SlamViewerClient:
 
     def _set_map_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(map_snapshot)
-        colors = to_viser_colors(points)
+        colors = intensity_to_colors(map_snapshot, len(points))
+        if colors is None:
+            colors = to_viser_colors(points)
 
         with self._map_lock:
             self._map_point_chunks = [points]
@@ -371,7 +387,9 @@ class SlamViewerClient:
 
     def _append_map_increment(self, increment: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(increment)
-        colors = to_viser_colors(points)
+        colors = intensity_to_colors(increment, len(points))
+        if colors is None:
+            colors = to_viser_colors(points)
 
         with self._map_lock:
             self._map_point_chunks.append(points)
@@ -389,7 +407,9 @@ class SlamViewerClient:
 
     def _update_scan_cloud(self, scan_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(scan_snapshot)
-        colors = to_viser_colors(points)
+        colors = intensity_to_colors(scan_snapshot, len(points))
+        if colors is None:
+            colors = to_viser_colors(points)
 
         self._scan_cloud.points = points
         self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))

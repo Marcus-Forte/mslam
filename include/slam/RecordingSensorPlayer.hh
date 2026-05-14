@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ILog.hh"
+#include "common/Points.hh"
 #include "config/IConfig.hh"
 #include "msensor/interface/IImu.hh"
 #include "msensor/interface/ILidar.hh"
@@ -23,7 +24,7 @@ public:
   void init() override;
   void startSampling() override;
   void stopSampling() override;
-  std::shared_ptr<msensor::Scan3DI> getScan() override;
+  std::shared_ptr<Scan> getScan() override;
   std::optional<msensor::IMUData> getImuData() override;
   bool isFinished() const;
 
@@ -35,14 +36,13 @@ private:
   unsigned int entry_delay_ms_ = 0;
   bool started_ = false;
   bool end_of_file_ = false;
-  std::queue<std::shared_ptr<msensor::Scan3DI>> scan_queue_;
+  std::queue<std::shared_ptr<Scan>> scan_queue_;
   std::queue<msensor::IMUData> imu_queue_;
 
   bool fillUntilScanAvailable();
 
   msensor::IMUData fromEntryToImu(const sensors::RecordingEntry &entry);
-  std::shared_ptr<msensor::Scan3DI>
-  fromEntryScan3D(const sensors::RecordingEntry &entry);
+  std::shared_ptr<Scan> fromEntryScan3D(const sensors::RecordingEntry &entry);
 };
 
 } // namespace mslam

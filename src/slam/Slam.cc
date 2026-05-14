@@ -12,8 +12,8 @@ namespace {
 
 constexpr int g_init_scans = 10;
 
-mslam::PointCloud3 toPointCloud3(const mslam::VectorPoint3d &points) {
-  mslam::PointCloud3 point_cloud;
+mslam::PointCloud toPointCloud3(const mslam::VectorPoint3d &points) {
+  mslam::PointCloud point_cloud;
   point_cloud.reserve(points.size());
   for (const auto &point : points) {
     point_cloud.emplace_back(point.x(), point.y(), point.z());
@@ -75,7 +75,7 @@ void Slam::Predict(const msensor::IMUData &imuData) {
   logger_->log(ILog::Level::DEBUG, "Predict");
   logPose3D(logger_, pose_);
 }
-void Slam::Update(const msensor::Scan3D &lidarData) {
+void Slam::Update(const Scan &lidarData) {
   const auto pose_prior = pose_;
 
   pose_ = registration_.Align3D(pose_prior, *map_, *lidarData.points,
@@ -148,8 +148,9 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       continue;
     }
 
-    const auto scani = lidar->getScan();
-    if (!scani) {
+    auto scan = lidar->getScan();
+
+    if (!scan) {
       if (playback_player && playback_player->isFinished()) {
         logger_->log(ILog::Level::INFO,
                      "Playback exhausted; exiting SLAM process.");
@@ -164,14 +165,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
     scan_timer.start();
 
-    msensor::Scan3D scan;
-    scan.points->reserve(scani->points->size());
-    scan.header = scani->header;
-    for (const auto &pt : *scani->points) {
-      scan.points->emplace_back(pt.x, pt.y, pt.z);
-    }
-
-    if (scan.points->empty()) {
+    if (scan->points->empty()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
@@ -207,7 +201,8 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
     if (init_scan_count < g_init_scans) {
       stage_timer.start();
 
-      auto filtered_scan = preprocessor_.removePointsNearCenter(scan);
+      auto filtered_scan = preprocessor_.removePointsNearCenter(*scan);
+
       exporter.addTransformedScan(*filtered_scan->points);
       stage_timer.start();
       auto map_increment = map_->addScan(*filtered_scan->points);
@@ -227,19 +222,19 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
     if (config_.with_lidar) {
       logger_->log(ILog::Level::INFO,
                    "Processing Lidar scan with {} points @ {}, seq nr {}",
-                   scan.points->size(), scan.header.timestamp,
-                   scan.header.sequence_number);
+                   scan->points->size(), scan->header.timestamp,
+                   scan->header.sequence_number);
 
       if (config_.preprocessor.deskew_mode != DeskewMode::Off) {
         stage_timer.start();
-        std::shared_ptr<msensor::Scan3D> deskewed;
+        std::shared_ptr<Scan> deskewed;
         if (config_.preprocessor.deskew_mode == DeskewMode::Imu &&
             config_.with_imu) {
           const Eigen::Affine3d imu_delta =
               pre_imu_pose.inverse() * getTransform();
-          deskewed = preprocessor_.deskewImu(scan, imu_delta);
+          deskewed = preprocessor_.deskewImu(*scan, imu_delta);
         } else {
-          deskewed = preprocessor_.deskew(scan, last_delta);
+          deskewed = preprocessor_.deskew(*scan, last_delta);
         }
         const auto deskew_us = stage_timer.stop();
         logger_->log(ILog::Level::DEBUG, "Deskew took: {} us (mode: {})",
@@ -247,19 +242,20 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
                      config_.preprocessor.deskew_mode == DeskewMode::Imu
                          ? "imu"
                          : "constant_velocity");
-        scan = *deskewed;
+        *scan = *deskewed;
       }
 
       stage_timer.start();
-      auto filtered_scan = preprocessor_.removePointsNearCenter(scan);
+      auto filtered_scan = preprocessor_.removePointsNearCenter(*scan);
       const auto range_filter_us = stage_timer.stop();
 
       logger_->log(ILog::Level::DEBUG,
                    "Removed near-center points: {} -> {} points",
-                   scan.points->size(), filtered_scan->points->size());
+                   scan->points->size(), filtered_scan->points->size());
 
       stage_timer.start();
       filtered_scan = preprocessor_.downsample(*filtered_scan);
+
       const auto downsample_us = stage_timer.stop();
       const auto preprocessor_us = range_filter_us + downsample_us;
 
@@ -268,7 +264,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
                    "us",
                    range_filter_us, downsample_us);
       logger_->log(ILog::Level::DEBUG, "Downsampled scan: {} -> {} points",
-                   scan.points->size(), filtered_scan->points->size());
+                   scan->points->size(), filtered_scan->points->size());
 
       stage_timer.start();
       Update(*filtered_scan);

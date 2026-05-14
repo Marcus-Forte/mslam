@@ -13,23 +13,26 @@ sensors::Pose3D toGRPC(const Pose3D &pose) {
   return msg;
 }
 
-sensors::PointCloud3 toGRPC(const PointCloud3 &map) {
+sensors::PointCloud3 toGRPC(const PointCloud &map) {
   sensors::PointCloud3 msg;
   msg.mutable_header()->set_timestamp(0);
 
   auto *x = msg.mutable_x();
   auto *y = msg.mutable_y();
   auto *z = msg.mutable_z();
+  auto *intensity = msg.mutable_intensity();
 
   const auto point_count = static_cast<int>(map.size());
   x->Reserve(point_count);
   y->Reserve(point_count);
   z->Reserve(point_count);
+  intensity->Reserve(point_count);
 
   for (const auto &point : map) {
     x->Add(point.x);
     y->Add(point.y);
     z->Add(point.z);
+    intensity->Add(point.intensity);
   }
   return msg;
 }

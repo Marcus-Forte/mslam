@@ -20,7 +20,7 @@ public:
        const std::shared_ptr<IMap> &map);
   void ResetPose() override;
   void Predict(const msensor::IMUData &imuData) override;
-  void Update(const msensor::Scan3D &lidarData) override;
+  void Update(const Scan &lidarData) override;
   Pose3D getPose() const;
   Eigen::Affine3d getTransform() const;
   const VectorPoint3d &getLastMapCorrespondences() const;

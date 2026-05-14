@@ -8,7 +8,7 @@
 
 namespace {
 
-mslam::PointCloud3 preparePointCloudForExport(const mslam::PointCloud3 &cloud) {
+mslam::PointCloud preparePointCloudForExport(const mslam::PointCloud &cloud) {
   auto export_cloud = cloud;
   export_cloud.width = static_cast<std::uint32_t>(export_cloud.points.size());
   export_cloud.height = 1;
@@ -27,7 +27,7 @@ std::filesystem::path buildPlyExportPath(const std::string &prefix,
 }
 
 void savePointCloudAsPly(const std::filesystem::path &path,
-                         const mslam::PointCloud3 &cloud) {
+                         const mslam::PointCloud &cloud) {
   const auto parent_path = path.parent_path();
   if (!parent_path.empty()) {
     std::filesystem::create_directories(parent_path);
@@ -62,7 +62,7 @@ bool PointCloudExporter::isEnabled() const {
   return voxel_hash_map_ != nullptr;
 }
 
-void PointCloudExporter::addTransformedScan(const PointCloud3 &scan) {
+void PointCloudExporter::addTransformedScan(const PointCloud &scan) {
   if (!isEnabled()) {
     return;
   }

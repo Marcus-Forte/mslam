@@ -8,10 +8,10 @@
 
     "preprocessor": {
         "voxel_size": 0.1,
-        "min_distance_to_center": 0.5,
+        "min_distance_to_center": 1.0,
         "downsample_filter": "voxel_hash", // voxel_hash || voxel_grid
         "points_per_second": 200000,
-        "deskew": "off" // off || constant_velocity || imu
+        "deskew": "constant_velocity" // off || constant_velocity || imu
     },
     "map": {
         "resolution": 0.1,
@@ -19,7 +19,7 @@
     },
 
     "slam": {
-        "optimizer_iterations": 3,
+        "optimizer_iterations": 5,
         "reg_iterations": 3,
         "max_correspondence_distance": 0.2
     }

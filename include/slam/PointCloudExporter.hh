@@ -16,7 +16,7 @@ public:
                      size_t max_points_per_voxel);
 
   bool isEnabled() const;
-  void addTransformedScan(const PointCloud3 &scan);
+  void addTransformedScan(const PointCloud &scan);
   void save() const;
 
   const std::filesystem::path &getVoxelHashPath() const;
@@ -29,7 +29,7 @@ private:
   std::filesystem::path voxel_hash_path_;
   std::filesystem::path transformed_scans_path_;
   std::unique_ptr<VoxelHashMap> voxel_hash_map_;
-  PointCloud3 accumulated_transformed_scans_;
+  PointCloud accumulated_transformed_scans_;
 };
 
 } // namespace mslam

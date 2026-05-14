@@ -8,27 +8,27 @@ namespace {
 
 class StaticMap final : public mslam::IMap {
 public:
-  mslam::PointCloud3 addScan(const mslam::PointCloud3 &scan) override {
+  mslam::PointCloud addScan(const mslam::PointCloud &scan) override {
     return scan;
   }
 
-  Neighbor getClosestNeighbor(const mslam::Point3 &query) const override {
+  Neighbor getClosestNeighbor(const mslam::Point &query) const override {
     return {query, 0.0F};
   }
 
-  std::vector<Neighbor> getClosestNNeighbors(const mslam::Point3 & /*query*/,
+  std::vector<Neighbor> getClosestNNeighbors(const mslam::Point & /*query*/,
                                              int /*count*/) const override {
     return {};
   }
 
-  const mslam::PointCloud3 &getPointCloudRepresentation() const override {
+  const mslam::PointCloud &getPointCloudRepresentation() const override {
     return points_;
   }
 
   void clear() override { points_.points.clear(); }
 
 private:
-  mslam::PointCloud3 points_;
+  mslam::PointCloud points_;
 };
 
 TEST(Slam, PredictIntegratesAllAngularAxes) {

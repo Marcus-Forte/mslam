@@ -4,8 +4,7 @@
 
 namespace {
 
-inline float squaredDistance(const mslam::Point3 &lhs,
-                             const mslam::Point3 &rhs) {
+inline float squaredDistance(const mslam::Point &lhs, const mslam::Point &rhs) {
   const float dx = lhs.x - rhs.x;
   const float dy = lhs.y - rhs.y;
   const float dz = lhs.z - rhs.z;
@@ -32,8 +31,8 @@ VoxelHashMap::VoxelHashMap(float voxel_size, size_t max_points_per_voxel)
       max_points_per_voxel_(max_points_per_voxel), adjacent_voxels_(1),
       voxel_shifts_(buildVoxelShifts(1)) {}
 
-PointCloud3 VoxelHashMap::addScan(const PointCloud3 &scan) {
-  PointCloud3 added;
+PointCloud VoxelHashMap::addScan(const PointCloud &scan) {
+  PointCloud added;
   added.points.reserve(scan.points.size());
 
   for (const auto &point : scan.points) {
@@ -54,7 +53,7 @@ PointCloud3 VoxelHashMap::addScan(const PointCloud3 &scan) {
   return added;
 }
 
-IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
+IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point &query) const {
   const auto voxel = PointToVoxel(query, inverse_voxel_size_);
 
   IMap::Neighbor best_neighbor{{0, 0, 0}, std::numeric_limits<float>::max()};
@@ -70,7 +69,7 @@ IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
     for (const auto &point : bucket_points.points) {
       const float squared_distance = squaredDistance(point, query);
       if (squared_distance < best_neighbor.second) {
-        best_neighbor = {Point3{point.x, point.y, point.z}, squared_distance};
+        best_neighbor = {Point{point.x, point.y, point.z}, squared_distance};
       }
     }
   }
@@ -79,7 +78,7 @@ IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point3 &query) const {
 }
 
 std::vector<IMap::Neighbor>
-VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
+VoxelHashMap::getClosestNNeighbors(const Point &query, int N) const {
   std::vector<IMap::Neighbor> neighbors;
   if (N <= 0) {
     return neighbors;
@@ -98,7 +97,7 @@ VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
       const auto &bucket_points = search->second;
       for (const auto &point : bucket_points.points) {
         const float squared_distance = squaredDistance(point, query);
-        neighbors.emplace_back(Point3{point.x, point.y, point.z},
+        neighbors.emplace_back(Point{point.x, point.y, point.z},
                                squared_distance);
       }
     }
@@ -129,7 +128,7 @@ VoxelHashMap::getClosestNNeighbors(const Point3 &query, int N) const {
  *
  * @return PointCloud2D
  */
-const PointCloud3 &VoxelHashMap::getPointCloudRepresentation() const {
+const PointCloud &VoxelHashMap::getPointCloudRepresentation() const {
   return map_rep_;
 }
 

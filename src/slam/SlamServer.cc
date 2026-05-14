@@ -13,17 +13,17 @@ constexpr char g_default_slam_server_address[] = "0.0.0.0:50052";
 constexpr int g_max_grpc_message_size = 64 * 1024 * 1024;
 
 struct ScanSnapshot {
-  mslam::PointCloud3 scan;
+  mslam::PointCloud scan;
   uint64_t version = 0;
 };
 
 struct TransformedScanSnapshot {
-  mslam::PointCloud3 scan;
+  mslam::PointCloud scan;
   uint64_t version = 0;
 };
 
 struct CorrespondenceSnapshot {
-  mslam::PointCloud3 correspondences;
+  mslam::PointCloud correspondences;
   uint64_t version = 0;
 };
 
@@ -90,21 +90,21 @@ void SlamServer::updatePose(const Pose3D &pose) {
   pose_cv_.notify_all();
 }
 
-void SlamServer::updateMapIncrement(const PointCloud3 &increment) {
+void SlamServer::updateMapIncrement(const PointCloud &increment) {
   std::scoped_lock lock(map_increment_mutex_);
   map_increment_ = increment;
   ++map_increment_version_;
   map_increment_cv_.notify_all();
 }
 
-void SlamServer::updateTransformedScan(const PointCloud3 &scan) {
+void SlamServer::updateTransformedScan(const PointCloud &scan) {
   std::scoped_lock lock(transformed_scan_mutex_);
   transformed_scan_ = scan;
   ++transformed_scan_version_;
   transformed_scan_cv_.notify_all();
 }
 
-void SlamServer::updateCorrespondences(const PointCloud3 &correspondences) {
+void SlamServer::updateCorrespondences(const PointCloud &correspondences) {
   std::scoped_lock lock(correspondences_mutex_);
   correspondences_ = correspondences;
   ++correspondences_version_;
@@ -123,7 +123,7 @@ SlamServer::GetMapIncrements(grpc::ServerContext *context,
                              grpc::ServerWriter<sensors::PointCloud3> *writer) {
   uint64_t last_version = 0;
   while (!context->IsCancelled() && !stopping_.load()) {
-    PointCloud3 snapshot;
+    PointCloud snapshot;
     {
       std::unique_lock lock(map_increment_mutex_);
       map_increment_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "common/Points.hh"
 #include "config/IConfig.hh"
-#include "msensor/interface/ILidar.hh"
 
 #include <Eigen/Dense>
 
@@ -14,15 +14,13 @@ public:
   /**
    * @brief Downsamples the input scan.
    */
-  std::shared_ptr<msensor::Scan3D>
-  downsample(const msensor::Scan3D &input) const;
+  std::shared_ptr<Scan> downsample(const Scan &input) const;
 
   /**
    * @brief Removes points that are closer to the scan origin than the
    * configured minimum distance.
    */
-  std::shared_ptr<msensor::Scan3D>
-  removePointsNearCenter(const msensor::Scan3D &input) const;
+  std::shared_ptr<Scan> removePointsNearCenter(const Scan &input) const;
 
   /**
    * @brief Deskews a lidar scan assuming constant velocity motion.
@@ -33,9 +31,8 @@ public:
    *        (e.g. from the previous registration result).
    * @return A new scan with motion-corrected points.
    */
-  std::shared_ptr<msensor::Scan3D>
-  deskew(const msensor::Scan3D &scan,
-         const Eigen::Affine3d &relative_motion) const;
+  std::shared_ptr<Scan> deskew(const Scan &scan,
+                               const Eigen::Affine3d &relative_motion) const;
 
   /**
    * @brief Deskews a lidar scan using the IMU-predicted motion delta.
@@ -46,9 +43,8 @@ public:
    *        over the inter-scan interval.
    * @return A new scan with motion-corrected points.
    */
-  std::shared_ptr<msensor::Scan3D>
-  deskewImu(const msensor::Scan3D &scan,
-            const Eigen::Affine3d &imu_delta) const;
+  std::shared_ptr<Scan> deskewImu(const Scan &scan,
+                                  const Eigen::Affine3d &imu_delta) const;
 
 private:
   PreProcessor config_;

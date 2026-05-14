@@ -12,14 +12,14 @@ public:
    * A neighbor consists of a point in the map and its associated distance
    * metric (squared distance).
    */
-  using Neighbor = std::pair<Point3, float>;
+  using Neighbor = std::pair<Point, float>;
   /**
    * @brief Add points to the map.
    *
    * @param scan Points to be added to the map.
-   * @return PointCloud3 The subset of points that were actually inserted.
+   * @return PointCloud The subset of points that were actually inserted.
    */
-  virtual PointCloud3 addScan(const PointCloud3 &scan) = 0;
+  virtual PointCloud addScan(const PointCloud &scan) = 0;
 
   /**
    * @brief Return the single closest neighbor to the query point.
@@ -27,7 +27,7 @@ public:
    * @param query Query point in map coordinates.
    * @return Neighbor Closest point and its distance metric.
    */
-  virtual Neighbor getClosestNeighbor(const Point3 &query) const = 0;
+  virtual Neighbor getClosestNeighbor(const Point &query) const = 0;
 
   /**
    * @brief Return up to the closest N neighbors to the query point.
@@ -41,15 +41,15 @@ public:
    * @return std::vector<Neighbor> Up to N nearest neighbors ordered by
    * distance.
    */
-  virtual std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
+  virtual std::vector<Neighbor> getClosestNNeighbors(const Point &query,
                                                      int N) const = 0;
 
   /**
    * @brief Get a Point Cloud Representation. Copy might be made.
    *
-   * @return PointCloud3
+   * @return PointCloud
    */
-  virtual const PointCloud3 &getPointCloudRepresentation() const = 0;
+  virtual const PointCloud &getPointCloudRepresentation() const = 0;
 
   /**
    * @brief Remove all points from the map.

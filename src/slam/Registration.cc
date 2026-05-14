@@ -37,7 +37,7 @@ struct MapPointKeyHash {
   }
 };
 
-inline MapPointKey makeMapPointKey(const Point3 &point) {
+inline MapPointKey makeMapPointKey(const Point &point) {
   return {point.x, point.y, point.z};
 }
 
@@ -76,14 +76,14 @@ estimateSurfaceNormal(const std::vector<IMap::Neighbor> &neighbors) {
 }
 
 std::optional<Eigen::Vector3d>
-estimateSurfaceNormal(const IMap &map, const Point3 &query, int num_neighbors) {
+estimateSurfaceNormal(const IMap &map, const Point &query, int num_neighbors) {
   const auto neighbors = map.getClosestNNeighbors(query, num_neighbors);
   return estimateSurfaceNormal(neighbors);
 }
 
 template <typename Model, int InputDim, bool UseNormals>
 Pose3D
-align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
+align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud &scan,
                   VectorPoint3d &last_map_correspondences,
                   int num_registration_iterations, int num_optimizer_iterations,
                   float max_correspondence_distance,
@@ -121,8 +121,8 @@ align3DWithMetric(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
       const Eigen::Vector3d point_eigen{pt.x, pt.y, pt.z};
       const Eigen::Vector3d transformed_scan_pt = transform * point_eigen;
 
-      const Point3 query(transformed_scan_pt.x(), transformed_scan_pt.y(),
-                         transformed_scan_pt.z());
+      const Point query(transformed_scan_pt.x(), transformed_scan_pt.y(),
+                        transformed_scan_pt.z());
       knn_timer.start();
       const auto closest = map.getClosestNeighbor(query);
       knn_us += knn_timer.stop();
@@ -212,7 +212,7 @@ Registration::Registration(int num_registration_iterations,
 
 /// \todo add transformed scan as output
 Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
-                             const PointCloud3 &scan) {
+                             const PointCloud &scan) {
 
   VectorPoint2d scan_points;
   VectorPoint2d map_correspondences;
@@ -240,7 +240,7 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
       const Eigen::Vector2d transformed_scan_pt = transform_ * point_eigen;
 
       /// \todo optimize
-      const Point3 query(transformed_scan_pt.x(), transformed_scan_pt.y(), 0);
+      const Point query(transformed_scan_pt.x(), transformed_scan_pt.y(), 0);
       const auto closest = map.getClosestNeighbor(query);
       if (closest.second <
           max_correspondence_distance_ * max_correspondence_distance_) {
@@ -289,7 +289,7 @@ Pose2D Registration::Align2D(const Pose2D &pose, const IMap &map,
 }
 
 Pose3D Registration::Align3D(const Pose3D &pose, const IMap &map,
-                             const PointCloud3 &scan,
+                             const PointCloud &scan,
                              RegistrationMetric3D metric) {
   switch (metric) {
   case RegistrationMetric3D::PointToPoint:

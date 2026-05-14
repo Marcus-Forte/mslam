@@ -20,7 +20,7 @@ void RecordingSensorPlayer::stopSampling() {
   end_of_file_ = true;
 }
 
-std::shared_ptr<msensor::Scan3DI> RecordingSensorPlayer::getScan() {
+std::shared_ptr<Scan> RecordingSensorPlayer::getScan() {
   if (!started_) {
     return nullptr;
   }
@@ -89,7 +89,7 @@ RecordingSensorPlayer::fromEntryToImu(const sensors::RecordingEntry &entry) {
   return fromProtobuf(entry.imu());
 }
 
-std::shared_ptr<msensor::Scan3DI>
+std::shared_ptr<Scan>
 RecordingSensorPlayer::fromEntryScan3D(const sensors::RecordingEntry &entry) {
   return fromProtobuf(entry.scan());
 }

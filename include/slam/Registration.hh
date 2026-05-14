@@ -25,7 +25,7 @@ public:
    * @param scan
    * @return Pose2D
    */
-  Pose2D Align2D(const Pose2D &pose, const IMap &map, const PointCloud3 &scan);
+  Pose2D Align2D(const Pose2D &pose, const IMap &map, const PointCloud &scan);
 
   /**
    * @brief
@@ -37,7 +37,7 @@ public:
    * @param metric 3D registration metric to use for optimization.
    * @return Pose
    */
-  Pose3D Align3D(const Pose3D &pose, const IMap &map, const PointCloud3 &scan,
+  Pose3D Align3D(const Pose3D &pose, const IMap &map, const PointCloud &scan,
                  RegistrationMetric3D metric);
 
   /**

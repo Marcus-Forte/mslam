@@ -1,4 +1,5 @@
 #include "ConsoleLogger.hh"
+#include "common/Points.hh"
 #include "map/KDTreeMap.hh"
 #include "slam/Registration.hh"
 #include <filesystem>
@@ -18,7 +19,7 @@ int main(int argc, char **argv) {
   const auto num_scans = argc - 1;
   auto logger = std::make_shared<ConsoleLogger>();
 
-  std::vector<msensor::PointCloud3> scans;
+  std::vector<mslam::PointCloud> scans;
 
   for (int i = 1; i < argc; ++i) {
     if (!std::filesystem::exists(argv[i])) {
@@ -26,7 +27,7 @@ int main(int argc, char **argv) {
                   argv[1]);
       exit(-1);
     }
-    msensor::PointCloud3 &&scan{};
+    mslam::PointCloud &&scan{};
     pcl::io::loadPLYFile(argv[i], scan);
     scans.emplace_back(scan);
     logger->log(ILog::Level::INFO, "loaded points: source: {}",

@@ -23,7 +23,7 @@ Eigen::Affine3d toAffine(double x, double y, double z, double rx, double ry,
 
 /// \todo how to prevent conversions to double?
 void transformCloud(const Eigen::Affine3d &transform,
-                    msensor::PointCloud3 &cloud_out) {
+                    mslam::PointCloud &cloud_out) {
 
   // pcl::transformPointCloud(cloud_out, cloud_out, transform.matrix());
   std::for_each(cloud_out.begin(), cloud_out.end(), [&](auto &pt) {
@@ -37,7 +37,7 @@ void transformCloud(const Eigen::Affine3d &transform,
 
 /// \todo how to prevent conversions to double?
 void transformCloud(const Eigen::Affine2d &transform,
-                    msensor::PointCloud3 &cloud_out) {
+                    mslam::PointCloud &cloud_out) {
 
   // pcl::transformPointCloud(cloud_out, cloud_out, transform.matrix());
   std::for_each(cloud_out.begin(), cloud_out.end(), [&](auto &pt) {

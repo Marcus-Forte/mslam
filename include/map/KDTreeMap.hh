@@ -10,16 +10,16 @@ class KDTreeMap : public IMap {
 public:
   explicit KDTreeMap(float resolution);
 
-  PointCloud3 addScan(const PointCloud3 &points) override;
-  const PointCloud3 &getPointCloudRepresentation() const override;
+  PointCloud addScan(const PointCloud &points) override;
+  const PointCloud &getPointCloudRepresentation() const override;
   void clear() override;
-  Neighbor getClosestNeighbor(const Point3 &query) const override;
-  std::vector<Neighbor> getClosestNNeighbors(const Point3 &query,
+  Neighbor getClosestNeighbor(const Point &query) const override;
+  std::vector<Neighbor> getClosestNNeighbors(const Point &query,
                                              int N) const override;
 
 private:
   VoxelHashMap voxel_map_;
-  pcl::search::KdTree<pcl::PointXYZ> kdtree_;
-  PointCloud3::Ptr map_rep_;
+  pcl::search::KdTree<Point> kdtree_;
+  PointCloud::Ptr map_rep_;
 };
 } // namespace mslam

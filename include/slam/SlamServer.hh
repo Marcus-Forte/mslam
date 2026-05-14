@@ -31,9 +31,9 @@ public:
   void setSlam(Slam *slam);
 
   void updatePose(const Pose3D &pose);
-  void updateMapIncrement(const PointCloud3 &increment);
-  void updateTransformedScan(const PointCloud3 &scan);
-  void updateCorrespondences(const PointCloud3 &correspondences);
+  void updateMapIncrement(const PointCloud &increment);
+  void updateTransformedScan(const PointCloud &scan);
+  void updateCorrespondences(const PointCloud &correspondences);
 
 private:
   grpc::Status GetMap(grpc::ServerContext *, const sensors::Empty *,
@@ -80,9 +80,9 @@ private:
   mutable std::condition_variable correspondences_cv_;
   mutable std::condition_variable pose_cv_;
   Pose3D pose_;
-  PointCloud3 map_increment_;
-  PointCloud3 transformed_scan_;
-  PointCloud3 correspondences_;
+  PointCloud map_increment_;
+  PointCloud transformed_scan_;
+  PointCloud correspondences_;
   uint64_t scan_version_ = 0;
   uint64_t map_increment_version_ = 0;
   uint64_t transformed_scan_version_ = 0;

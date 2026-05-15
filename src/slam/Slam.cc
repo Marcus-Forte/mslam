@@ -6,6 +6,7 @@
 #include "slam/SlamServer.hh"
 #include "slam/Transform.hh"
 #include "slam/registration/PointToPlaneRegistration.hh"
+#include "slam/registration/PointToPointRegistration.hh"
 
 #include <csignal>
 #include <thread>

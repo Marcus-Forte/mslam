@@ -1,8 +1,8 @@
 #include "slam/registration/PointToPlaneRegistration.hh"
 #include "Timer.hh"
-#include "moptim/AnalyticalCost.h"
 #include "moptim/LevenbergMarquardt.h"
 #include "moptim/NumericalCostForwardEuler.h"
+#include "moptim/PlusOperations/SE3PlusOperator.h"
 #include "slam/NormalEstimator.hh"
 #include "slam/Transform.hh"
 #include "slam/registration/PointDistance.hh"
@@ -14,29 +14,33 @@ Pose3D PointToPlaneRegistration::Align(const Pose3D &pose, const IMap &map,
                                        const PointCloud &scan) {
   static constexpr int k_maxSmallDeltaHits = 3;
   NormalEstimator normal_estimator(map);
-  Eigen::VectorXd x{{pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]}};
+  auto total_T = toAffine(pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]);
 
   std::vector<Eigen::Matrix<double, 6, 1>> inputs;
   VectorPoint3d map_points;
   int small_delta_hits = 0;
   Timer iteration_timer;
   Timer stage_timer;
-  PointCloud transformed_scan;
+  Timer normal_timer;
 
   inputs.reserve(scan.size());
   map_points.reserve(scan.size());
 
+  // Initial guess
+  auto source = scan;
+  transformCloud(total_T, source);
+
+  Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
+
+  moptim::LevenbergMarquardt<double, moptim::SE3PlusOperator<double>> lm(
+      6, logger_);
+  lm.setMaxIterations(num_optimizer_iterations_);
+
   for (int i = 0; i < num_registration_iterations_; ++i) {
     iteration_timer.start();
-    const auto transform = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
+    const auto correspondences =
+        correspondence_finder_->find(map, source, max_correspondence_distance_);
 
-    transformed_scan = scan;
-    transformCloud(transform, transformed_scan);
-
-    const auto correspondences = correspondence_finder_->find(
-        map, scan, transformed_scan, max_correspondence_distance_);
-
-    Timer normal_timer;
     normal_timer.start();
     inputs.clear();
     map_points.clear();
@@ -62,13 +66,18 @@ Pose3D PointToPlaneRegistration::Align(const Pose3D &pose, const IMap &map,
     }
 
     stage_timer.start();
-    moptim::LevenbergMarquardt<double> lm(6, logger_);
-    lm.setMaxIterations(num_optimizer_iterations_);
+    delta.setZero();
+    lm.clearCosts();
     lm.addCost(
-        std::make_shared<moptim::AnalyticalCost<Point3PlaneDistance, double>>(
+        std::make_shared<moptim::NumericalCostForwardEuler<
+            Point3PlaneDistance, double, moptim::SE3PlusOperator<double>>>(
             inputs[0].data(), map_points[0].data(), map_points.size(), 6, 3,
             6));
-    const auto status = lm.optimize(x.data());
+    const auto status = lm.optimize(delta.data());
+
+    const auto delta_T = moptim::se3Exp(delta);
+    transformCloud(delta_T, source);
+    total_T = delta_T * total_T;
 
     logger_->log(ILog::Level::DEBUG, "Opt. Took: {} us", stage_timer.stop());
     logger_->log(ILog::Level::DEBUG,
@@ -82,7 +91,16 @@ Pose3D PointToPlaneRegistration::Align(const Pose3D &pose, const IMap &map,
     }
   }
 
-  return {x[0], x[1], x[2], x[3], x[4], x[5]};
+  const auto t = total_T.translation();
+  const auto &R = total_T.linear();
+  return {
+      t.x(),
+      t.y(),
+      t.z(),
+      std::atan2(-R(1, 2), R(2, 2)),
+      std::asin(std::clamp(R(0, 2), -1.0, 1.0)),
+      std::atan2(-R(0, 1), R(0, 0)),
+  };
 }
 
 } // namespace mslam

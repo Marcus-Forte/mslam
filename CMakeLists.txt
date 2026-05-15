@@ -16,6 +16,7 @@ link_libraries(Eigen3::Eigen)
 # between translation units that share Eigen template instantiations.
 add_compile_options(${PCL_COMPILE_OPTIONS})
 add_compile_options("-march=native")
+# add_compile_definitions(EIGEN_DONT_VECTORIZE)
 
 include(cmake/findGRPC.cmake)
 include(cmake/code_format.cmake)

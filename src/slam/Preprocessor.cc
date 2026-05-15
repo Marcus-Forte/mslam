@@ -1,6 +1,6 @@
 #include "slam/Preprocessor.hh"
 #include "map/VoxelHashMap.hh"
-#include "slam/Transform.hh"
+#include "moptim/PlusOperations/SE3.h"
 
 #include <Eigen/Geometry>
 #include <cmath>
@@ -79,7 +79,7 @@ Preprocessor::deskew(const Scan &scan,
   }
 
   // SE3 log of the relative motion (constant velocity twist)
-  const auto omega = se3Log(relative_motion);
+  const auto omega = moptim::se3Log(relative_motion);
 
   auto result = std::make_shared<Scan>();
   result->header.timestamp = scan.header.timestamp;
@@ -94,7 +94,7 @@ Preprocessor::deskew(const Scan &scan,
     // Interpolate from identity (end of scan) back to start:
     // at stamp=1 (last point) → identity, at stamp=0 (first point) → full
     // inverse
-    const Eigen::Affine3d pose = se3Exp((stamp - 1.0) * omega);
+    const Eigen::Affine3d pose = moptim::se3Exp((stamp - 1.0) * omega);
 
     const auto &pt = scan.points->at(i);
     const Eigen::Vector3d p(pt.x, pt.y, pt.z);

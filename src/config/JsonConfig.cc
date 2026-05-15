@@ -45,10 +45,23 @@ void JsonConfig::load() {
   Json::Value root;
   std::ifstream file(config_file_);
   file >> root;
+
+  if (root["imu"].empty()) {
+    throw std::runtime_error("Empty imu setting");
+  }
+  if (root["lidar"].empty()) {
+    throw std::runtime_error("Empty lidar setting");
+  }
   config_.with_imu = root["imu"].asBool();
   config_.with_lidar = root["lidar"].asBool();
-  if (!root["log_level"].empty()) {
-    config_.log_level = parseLogLevel(root["log_level"].asString());
+
+  if (root["log_level"].empty()) {
+    throw std::runtime_error("Empty log_level setting");
+  }
+  config_.log_level = parseLogLevel(root["log_level"].asString());
+
+  if (root["map_type"].empty()) {
+    throw std::runtime_error("Empty map_type setting");
   }
   const auto &map_type = root["map_type"].asString();
   if (map_type == "voxel") {
@@ -60,7 +73,8 @@ void JsonConfig::load() {
   }
   config_.remote_scanner = root["remote_scanner"].asString();
 
-  if (!isValidIPAndPort(config_.remote_scanner)) {
+  if (config_.remote_scanner.empty() ||
+      !isValidIPAndPort(config_.remote_scanner)) {
     throw std::runtime_error("Invalid Remote Scan IP: " +
                              config_.remote_scanner);
   }
@@ -69,38 +83,45 @@ void JsonConfig::load() {
   if (root["preprocessor"]["voxel_size"].empty()) {
     throw std::runtime_error("Empty preprocessor voxel_size setting");
   }
+  if (root["preprocessor"]["min_distance_to_center"].empty()) {
+    throw std::runtime_error(
+        "Empty preprocessor min_distance_to_center setting");
+  }
+  if (root["preprocessor"]["downsample_filter"].empty()) {
+    throw std::runtime_error("Empty preprocessor downsample_filter setting");
+  }
+  if (root["preprocessor"]["deskew"].empty()) {
+    throw std::runtime_error("Empty preprocessor deskew setting");
+  }
+  if (root["preprocessor"]["min_intensity"].empty()) {
+    throw std::runtime_error("Empty preprocessor min_intensity setting");
+  }
   config_.preprocessor.voxel_size =
       root["preprocessor"]["voxel_size"].asFloat();
-  if (!root["preprocessor"]["min_distance_to_center"].empty()) {
-    config_.preprocessor.min_distance_to_center =
-        root["preprocessor"]["min_distance_to_center"].asFloat();
-  }
-  if (!root["preprocessor"]["downsample_filter"].empty()) {
-    config_.preprocessor.downsample_filter = parseDownsampleFilter(
-        root["preprocessor"]["downsample_filter"].asString());
-  }
-  if (!root["preprocessor"]["points_per_second"].empty()) {
-    config_.preprocessor.points_per_second =
-        root["preprocessor"]["points_per_second"].asUInt();
-  }
-  if (!root["preprocessor"]["deskew"].empty()) {
-    const auto &deskew_val = root["preprocessor"]["deskew"];
-    if (deskew_val.isBool()) {
-      config_.preprocessor.deskew_mode =
-          deskew_val.asBool() ? mslam::DeskewMode::ConstantVelocity
-                              : mslam::DeskewMode::Off;
+  config_.preprocessor.min_distance_to_center =
+      root["preprocessor"]["min_distance_to_center"].asFloat();
+  config_.preprocessor.min_intensity =
+      root["preprocessor"]["min_intensity"].asFloat();
+
+  config_.preprocessor.downsample_filter = parseDownsampleFilter(
+      root["preprocessor"]["downsample_filter"].asString());
+
+  const auto &deskew_val = root["preprocessor"]["deskew"];
+  if (deskew_val.isBool()) {
+    config_.preprocessor.deskew_mode = deskew_val.asBool()
+                                           ? mslam::DeskewMode::ConstantVelocity
+                                           : mslam::DeskewMode::Off;
+  } else {
+    const auto deskew_str = deskew_val.asString();
+    if (deskew_str == "off") {
+      config_.preprocessor.deskew_mode = mslam::DeskewMode::Off;
+    } else if (deskew_str == "constant_velocity") {
+      config_.preprocessor.deskew_mode = mslam::DeskewMode::ConstantVelocity;
+    } else if (deskew_str == "imu") {
+      config_.preprocessor.deskew_mode = mslam::DeskewMode::Imu;
     } else {
-      const auto deskew_str = deskew_val.asString();
-      if (deskew_str == "off") {
-        config_.preprocessor.deskew_mode = mslam::DeskewMode::Off;
-      } else if (deskew_str == "constant_velocity") {
-        config_.preprocessor.deskew_mode = mslam::DeskewMode::ConstantVelocity;
-      } else if (deskew_str == "imu") {
-        config_.preprocessor.deskew_mode = mslam::DeskewMode::Imu;
-      } else {
-        throw std::runtime_error("Invalid preprocessor deskew mode: " +
-                                 deskew_str);
-      }
+      throw std::runtime_error("Invalid preprocessor deskew mode: " +
+                               deskew_str);
     }
   }
   if (config_.preprocessor.min_distance_to_center < 0.0F) {
@@ -121,6 +142,15 @@ void JsonConfig::load() {
       root["map"]["max_points_per_voxel"].asUInt();
 
   // Slam parameters
+  if (root["slam"]["optimizer_iterations"].empty()) {
+    throw std::runtime_error("Empty slam optimizer_iterations setting");
+  }
+  if (root["slam"]["reg_iterations"].empty()) {
+    throw std::runtime_error("Empty slam reg_iterations setting");
+  }
+  if (root["slam"]["max_correspondence_distance"].empty()) {
+    throw std::runtime_error("Empty slam max_correspondence_distance setting");
+  }
   config_.parameters.opt_iterations =
       root["slam"]["optimizer_iterations"].asUInt();
   config_.parameters.reg_iterations = root["slam"]["reg_iterations"].asUInt();

@@ -40,7 +40,6 @@ private:
 
   SlamConfiguration config_;
   std::shared_ptr<IMap> map_;
-  Preprocessor preprocessor_;
   std::unique_ptr<IRegistration> registration_;
   Pose3D pose_;
   std::shared_ptr<ILog> logger_;

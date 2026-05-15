@@ -12,7 +12,7 @@ enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
 enum class DeskewMode { Off, ConstantVelocity, Imu };
 
-inline std::string toString(ILog::Level level) {
+inline constexpr std::string_view toString(ILog::Level level) {
   switch (level) {
   case ILog::Level::TRACE:
     return "TRACE";
@@ -29,7 +29,7 @@ inline std::string toString(ILog::Level level) {
   throw std::runtime_error("Invalid log level");
 }
 
-inline std::string toString(RegistrationMetric3D metric) {
+inline constexpr std::string_view toString(RegistrationMetric3D metric) {
   switch (metric) {
   case RegistrationMetric3D::PointToPoint:
     return "point_to_point";
@@ -40,7 +40,7 @@ inline std::string toString(RegistrationMetric3D metric) {
   throw std::runtime_error("Invalid 3D registration metric");
 }
 
-inline std::string toString(DownsampleFilter filter) {
+inline constexpr std::string_view toString(DownsampleFilter filter) {
   switch (filter) {
   case DownsampleFilter::VoxelGrid:
     return "voxel_grid";
@@ -66,8 +66,9 @@ struct SlamParameters {
  *
  */
 struct PreProcessor {
-  float voxel_size = 0.1;              // input scan voxel downsampling
+  float voxel_size = 0.1F;             // input scan voxel downsampling
   float min_distance_to_center = 0.0F; // remove points closer than this
+  float min_intensity = 0.0F; // reject points with intensity below this
   DownsampleFilter downsample_filter = DownsampleFilter::VoxelGrid;
   unsigned int points_per_second =
       0; // lidar scan rate (pts/s), used for deskewing

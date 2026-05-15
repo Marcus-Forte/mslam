@@ -99,3 +99,37 @@ running pairwise registration experiments.
 ```bash
 ./build/default/register_scans2d scan1.ply scan2.ply
 ```
+
+## Inspecting generated SIMD instructions
+
+The project compiles with `-march=native`, which allows the compiler to emit
+AVX/FMA instructions for Eigen operations. To verify which source lines produce
+SIMD code, disassemble an object file with line annotations:
+
+```bash
+# With source-line annotations (requires debug info, i.e. -g):
+objdump -d -l build/default/src/slam/CMakeFiles/slam.dir/Transform.cc.o
+
+# With interleaved source code:
+objdump -d -S build/default/src/slam/CMakeFiles/slam.dir/Transform.cc.o
+
+# Filter for SIMD instructions only:
+objdump -d build/default/src/slam/CMakeFiles/slam.dir/Transform.cc.o \
+  | grep -E "vmov|vadd|vmul|vfma|vbroadcast"
+
+# On ARM64 (NEON/SVE):
+objdump -d build/default/src/slam/CMakeFiles/slam.dir/Transform.cc.o \
+  | grep -E "fmla|fmul|fadd|ld1|st1|fmadd|fmsub"
+```
+
+The key functions to inspect:
+
+| Object file | Source | What it does |
+|---|---|---|
+| `Transform.cc.o` | `transformCloud(Affine3d, ...)` | Per-point affine transform (hot loop, uses AVX2 ymm registers) |
+| `Transform.cc.o` | `toAffine(..., rx, ry, rz)` | Rotation matrix construction from Euler angles |
+| `PointToPlaneRegistration.cc.o` | `Align3D` | 6×6 normal equation solve |
+| `NormalEstimator.cc.o` | `estimate` | 3×3 covariance eigensolver |
+
+Replace the path after `CMakeFiles/slam.dir/` with any source file to inspect
+other translation units.

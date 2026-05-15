@@ -22,9 +22,7 @@ from proto_gen import lidar_pb2, slam_pb2, slam_pb2_grpc  # noqa: E402
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAIN_LOOP_INTERVAL_SEC = 0.1
-RECONNECT_INITIAL_DELAY_SEC = 1.0
-RECONNECT_MAX_DELAY_SEC = 30.0
-RECONNECT_BACKOFF_FACTOR = 2.0
+RECONNECT_DELAY_SEC = 5.0
 MAP_POINT_SIZE_SCALE = 0.2
 SCAN_POINT_SIZE_SCALE = 0.2
 CORRESPONDENCE_POINT_SIZE_SCALE = 0.2
@@ -164,12 +162,9 @@ class SlamViewerClient:
         stream_name: str,
         stream_fn: Callable[[], None],
     ) -> None:
-        delay = RECONNECT_INITIAL_DELAY_SEC
         while not self._shutdown_event.is_set():
             try:
                 stream_fn()
-                # Stream ended normally (server closed); reset backoff and reconnect.
-                delay = RECONNECT_INITIAL_DELAY_SEC
             except Exception as exc:
                 self._log_stream_exception(stream_name, exc)
                 if self._shutdown_event.is_set():
@@ -177,11 +172,10 @@ class SlamViewerClient:
                 logger.info(
                     "Reconnecting %s stream in %.1f seconds...",
                     stream_name,
-                    delay,
+                    RECONNECT_DELAY_SEC,
                 )
-                if self._shutdown_event.wait(timeout=delay):
+                if self._shutdown_event.wait(timeout=RECONNECT_DELAY_SEC):
                     return
-                delay = min(delay * RECONNECT_BACKOFF_FACTOR, RECONNECT_MAX_DELAY_SEC)
 
     def _run_stream_map_increments(self) -> None:
         self._run_stream("map", self._stream_map_increments)
@@ -201,10 +195,12 @@ class SlamViewerClient:
         with grpc.insecure_channel(self._server_addr) as channel:
             stub = slam_pb2_grpc.SlamServiceStub(channel)
 
-            # Fetch full snapshot on each (re)connect so stale data is replaced.
-            self._clear_local_clouds()
+            # Fetch full snapshot first — only clear local clouds once we know
+            # the server is back, so the visualization stays intact while disconnected.
             logger.info("Fetching initial SLAM map snapshot from %s", self._server_addr)
-            self._set_map_cloud(stub.GetMap(request))
+            map_snapshot = stub.GetMap(request)
+            self._clear_local_clouds()
+            self._set_map_cloud(map_snapshot)
 
             logger.info("Streaming map increments from %s", self._server_addr)
             for increment in stub.GetMapIncrements(request):

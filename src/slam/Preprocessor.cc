@@ -45,7 +45,7 @@ std::shared_ptr<Scan> Preprocessor::downsample(const Scan &input) const {
 std::shared_ptr<Scan>
 Preprocessor::removePointsNearCenter(const Scan &input) const {
   auto filtered_scan = std::make_shared<Scan>();
-  filtered_scan->header.timestamp = input.header.timestamp;
+  filtered_scan->header = input.header;
 
   const float min_distance_squared =
       config_.min_distance_to_center * config_.min_distance_to_center;

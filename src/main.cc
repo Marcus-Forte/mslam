@@ -4,7 +4,8 @@
 
 #include "map/KDTreeMap.hh"
 #include "map/VoxelHashMap.hh"
-#include "sensors_remote_client.hh"
+#include "msensor/imu/remote_imu.hh"
+#include "msensor/lidar/remote_lidar.hh"
 #include "slam/PointCloudExporter.hh"
 #include "slam/RecordingSensorPlayer.hh"
 #include "slam/Slam.hh"
@@ -115,11 +116,9 @@ int main(int argc, char **argv) {
     throw std::runtime_error("Local mode not yet supported");
 
   } else {
-    auto scanner = std::make_shared<SensorsRemoteClient>(config.remote_scanner);
-    scanner->init();
-    scanner->start();
-    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(scanner);
-    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(scanner);
+    lidar_sensor =
+        std::make_shared<msensor::RemoteLidar>(config.remote_scanner);
+    imu_sensor = std::make_shared<msensor::RemoteImu>(config.remote_scanner);
   }
 
   mslam::Slam slam(logger, config, map);

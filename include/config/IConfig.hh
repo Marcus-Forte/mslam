@@ -91,6 +91,7 @@ struct MapParameters {
 struct SlamConfiguration {
   bool with_imu = false;
   bool with_lidar = true;
+  double imu_acceleration_scale = 1.0;
   ILog::Level log_level = ILog::Level::INFO;
   MapType map_type = MapType::KdTree;
   std::string remote_scanner = "local";
@@ -102,6 +103,7 @@ struct SlamConfiguration {
   friend std::ostream &operator<<(std::ostream &os, SlamConfiguration config) {
     os << "IMU: " << config.with_imu << "\n"
        << "LIDAR: " << config.with_lidar << "\n"
+       << "IMU Acceleration Scale: " << config.imu_acceleration_scale << "\n"
        << "Log Level: " << toString(config.log_level) << "\n"
        << "Scanner: " << config.remote_scanner << "\n"
        << "# MAP Parameters #" << "\n"

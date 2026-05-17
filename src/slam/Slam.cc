@@ -8,12 +8,16 @@
 #include "slam/registration/PointToPlaneRegistration.hh"
 #include "slam/registration/PointToPointRegistration.hh"
 
+#include <cmath>
 #include <csignal>
+#include <limits>
 #include <thread>
 
 namespace {
 
 constexpr int g_init_scans = 10;
+constexpr double g_gravity_mps2 = 9.80665;
+constexpr double g_min_acceleration_norm_mps2 = 1e-3;
 
 mslam::PointCloud toPointCloud3(const mslam::VectorPoint3d &points) {
   mslam::PointCloud point_cloud;
@@ -29,6 +33,40 @@ void logPose3D(const std::shared_ptr<ILog> &logger, const mslam::Pose3D &pose) {
               "Pose: {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", pose[0],
               pose[1], pose[2], pose[3], pose[4], pose[5]);
 }
+
+Eigen::Vector3d
+toGravityCompensatedWorldAcceleration(const mslam::Pose3D &pose,
+                                      const msensor::IMUData &imu_data,
+                                      double acceleration_scale) {
+  const auto orientation =
+      toAffine(0.0, 0.0, 0.0, pose[3], pose[4], pose[5]).linear();
+  Eigen::Vector3d world_acceleration =
+      orientation * (acceleration_scale *
+                     Eigen::Vector3d(imu_data.ax, imu_data.ay, imu_data.az));
+  world_acceleration.z() -= g_gravity_mps2;
+  return world_acceleration;
+}
+
+std::optional<Eigen::Vector2d>
+estimateGravityAlignedRollPitch(const msensor::IMUData &imu_data) {
+  const Eigen::Vector3d body_acceleration(imu_data.ax, imu_data.ay,
+                                          imu_data.az);
+  const double acceleration_norm = body_acceleration.norm();
+  if (!std::isfinite(acceleration_norm) ||
+      acceleration_norm < g_min_acceleration_norm_mps2) {
+    return std::nullopt;
+  }
+
+  const Eigen::Vector3d gravity_direction =
+      body_acceleration / acceleration_norm;
+  const double roll =
+      std::atan2(gravity_direction.y(),
+                 std::hypot(gravity_direction.x(), gravity_direction.z()));
+  const double pitch =
+      std::atan2(-gravity_direction.x(), gravity_direction.z());
+  return Eigen::Vector2d(roll, pitch);
+}
+
 } // namespace
 namespace mslam {
 
@@ -44,21 +82,59 @@ Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamConfiguration &config,
       map_(map) {
   ResetPose();
 }
+
+void Slam::ResetImuPreintegration() {
+  imu_velocity_.setZero();
+  last_imu_timestamp_ns_.reset();
+}
+
 void Slam::ResetPose() {
   pose_.setZero();
+  ResetImuPreintegration();
+  imu_gravity_aligned_ = false;
   logger_->log(ILog::Level::INFO, "Slam Reset: Pose");
 }
+
+bool Slam::TryInitializeGravityAlignment(const msensor::IMUData &imuData) {
+  if (imu_gravity_aligned_) {
+    return false;
+  }
+
+  const auto roll_pitch = estimateGravityAlignedRollPitch(imuData);
+  if (!roll_pitch.has_value()) {
+    return false;
+  }
+
+  pose_[3] = (*roll_pitch).x();
+  pose_[4] = (*roll_pitch).y();
+  imu_velocity_.setZero();
+  imu_gravity_aligned_ = true;
+
+  logger_->log(
+      ILog::Level::INFO,
+      "Initialized IMU gravity alignment: roll={}, pitch={}, accel_scale={}",
+      pose_[3], pose_[4], config_.imu_acceleration_scale);
+  return true;
+}
+
 void Slam::Predict(const msensor::IMUData &imuData) {
-  static uint64_t last_timestamp = std::numeric_limits<uint64_t>::max();
+  const bool just_initialized_gravity = TryInitializeGravityAlignment(imuData);
+
+  if (!last_imu_timestamp_ns_.has_value()) {
+    last_imu_timestamp_ns_ = imuData.header.timestamp;
+    return;
+  }
 
   const auto delta = (static_cast<double>(imuData.header.timestamp) -
-                      static_cast<double>(last_timestamp)) *
+                      static_cast<double>(*last_imu_timestamp_ns_)) *
                      1e-9;
 
-  last_timestamp = imuData.header.timestamp;
+  last_imu_timestamp_ns_ = imuData.header.timestamp;
 
   if (delta < 0) {
     logger_->log(ILog::Level::WARNING, "IMU Loopback detected.");
+    ResetImuPreintegration();
+    last_imu_timestamp_ns_ = imuData.header.timestamp;
     return;
   }
 
@@ -67,22 +143,54 @@ void Slam::Predict(const msensor::IMUData &imuData) {
         ILog::Level::WARNING,
         "Large IMU delta detected: {} seconds. Possible timestamp issue.",
         delta);
+    ResetImuPreintegration();
+    last_imu_timestamp_ns_ = imuData.header.timestamp;
     return;
   }
 
-  logger_->log(ILog::Level::DEBUG, "delta: {} * [{}, {}, {}]", delta,
-               imuData.gx, imuData.gy, imuData.gz);
+  if (just_initialized_gravity) {
+    imu_velocity_.setZero();
+    return;
+  }
+
+  if (!imu_gravity_aligned_) {
+    pose_[3] += delta * imuData.gx;
+    pose_[4] += delta * imuData.gy;
+    pose_[5] += delta * imuData.gz;
+    return;
+  }
+
+  const Eigen::Vector3d world_acceleration =
+      toGravityCompensatedWorldAcceleration(pose_, imuData,
+                                            config_.imu_acceleration_scale);
+
+  pose_[0] +=
+      delta * imu_velocity_.x() + 0.5 * delta * delta * world_acceleration.x();
+  pose_[1] +=
+      delta * imu_velocity_.y() + 0.5 * delta * delta * world_acceleration.y();
+  pose_[2] +=
+      delta * imu_velocity_.z() + 0.5 * delta * delta * world_acceleration.z();
+
+  imu_velocity_ += delta * world_acceleration;
   pose_[3] += delta * imuData.gx;
   pose_[4] += delta * imuData.gy;
   pose_[5] += delta * imuData.gz;
 
+  logger_->log(ILog::Level::DEBUG,
+               "IMU preintegration dt: {} s, acc_w: [{}, {}, {}], vel_w: "
+               "[{}, {}, {}]",
+               delta, world_acceleration.x(), world_acceleration.y(),
+               world_acceleration.z(), imu_velocity_.x(), imu_velocity_.y(),
+               imu_velocity_.z());
   logger_->log(ILog::Level::DEBUG, "Predict");
   logPose3D(logger_, pose_);
 }
+
 void Slam::Update(const Scan &lidarData) {
   const auto pose_prior = pose_;
 
   pose_ = registration_->Align(pose_prior, *map_, *lidarData.points);
+  ResetImuPreintegration();
   logger_->log(ILog::Level::DEBUG, "Update");
   logPose3D(logger_, pose_);
 }
@@ -174,16 +282,25 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       pre_imu_pose = getTransform();
 
       while (true) {
+        if (should_stop_.load()) {
+          break;
+        }
+
         const auto imudata = imu->getImuData();
         if (!imudata.has_value()) {
           break;
         }
 
-        logger_->log(ILog::Level::DEBUG,
-                     "Processing IMU @ {}, delta {} ms, seq nr {}",
-                     imudata->header.timestamp,
-                     (imudata->header.timestamp - last_imu_time) * 1e-6,
-                     imudata->header.sequence_number);
+        logger_->log(
+            ILog::Level::DEBUG,
+            "Processing IMU @ {}, delta {} ms, seq nr {}, raw_acc=[{}, {}, "
+            "{}], |acc|={}, raw_gyro=[{}, {}, {}]",
+            imudata->header.timestamp,
+            (imudata->header.timestamp - last_imu_time) * 1e-6,
+            imudata->header.sequence_number, imudata->ax, imudata->ay,
+            imudata->az,
+            std::hypot(imudata->ax, std::hypot(imudata->ay, imudata->az)),
+            imudata->gx, imudata->gy, imudata->gz);
 
         last_imu_time = imudata->header.timestamp;
 
@@ -217,6 +334,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       logger_->log(ILog::Level::INFO,
                    "Init timing. addScan: {} us. Total: {} us", map_update_us,
                    scan_timer.stop());
+      ResetImuPreintegration();
       continue;
     }
     if (config_.with_lidar) {

@@ -1,6 +1,7 @@
 {
     "imu": true,
     "lidar" : true,
+    "imu_acceleration_scale": 9.80665,
     "camera": false,
     "log_level": "debug", // trace || debug || info || warning || error
     "map_type": "voxel", // kdtree || voxel
@@ -9,7 +10,7 @@
     "preprocessor": {
         "voxel_size": 0.1,
         "min_distance_to_center": 1.0,
-        "min_intensity": 50,
+        "min_intensity": 0,
         "downsample_filter": "voxel_hash", // voxel_hash || voxel_grid
         "deskew": "constant_velocity" // off || constant_velocity || imu
     },

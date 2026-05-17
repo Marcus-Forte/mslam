@@ -1,6 +1,8 @@
 #include "config/JsonConfig.hh"
 #include "config/Validation.hh"
 #include "jsoncpp/json/reader.h"
+
+#include <cmath>
 #include <fstream>
 
 namespace mslam {
@@ -54,6 +56,14 @@ void JsonConfig::load() {
   }
   config_.with_imu = root["imu"].asBool();
   config_.with_lidar = root["lidar"].asBool();
+  if (root["imu_acceleration_scale"].empty()) {
+    throw std::runtime_error("Empty imu_acceleration_scale setting");
+  }
+  config_.imu_acceleration_scale = root["imu_acceleration_scale"].asDouble();
+  if (!std::isfinite(config_.imu_acceleration_scale) ||
+      config_.imu_acceleration_scale <= 0.0) {
+    throw std::runtime_error("Invalid imu_acceleration_scale setting");
+  }
 
   if (root["log_level"].empty()) {
     throw std::runtime_error("Empty log_level setting");

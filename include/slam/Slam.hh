@@ -6,7 +6,10 @@
 #include "map/IMap.hh"
 #include "slam/Preprocessor.hh"
 #include "slam/registration/IRegistration.hh"
+
+#include <Eigen/Dense>
 #include <atomic>
+#include <optional>
 
 namespace mslam {
 
@@ -35,6 +38,9 @@ public:
   bool isRunning() const;
 
 private:
+  void ResetImuPreintegration();
+  bool TryInitializeGravityAlignment(const msensor::IMUData &imuData);
+
   static void signalHandler(int signal_number);
   static std::atomic<bool> should_stop_;
 
@@ -42,6 +48,9 @@ private:
   std::shared_ptr<IMap> map_;
   std::unique_ptr<IRegistration> registration_;
   Pose3D pose_;
+  Eigen::Vector3d imu_velocity_ = Eigen::Vector3d::Zero();
+  std::optional<uint64_t> last_imu_timestamp_ns_;
+  bool imu_gravity_aligned_ = false;
   std::shared_ptr<ILog> logger_;
   std::atomic<bool> running_{true};
 };

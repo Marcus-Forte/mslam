@@ -33,3 +33,10 @@ def quaternion_multiply(lhs: np.ndarray, rhs: np.ndarray) -> np.ndarray:
         ],
         dtype=np.float32,
     )
+
+
+def quaternion_rotate_vector(q_wxyz: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Rotate a 3-vector by a unit quaternion (w, x, y, z)."""
+    q_vec = q_wxyz[1:]
+    t = 2.0 * np.cross(q_vec, v)
+    return v + q_wxyz[0] * t + np.cross(q_vec, t)

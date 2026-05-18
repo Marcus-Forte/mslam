@@ -9,7 +9,7 @@ from typing import Any
 import grpc
 import numpy as np
 
-from geometry import euler_xyz_to_wxyz
+from geometry import euler_xyz_to_wxyz, quaternion_rotate_vector
 from points import intensity_to_colors, to_viser_colors, to_viser_points
 
 PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
@@ -79,6 +79,10 @@ class SlamViewerClient:
 
         self._grpc_channel = grpc.insecure_channel(self._server_addr)
         self._control_stub = slam_pb2_grpc.SlamServiceStub(self._grpc_channel)
+
+        self._follow_pose_toggle = self._viser_server.gui.add_checkbox(
+            "Follow Pose", initial_value=False
+        )
 
         start_button = self._viser_server.gui.add_button("Start")
         stop_button = self._viser_server.gui.add_button("Stop")
@@ -299,3 +303,13 @@ class SlamViewerClient:
 
         self._pose_frame.position = position
         self._pose_frame.wxyz = rotation_wxyz
+
+        if self._follow_pose_toggle.value:
+            self._move_camera_to_pose(position, rotation_wxyz)
+
+    def _move_camera_to_pose(
+        self, position: np.ndarray, rotation_wxyz: np.ndarray
+    ) -> None:
+        # Keep the orbit center on the pose so the user can freely rotate around it.
+        for client in self._viser_server.get_clients().values():
+            client.camera.look_at = position

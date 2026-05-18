@@ -4,8 +4,9 @@
 #include "ISlam.hh"
 #include "config/IConfig.hh"
 #include "map/IMap.hh"
-#include "slam/Preprocessor.hh"
+#include "slam/ImuPreintegration.hh"
 #include "slam/registration/IRegistration.hh"
+#include "slam/registration/ImuRegistration.hh"
 
 #include <Eigen/Dense>
 #include <atomic>
@@ -46,12 +47,18 @@ private:
 
   SlamConfiguration config_;
   std::shared_ptr<IMap> map_;
+  std::unique_ptr<IMap> dense_map_;
   std::unique_ptr<IRegistration> registration_;
-  Pose3D pose_;
-  Eigen::Vector3d imu_velocity_ = Eigen::Vector3d::Zero();
+  std::unique_ptr<ImuRegistration> imu_registration_;
+  SlamState state_;
   std::optional<uint64_t> last_imu_timestamp_ns_;
   bool imu_gravity_aligned_ = false;
   std::shared_ptr<ILog> logger_;
   std::atomic<bool> running_{true};
+
+  // IMU preintegration state
+  ImuPreintegrator preintegrator_{ImuNoiseParams{}};
+  SlamState previous_state_;
+  bool has_previous_state_ = false;
 };
 } // namespace mslam

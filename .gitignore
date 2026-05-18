@@ -5,3 +5,6 @@ __pycache__/
 
 # ignore *.pbscan JUST at the root of the repo
 /*.pbscan
+
+# Ignore .log files 
+/*.log

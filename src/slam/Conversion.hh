@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common/Points.hh"
-#include "common/Pose.hh"
+#include "common/State.hh"
 #include "slam.pb.h"
 
 namespace mslam {

@@ -127,8 +127,6 @@ void JsonConfig::load() {
       config_.preprocessor.deskew_mode = mslam::DeskewMode::Off;
     } else if (deskew_str == "constant_velocity") {
       config_.preprocessor.deskew_mode = mslam::DeskewMode::ConstantVelocity;
-    } else if (deskew_str == "imu") {
-      config_.preprocessor.deskew_mode = mslam::DeskewMode::Imu;
     } else {
       throw std::runtime_error("Invalid preprocessor deskew mode: " +
                                deskew_str);

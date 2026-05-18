@@ -10,7 +10,7 @@ namespace mslam {
 enum class MapType { KdTree, Voxel };
 enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
-enum class DeskewMode { Off, ConstantVelocity, Imu };
+enum class DeskewMode { Off, ConstantVelocity };
 
 inline constexpr std::string_view toString(ILog::Level level) {
   switch (level) {

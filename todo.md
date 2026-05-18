@@ -3,6 +3,7 @@
 ## Slam 
 
 * Documentation
+* Feature Extraction
 * slam unit test
 * Add initial scan logic to slam class?
 * SO3 operations module

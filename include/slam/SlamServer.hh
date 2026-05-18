@@ -2,7 +2,7 @@
 
 #include "ILog.hh"
 #include "common/Points.hh"
-#include "common/Pose.hh"
+#include "common/State.hh"
 #include "map/IMap.hh"
 #include "slam.grpc.pb.h"
 #include <atomic>

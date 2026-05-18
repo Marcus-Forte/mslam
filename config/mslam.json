@@ -8,20 +8,20 @@
     "remote_scanner": "192.168.178.129:50051", // ignored if .pbscan is used
 
     "preprocessor": {
-        "voxel_size": 0.1,
+        "voxel_size": 0.2,
         "min_distance_to_center": 1.0,
         "min_intensity": 0,
         "downsample_filter": "voxel_hash", // voxel_hash || voxel_grid
-        "deskew": "constant_velocity" // off || constant_velocity || imu
+        "deskew": "constant_velocity" // off || constant_velocity
     },
     "map": {
-        "resolution": 0.1,
-        "max_points_per_voxel": 3
+        "resolution": 0.2,
+        "max_points_per_voxel": 10
     },
 
     "slam": {
-        "optimizer_iterations": 6,
-        "reg_iterations": 6,
+        "optimizer_iterations": 3,
+        "reg_iterations": 3,
         "max_correspondence_distance": 0.3
     }
 }

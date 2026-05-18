@@ -6,6 +6,7 @@
 namespace mslam {
 class IMap {
 public:
+  virtual ~IMap() = default;
   /**
    * @brief A neighbor in the map.
    *

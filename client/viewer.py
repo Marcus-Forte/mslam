@@ -305,11 +305,9 @@ class SlamViewerClient:
         self._pose_frame.wxyz = rotation_wxyz
 
         if self._follow_pose_toggle.value:
-            self._move_camera_to_pose(position, rotation_wxyz)
+            self._move_camera_to_pose(position)
 
-    def _move_camera_to_pose(
-        self, position: np.ndarray, rotation_wxyz: np.ndarray
-    ) -> None:
-        # Keep the orbit center on the pose so the user can freely rotate around it.
+    def _move_camera_to_pose(self, position: np.ndarray) -> None:
+        # Move the orbit center to the pose; user can still rotate around it.
         for client in self._viser_server.get_clients().values():
             client.camera.look_at = position

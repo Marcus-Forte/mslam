@@ -2,7 +2,7 @@
 
 #include "ILog.hh"
 #include "common/Points.hh"
-#include "common/Pose.hh"
+#include "common/State.hh"
 #include "map/IMap.hh"
 #include "slam/ICorrespondenceFinder.hh"
 
@@ -22,8 +22,8 @@ public:
 
   virtual ~IRegistration() = default;
 
-  virtual Pose3D Align(const Pose3D &pose, const IMap &map,
-                       const PointCloud &scan) = 0;
+  virtual SlamState Align(const SlamState &state, const IMap &map,
+                          const PointCloud &scan) = 0;
 
 protected:
   int num_registration_iterations_;

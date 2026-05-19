@@ -29,6 +29,14 @@ Technical expectations:
 - Apply practical knowledge of OpenCV, PCL, Eigen-style linear algebra workflows, and performance-sensitive C++ implementation details
 - Prefer numerically stable reasoning, explicit coordinate-frame handling, and testable assumptions over speculative fixes
 
+SOLID principles:
+
+- **Single Responsibility**: Each class owns one concern. `Slam` orchestrates, `VoxelHashMap` stores spatial data, `CorrespondenceFinder` finds correspondences, `Preprocessor` filters scans. Do not conflate responsibilities when adding features.
+- **Open/Closed**: Extend behavior through new implementations of existing interfaces (`IMap`, `ICorrespondenceFinder`, registration strategies) rather than modifying working concrete classes. Add new registration methods as new classes, not as branches in existing ones.
+- **Liskov Substitution**: Any `IMap` implementation must be substitutable without the caller knowing the concrete type. Respect preconditions and postconditions defined by the interface contract.
+- **Interface Segregation**: Keep interfaces focused. `IMap` exposes spatial queries; `ICorrespondenceFinder` exposes matching. Do not bloat interfaces with methods only one consumer needs.
+- **Dependency Inversion**: High-level modules (`Slam`, `SlamServer`) depend on abstractions (`IMap`, `IConfig`), not on concrete implementations. Inject dependencies through constructors; do not construct them internally unless factory logic is the class's responsibility.
+
 Repository-specific guidance:
 
 - Use `logger->log(...)` for runtime diagnostics and reserve `std::cout` for CLI-facing behavior in entrypoint code

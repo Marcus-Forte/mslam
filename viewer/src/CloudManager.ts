@@ -14,7 +14,7 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 
-export type ColorMode = "height" | "flat";
+export type ColorMode = "intensity" | "flat";
 
 export type CloudEntry = {
   id: number;
@@ -35,29 +35,50 @@ const PRESET_COLORS = [
 ];
 const DEFAULT_POINT_SIZE = 0.04;
 
-function colorizeByHeight(geometry: BufferGeometry): void {
-  const positions = geometry.getAttribute("position");
-  if (!(positions instanceof BufferAttribute)) {
+/**
+ * Rainbow colormap matching _getRainbowColor from msensor (see client/colormap.py).
+ * Maps a normalized [0,1] value to an RGB triplet in [0,1].
+ */
+function rainbowColor(value: number): [number, number, number] {
+  const v = Math.max(0, Math.min(1, value));
+  const h = v * 5.0 + 1.0;
+  const i = Math.floor(h);
+  let f = h - i;
+  if ((i & 1) === 0) f = 1.0 - f;
+  const n = 1.0 - f;
+
+  if (i <= 1) return [n, 0, 1];
+  if (i === 2) return [0, n, 1];
+  if (i === 3) return [0, 1, n];
+  if (i === 4) return [n, 1, 0];
+  return [1, n, 0];
+}
+
+function colorizeByIntensity(geometry: BufferGeometry): void {
+  const intensityAttr = geometry.getAttribute("intensity");
+  if (!intensityAttr || intensityAttr.count === 0) {
     return;
   }
 
-  const colors = new Float32Array(positions.count * 3);
-  let minZ = Number.POSITIVE_INFINITY;
-  let maxZ = Number.NEGATIVE_INFINITY;
+  const count = intensityAttr.count;
+  const colors = new Float32Array(count * 3);
+  let minI = Number.POSITIVE_INFINITY;
+  let maxI = Number.NEGATIVE_INFINITY;
 
-  for (let i = 0; i < positions.count; i += 1) {
-    const z = positions.getZ(i);
-    minZ = Math.min(minZ, z);
-    maxZ = Math.max(maxZ, z);
+  for (let i = 0; i < count; i += 1) {
+    const v = intensityAttr.getX(i);
+    minI = Math.min(minI, v);
+    maxI = Math.max(maxI, v);
   }
 
-  const span = Math.max(maxZ - minZ, 1e-6);
+  const span = Math.max(maxI - minI, 1e-6);
 
-  for (let i = 0; i < positions.count; i += 1) {
-    const n = (positions.getZ(i) - minZ) / span;
-    colors[i * 3] = n;
-    colors[i * 3 + 1] = 0.35 + 0.45 * (1 - Math.abs(n - 0.5) * 2);
-    colors[i * 3 + 2] = 1 - n;
+  for (let i = 0; i < count; i += 1) {
+    const n = (intensityAttr.getX(i) - minI) / span;
+    const [r, g, b] = rainbowColor(n);
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
   }
 
   geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
@@ -76,8 +97,8 @@ function applyFlatColor(geometry: BufferGeometry, hex: string): void {
 }
 
 function applyCloudColor(entry: CloudEntry): void {
-  if (entry.colorMode === "height") {
-    colorizeByHeight(entry.geometry);
+  if (entry.colorMode === "intensity") {
+    colorizeByIntensity(entry.geometry);
   } else {
     applyFlatColor(entry.geometry, entry.flatColor);
   }
@@ -89,7 +110,7 @@ function applyCloudColor(entry: CloudEntry): void {
 
 export class CloudManager {
   private readonly group = new Group();
-  private readonly loader = new PLYLoader();
+  private readonly loader: PLYLoader;
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly clouds: CloudEntry[] = [];
@@ -112,6 +133,11 @@ export class CloudManager {
     this.countEl = countEl;
     this.totalEl = totalEl;
     this.raycaster.params.Points.threshold = 0.03;
+
+    this.loader = new PLYLoader();
+    this.loader.setCustomPropertyNameMapping({
+      intensity: ['intensity'],
+    });
   }
 
   get sceneGroup(): Group {
@@ -121,7 +147,7 @@ export class CloudManager {
   add(file: File): void {
     file.arrayBuffer().then((buffer) => {
       const geometry = this.loader.parse(buffer);
-      colorizeByHeight(geometry);
+      colorizeByIntensity(geometry);
 
       const id = this.nextId++;
       const pointSize = DEFAULT_POINT_SIZE;
@@ -145,7 +171,7 @@ export class CloudManager {
         name: file.name,
         mesh,
         geometry,
-        colorMode: "height",
+        colorMode: "intensity",
         flatColor: PRESET_COLORS[id % PRESET_COLORS.length],
         pointSize,
         visible: true,
@@ -197,7 +223,7 @@ export class CloudManager {
       }
 
       const positions = cloud.geometry.getAttribute("position");
-      if (!(positions instanceof BufferAttribute)) {
+      if (!positions) {
         continue;
       }
 
@@ -269,7 +295,7 @@ export class CloudManager {
         <div class="cloud-option-row">
           <span class="cloud-option-label">Color</span>
           <select class="cloud-color-mode">
-            <option value="height"${entry.colorMode === "height" ? " selected" : ""}>Height gradient</option>
+            <option value="intensity"${entry.colorMode === "intensity" ? " selected" : ""}>Intensity</option>
             <option value="flat"${entry.colorMode === "flat" ? " selected" : ""}>Flat color</option>
           </select>
           <input type="color" class="cloud-color-picker" value="${entry.flatColor}" />

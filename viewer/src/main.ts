@@ -75,7 +75,8 @@ class ViewerApp {
       this.camera,
       this.canvas,
       requireElement("#ruler-labels"),
-      requireElement("#ruler-distance"),
+      requireElement("#ruler-list-section"),
+      requireElement("#ruler-list"),
       requireElement("#ruler-toggle"),
       requireElement("#ruler-clear"),
     );

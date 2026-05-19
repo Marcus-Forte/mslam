@@ -27,10 +27,15 @@ export const appLayout = `
           <button id="ruler-toggle" class="tool-button" type="button" aria-pressed="false">
             Ruler off
           </button>
-          <button id="ruler-clear" class="tool-button secondary" type="button" disabled>
-            Clear
-          </button>
         </div>
+      </div>
+
+      <div class="ruler-list-section" id="ruler-list-section" hidden>
+        <div class="ruler-list-header">
+          <p class="section-label">Measurements</p>
+          <button id="ruler-clear" class="tool-button secondary small" type="button">Clear all</button>
+        </div>
+        <div class="ruler-list" id="ruler-list"></div>
       </div>
 
       <dl class="stats">
@@ -41,10 +46,6 @@ export const appLayout = `
         <div>
           <dt>Total points</dt>
           <dd id="total-points">0</dd>
-        </div>
-        <div>
-          <dt>Measure</dt>
-          <dd id="ruler-distance">-</dd>
         </div>
       </dl>
 

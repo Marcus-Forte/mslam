@@ -10,31 +10,50 @@ import {
 } from "three";
 
 type Measurement = {
+  id: number;
   start: Vector3;
   end: Vector3;
   distance: number;
   midpoint: Vector3;
   label: HTMLDivElement;
+  element: HTMLElement;
 };
 
-const MARKER_SIZE = 0.025;
+const MARKER_SIZE = 0.08;
+const COLOR_DEFAULT = "#1b2f38";
+const COLOR_SELECTED = "#e57b45";
+const MARKER_COLOR = "#d63030";
+
+function createMarkerMaterial(): PointsMaterial {
+  const mat = new PointsMaterial({ color: MARKER_COLOR, size: MARKER_SIZE, sizeAttenuation: true });
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "void main() {",
+      "void main() {\n  vec2 c = 2.0 * gl_PointCoord - 1.0;\n  if (dot(c, c) > 1.0) discard;",
+    );
+  };
+  return mat;
+}
 
 export class RulerTool {
   private readonly group = new Group();
   private readonly measurements: Measurement[] = [];
   private pendingPoint: Vector3 | null = null;
   private enabled = false;
+  private selectedId: number | null = null;
+  private nextId = 0;
 
   constructor(
     private readonly camera: PerspectiveCamera,
     private readonly canvas: HTMLCanvasElement,
     private readonly labelsContainer: HTMLDivElement,
-    private readonly distanceLabel: HTMLElement,
+    private readonly listSection: HTMLElement,
+    private readonly listContainer: HTMLElement,
     private readonly toggleButton: HTMLButtonElement,
     private readonly clearButton: HTMLButtonElement,
   ) {
     this.toggleButton.addEventListener("click", () => this.setEnabled(!this.enabled));
-    this.clearButton.addEventListener("click", () => this.clear());
+    this.clearButton.addEventListener("click", () => this.clearAll());
     this.setEnabled(false);
   }
 
@@ -54,14 +73,54 @@ export class RulerTool {
     }
 
     const distance = this.pendingPoint.distanceTo(point);
-    this.measurements.push({
+    const id = this.nextId++;
+    const measurement: Measurement = {
+      id,
       start: this.pendingPoint,
       end: point,
       distance,
       midpoint: this.pendingPoint.clone().add(point).multiplyScalar(0.5),
       label: this.buildLabel(distance),
-    });
+      element: this.buildListEntry(id, distance),
+    };
+    this.measurements.push(measurement);
+    this.listContainer.appendChild(measurement.element);
     this.pendingPoint = null;
+    this.selectedId = id;
+    this.render();
+  }
+
+  select(id: number | null): void {
+    this.selectedId = id;
+    this.updateSelection();
+    this.render();
+  }
+
+  remove(id: number): void {
+    const index = this.measurements.findIndex((m) => m.id === id);
+    if (index === -1) return;
+
+    const m = this.measurements[index];
+    m.label.remove();
+    m.element.remove();
+    this.measurements.splice(index, 1);
+
+    if (this.selectedId === id) {
+      this.selectedId = this.measurements.length > 0
+        ? this.measurements[this.measurements.length - 1].id
+        : null;
+    }
+    this.render();
+  }
+
+  clearAll(): void {
+    for (const m of this.measurements) {
+      m.label.remove();
+      m.element.remove();
+    }
+    this.measurements.length = 0;
+    this.pendingPoint = null;
+    this.selectedId = null;
     this.render();
   }
 
@@ -92,17 +151,35 @@ export class RulerTool {
     this.canvas.classList.toggle("ruler-active", on);
   }
 
-  private clear(): void {
-    this.pendingPoint = null;
-    this.measurements.length = 0;
-    this.render();
-  }
-
   private buildLabel(distance: number): HTMLDivElement {
     const el = document.createElement("div");
     el.className = "ruler-label";
     el.textContent = distance.toFixed(4);
     return el;
+  }
+
+  private buildListEntry(id: number, distance: number): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "ruler-entry";
+    el.innerHTML = `
+      <span class="ruler-entry-dist">${distance.toFixed(4)} m</span>
+      <button class="cloud-btn ruler-entry-remove" type="button" title="Remove">\u00d7</button>
+    `;
+    el.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest(".ruler-entry-remove")) return;
+      this.select(id);
+    });
+    el.querySelector(".ruler-entry-remove")!.addEventListener("click", () => {
+      this.remove(id);
+    });
+    return el;
+  }
+
+  private updateSelection(): void {
+    for (const m of this.measurements) {
+      m.element.classList.toggle("selected", m.id === this.selectedId);
+      m.label.classList.toggle("selected", m.id === this.selectedId);
+    }
   }
 
   private disposeGroup(): void {
@@ -122,33 +199,26 @@ export class RulerTool {
   private render(): void {
     this.disposeGroup();
     this.labelsContainer.replaceChildren(...this.measurements.map((m) => m.label));
+    this.listSection.hidden = this.measurements.length === 0;
 
     for (const m of this.measurements) {
+      const isSelected = m.id === this.selectedId;
+      const lineColor = isSelected ? COLOR_SELECTED : COLOR_DEFAULT;
+
       const markerGeo = new BufferGeometry().setFromPoints([m.start, m.end]);
-      const markerMat = new PointsMaterial({ color: "#b84122", size: MARKER_SIZE, sizeAttenuation: true });
-      this.group.add(new Points(markerGeo, markerMat));
+      this.group.add(new Points(markerGeo, createMarkerMaterial()));
 
       const lineGeo = new BufferGeometry().setFromPoints([m.start, m.end]);
-      const lineMat = new LineBasicMaterial({ color: "#1b2f38" });
+      const lineMat = new LineBasicMaterial({ color: lineColor, linewidth: 2 });
       this.group.add(new Line(lineGeo, lineMat));
     }
 
     if (this.pendingPoint) {
       const geo = new BufferGeometry().setFromPoints([this.pendingPoint]);
-      const mat = new PointsMaterial({ color: "#b84122", size: MARKER_SIZE, sizeAttenuation: true });
-      this.group.add(new Points(geo, mat));
+      this.group.add(new Points(geo, createMarkerMaterial()));
     }
 
-    this.clearButton.disabled = this.measurements.length === 0 && this.pendingPoint === null;
-
-    if (this.measurements.length === 0) {
-      this.distanceLabel.textContent = "-";
-    } else {
-      const last = this.measurements[this.measurements.length - 1].distance;
-      const suffix = this.measurements.length > 1 ? ` (${this.measurements.length})` : "";
-      this.distanceLabel.textContent = `${last.toFixed(4)}${suffix}`;
-    }
-
+    this.updateSelection();
     this.updateLabels();
   }
 }

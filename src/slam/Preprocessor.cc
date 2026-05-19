@@ -81,37 +81,61 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
     return result;
   }
 
-  // SE3 log of the relative motion (constant velocity twist)
   const auto omega = moptim::se3Log(relative_motion);
 
   result->points->resize(num_points);
-  result->points->is_dense = scan.points->is_dense;
-
-  // Incremental composition: 2 exp calls instead of N.
-  // pose_0 = exp(-omega) corresponds to stamp=0 (first point, full inverse).
-  // delta_pose advances by one step in the linear interpolation.
-  const Eigen::Affine3d start_pose = moptim::se3Exp(-omega);
-  const Eigen::Affine3d delta_pose =
-      moptim::se3Exp(omega / static_cast<double>(num_points - 1));
-
-  Eigen::Matrix3d R = start_pose.linear();
-  Eigen::Vector3d t = start_pose.translation();
-  const Eigen::Matrix3d dR = delta_pose.linear();
-  const Eigen::Vector3d dt = delta_pose.translation();
 
   for (std::size_t i = 0; i < num_points; ++i) {
+    const double stamp =
+        static_cast<double>(i) / static_cast<double>(num_points - 1);
+    const Eigen::Affine3d pose = moptim::se3Exp((stamp - 1.0) * omega);
+
     const auto &pt = scan.points->points[i];
     const Eigen::Vector3d p(pt.x, pt.y, pt.z);
-    const Eigen::Vector3d p_corrected = R * p + t;
+    const Eigen::Vector3d p_corrected = pose * p;
 
     result->points->points[i].x = static_cast<float>(p_corrected.x());
     result->points->points[i].y = static_cast<float>(p_corrected.y());
     result->points->points[i].z = static_cast<float>(p_corrected.z());
     result->points->points[i].intensity = pt.intensity;
+  }
 
-    // Advance pose: T_{i+1} = T_i * delta
-    t = R * dt + t;
-    R = R * dR;
+  return result;
+}
+
+std::shared_ptr<Scan> deskew(const Scan &scan,
+                             const Eigen::Affine3d &relative_motion,
+                             unsigned int scan_rate, double delta_t) {
+  auto result = std::make_shared<Scan>();
+  result->header = scan.header;
+  const std::size_t num_points = scan.points->size();
+  if (num_points == 0) {
+    return result;
+  }
+
+  const auto omega_ref = moptim::se3Log(relative_motion);
+
+  // Scale twist: relative_motion was observed over delta_t seconds,
+  // but this scan spans scan_duration seconds at the known scan_rate.
+  const double scan_duration =
+      static_cast<double>(num_points - 1) / static_cast<double>(scan_rate);
+  const auto omega = omega_ref * (scan_duration / delta_t);
+
+  result->points->resize(num_points);
+
+  for (std::size_t i = 0; i < num_points; ++i) {
+    const double stamp =
+        static_cast<double>(i) / static_cast<double>(num_points - 1);
+    const Eigen::Affine3d pose = moptim::se3Exp((stamp - 1.0) * omega);
+
+    const auto &pt = scan.points->points[i];
+    const Eigen::Vector3d p(pt.x, pt.y, pt.z);
+    const Eigen::Vector3d p_corrected = pose * p;
+
+    result->points->points[i].x = static_cast<float>(p_corrected.x());
+    result->points->points[i].y = static_cast<float>(p_corrected.y());
+    result->points->points[i].z = static_cast<float>(p_corrected.z());
+    result->points->points[i].intensity = pt.intensity;
   }
 
   return result;

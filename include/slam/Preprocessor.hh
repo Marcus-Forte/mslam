@@ -18,4 +18,10 @@ std::shared_ptr<Scan> filterByIntensity(const Scan &input, float min_intensity);
 std::shared_ptr<Scan> deskew(const Scan &scan,
                              const Eigen::Affine3d &relative_motion);
 
+/// Time-aware deskew: scales the twist from relative_motion (observed over
+/// delta_t seconds) to match the actual scan duration derived from scan_rate.
+std::shared_ptr<Scan> deskew(const Scan &scan,
+                             const Eigen::Affine3d &relative_motion,
+                             unsigned int scan_rate, double delta_t);
+
 } // namespace mslam

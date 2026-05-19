@@ -8,20 +8,21 @@
     "remote_scanner": "192.168.178.129:50051", // ignored if .pbscan is used
 
     "preprocessor": {
-        "voxel_size": 0.2,
-        "min_distance_to_center": 1.0,
+        "voxel_size": 0.1,
+        "min_distance_to_center": 0.7,
         "min_intensity": 0,
         "downsample_filter": "voxel_hash", // voxel_hash || voxel_grid
-        "deskew": "constant_velocity" // off || constant_velocity
+        "deskew": "constant_velocity", // off || constant_velocity
+        "points_per_second": 200000 // 0 to disable time-aware deskew
     },
     "map": {
-        "resolution": 0.2,
-        "max_points_per_voxel": 10
+        "resolution": 0.1,
+        "max_points_per_voxel": 3
     },
 
     "slam": {
         "optimizer_iterations": 3,
         "reg_iterations": 3,
-        "max_correspondence_distance": 0.3
+        "max_correspondence_distance": 0.2
     }
 }

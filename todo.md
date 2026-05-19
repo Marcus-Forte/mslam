@@ -4,19 +4,16 @@
 
 * Documentation
 * Feature Extraction
-* slam unit test
-* Add initial scan logic to slam class?
-* SO3 operations module
+  * Outlier pre-processing (e.g. radius outlier removal)
+* Correction Heuristics (e.g. loop closure, keyframe selection, fitness score)
+* Unit Testing
+* Improve Initialization (currently just uses first scan as map)
 * Fix player so that it returns sensor data accordingly (time?)
-* Outlier pre-processing (e.g. radius outlier removal)
-* Logging to stages of the pipeline
-* Combine sensor timestamps (deskew)
-* Add other services: reset slam, start, stop, etc.
-* Keep / Use point intensities (currently ignored)
-
-## Client
-
-* Have client attempt reconnection if connection to server is lost.
+* Keep / Use point intensities for registration? (currently ignored)
+* Dense map storing and publishing (option)
+* Better grouping of SO3 and SE3 operations. Can be encapsulated in moptim.
+* Cleanup preinegration
+* Abstraction and Parallelism for per-point processing tasks.
 
 ## Devenv
 

@@ -296,6 +296,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
   Eigen::Affine3d last_pose = Eigen::Affine3d::Identity();
   Eigen::Affine3d last_delta = Eigen::Affine3d::Identity();
+  uint64_t last_scan_timestamp_ns = 0;
 
   while (!should_stop_.load()) {
 
@@ -397,7 +398,20 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
       if (config_.preprocessor.deskew_mode != DeskewMode::Off) {
         stage_timer.start();
-        scan = deskew(*scan, last_delta);
+        if (config_.preprocessor.points_per_second > 0 &&
+            last_scan_timestamp_ns > 0) {
+          const double delta_t = static_cast<double>(scan->header.timestamp -
+                                                     last_scan_timestamp_ns) *
+                                 1e-9;
+          if (delta_t > 0.0) {
+            scan = deskew(*scan, last_delta,
+                          config_.preprocessor.points_per_second, delta_t);
+          } else {
+            scan = deskew(*scan, last_delta);
+          }
+        } else {
+          scan = deskew(*scan, last_delta);
+        }
         const auto deskew_us = stage_timer.stop();
         logger_->log(ILog::Level::DEBUG, "Deskew took: {} us", deskew_us);
       }
@@ -445,6 +459,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       const Eigen::Affine3d new_pose = getTransform();
       last_delta = last_pose.inverse() * new_pose;
       last_pose = new_pose;
+      last_scan_timestamp_ns = scan->header.timestamp;
 
       stage_timer.start();
       server.updatePose(getPose());

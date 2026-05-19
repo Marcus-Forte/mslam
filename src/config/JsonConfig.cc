@@ -137,6 +137,12 @@ void JsonConfig::load() {
         "Invalid preprocessor min_distance_to_center setting");
   }
 
+  if (root["preprocessor"]["points_per_second"].empty()) {
+    throw std::runtime_error("Empty preprocessor points_per_second setting");
+  }
+  config_.preprocessor.points_per_second =
+      root["preprocessor"]["points_per_second"].asUInt();
+
   // Map parameters
   if (root["map"]["resolution"].empty()) {
     throw std::runtime_error("Empty map resolution setting");

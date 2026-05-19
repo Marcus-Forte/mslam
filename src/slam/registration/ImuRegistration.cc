@@ -1,6 +1,7 @@
 #include "slam/registration/ImuRegistration.hh"
 
 #include "moptim/LevenbergMarquardt.h"
+#include "moptim/NumericalCostCentral.h"
 #include "moptim/NumericalCostForwardEuler.h"
 #include "moptim/PlusOperations/SE3PlusOperator.h"
 #include "moptim/PlusOperations/SE3xEuclideanPlusOperator.h"
@@ -63,8 +64,8 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
                           current.position.z(), current.rotation.x(),
                           current.rotation.y(), current.rotation.z());
 
-  auto source = scan;
-  transformCloud(total_T, source);
+  source_buffer_ = scan;
+  transformCloud(total_T, source_buffer_);
 
   // Build initial 15-DOF state: [se3_pose(6), velocity(3), gyro_bias(3),
   // accel_bias(3)]
@@ -90,33 +91,32 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
   const Eigen::Matrix<double, 15, 1> zeros =
       Eigen::Matrix<double, 15, 1>::Zero();
 
-  std::vector<Eigen::Matrix<double, 6, 1>> inputs;
-  VectorPoint3d map_points;
   int small_delta_hits = 0;
 
-  inputs.reserve(scan.size());
-  map_points.reserve(scan.size());
+  inputs_buffer_.reserve(scan.size());
+  map_points_buffer_.reserve(scan.size());
 
   Eigen::Matrix<double, 15, 1> delta = Eigen::Matrix<double, 15, 1>::Zero();
   moptim::LevenbergMarquardt<double, SE3xEucPlus> lm(15, logger_);
   lm.setMaxIterations(num_optimizer_iterations_);
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
-    const auto correspondences =
-        correspondence_finder_->find(map, source, max_correspondence_distance_);
+    correspondence_finder_->find(map, source_buffer_,
+                                 max_correspondence_distance_,
+                                 correspondences_buffer_);
 
-    inputs.clear();
-    map_points.clear();
-    for (const auto &[scan_point, map_point] : correspondences) {
+    inputs_buffer_.clear();
+    map_points_buffer_.clear();
+    for (const auto &[scan_point, map_point] : correspondences_buffer_) {
       const auto normal = normal_estimator.estimate(map_point);
       if (!normal.has_value())
         continue;
-      inputs.emplace_back(scan_point.x, scan_point.y, scan_point.z, normal->x(),
-                          normal->y(), normal->z());
-      map_points.emplace_back(map_point.x, map_point.y, map_point.z);
+      inputs_buffer_.emplace_back(scan_point.x, scan_point.y, scan_point.z,
+                                  normal->x(), normal->y(), normal->z());
+      map_points_buffer_.emplace_back(map_point.x, map_point.y, map_point.z);
     }
 
-    if (map_points.empty()) {
+    if (map_points_buffer_.empty()) {
       logger_->log(ILog::Level::WARNING,
                    "ImuRegistration (15-DOF) found no correspondences.");
       break;
@@ -125,16 +125,19 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
     lm.clearCosts();
 
     // Scan-matching cost (point-to-plane, only uses pose DOFs 0-5)
-    lm.addCost(std::make_shared<moptim::NumericalCostForwardEuler<
-                   Point3PlaneDistanceSE3, double, SE3xEucPlus>>(
-        inputs[0].data(), map_points[0].data(), map_points.size(), 6, 3, 15));
+    lm.addCost(
+        std::make_shared<moptim::NumericalCostCentral<Point3PlaneDistanceSE3,
+                                                      double, SE3xEucPlus>>(
+            inputs_buffer_[0].data(), map_points_buffer_[0].data(),
+            map_points_buffer_.size(), 6, 3, 15));
 
     // IMU preintegration factor (constrains all 15 DOFs)
     // Pass current state so the factor can compose delta with it
-    lm.addCost(std::make_shared<moptim::NumericalCostForwardEuler<
-                   ImuPreintegrationFactor, double, SE3xEucPlus>>(
-        prev_state_vec.data(), zeros.data(), 1, 15, 15, 15,
-        ImuPreintegrationFactor(preintegrator, opt_state, kImuWeight)));
+    lm.addCost(
+        std::make_shared<moptim::NumericalCostCentral<ImuPreintegrationFactor,
+                                                      double, SE3xEucPlus>>(
+            prev_state_vec.data(), zeros.data(), 1, 15, 15, 15,
+            ImuPreintegrationFactor(preintegrator, opt_state, kImuWeight)));
 
     delta.setZero();
     const auto status = lm.optimize(delta.data());
@@ -147,8 +150,8 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
     // Update source cloud with new pose for next correspondence search
     const auto new_T = moptim::se3Exp(opt_state.head<6>());
     // Re-transform from original scan
-    source = scan;
-    transformCloud(new_T, source);
+    source_buffer_ = scan;
+    transformCloud(new_T, source_buffer_);
     total_T = new_T;
 
     if (status == moptim::Status::SMALL_DELTA) {

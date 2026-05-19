@@ -31,6 +31,10 @@ protected:
   float max_correspondence_distance_;
   std::shared_ptr<ILog> logger_;
   std::shared_ptr<ICorrespondenceFinder> correspondence_finder_;
+  // Pre-allocated buffers reused across Align() calls to avoid per-scan
+  // heap allocation. Capacity grows to the largest scan seen and stays there.
+  PointCloud source_buffer_;
+  Correspondences correspondences_buffer_;
 };
 
 } // namespace mslam

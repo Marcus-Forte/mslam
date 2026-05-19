@@ -26,6 +26,10 @@ public:
   SlamState Align(const SlamState &state, const IMap &map,
                   const PointCloud &scan, const SlamState &prev_state,
                   const ImuPreintegrator &preintegrator);
+
+private:
+  std::vector<Eigen::Matrix<double, 6, 1>> inputs_buffer_;
+  VectorPoint3d map_points_buffer_;
 };
 
 } // namespace mslam

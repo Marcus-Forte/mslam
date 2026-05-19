@@ -14,6 +14,7 @@
 * Better grouping of SO3 and SE3 operations. Can be encapsulated in moptim.
 * Cleanup preinegration
 * Abstraction and Parallelism for per-point processing tasks.
+* Add covariance to moptim
 
 ## Devenv
 

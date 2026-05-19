@@ -142,3 +142,40 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
 }
 
 } // namespace mslam
+
+namespace mslam {
+
+Preprocessor::Preprocessor(const PreProcessor &config) : config_(config) {}
+
+std::shared_ptr<Scan> Preprocessor::filterNearCenter(const Scan &scan) const {
+  return removePointsNearCenter(scan, config_.min_distance_to_center);
+}
+
+std::shared_ptr<Scan>
+Preprocessor::process(const Scan &scan, const Eigen::Affine3d &last_delta,
+                      uint64_t last_scan_timestamp_ns) const {
+  std::shared_ptr<Scan> result;
+
+  if (config_.deskew_mode != DeskewMode::Off) {
+    if (config_.points_per_second > 0 && last_scan_timestamp_ns > 0) {
+      const double delta_t =
+          static_cast<double>(scan.header.timestamp - last_scan_timestamp_ns) *
+          1e-9;
+      result = delta_t > 0.0 ? deskew(scan, last_delta,
+                                      config_.points_per_second, delta_t)
+                             : deskew(scan, last_delta);
+    } else {
+      result = deskew(scan, last_delta);
+    }
+  } else {
+    result = std::make_shared<Scan>(scan);
+  }
+
+  result = removePointsNearCenter(*result, config_.min_distance_to_center);
+  result = downsample(*result, config_.voxel_size, config_.downsample_filter);
+  result = filterByIntensity(*result, config_.min_intensity);
+
+  return result;
+}
+
+} // namespace mslam

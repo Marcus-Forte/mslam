@@ -19,19 +19,17 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
       toAffine(state.position.x(), state.position.y(), state.position.z(),
                state.rotation.x(), state.rotation.y(), state.rotation.z());
 
-  std::vector<Eigen::Matrix<double, 6, 1>> inputs;
-  VectorPoint3d map_points;
   int small_delta_hits = 0;
   Timer iteration_timer;
   Timer stage_timer;
   Timer normal_timer;
 
-  inputs.reserve(scan.size());
-  map_points.reserve(scan.size());
+  inputs_buffer_.reserve(scan.size());
+  map_points_buffer_.reserve(scan.size());
 
   // Initial guess
-  auto source = scan;
-  transformCloud(total_T, source);
+  source_buffer_ = scan;
+  transformCloud(total_T, source_buffer_);
 
   Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
 
@@ -41,27 +39,29 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
     iteration_timer.start();
-    const auto correspondences =
-        correspondence_finder_->find(map, source, max_correspondence_distance_);
+    correspondence_finder_->find(map, source_buffer_,
+                                 max_correspondence_distance_,
+                                 correspondences_buffer_);
 
     normal_timer.start();
-    inputs.clear();
-    map_points.clear();
-    for (const auto &[scan_point, map_point] : correspondences) {
+    inputs_buffer_.clear();
+    map_points_buffer_.clear();
+    for (const auto &[scan_point, map_point] : correspondences_buffer_) {
       const auto normal = normal_estimator.estimate(map_point);
       if (!normal.has_value()) {
         continue;
       }
 
-      inputs.emplace_back(scan_point.x, scan_point.y, scan_point.z, normal->x(),
-                          normal->y(), normal->z());
-      map_points.emplace_back(map_point.x, map_point.y, map_point.z);
+      inputs_buffer_.emplace_back(scan_point.x, scan_point.y, scan_point.z,
+                                  normal->x(), normal->y(), normal->z());
+      map_points_buffer_.emplace_back(map_point.x, map_point.y, map_point.z);
     }
-    logger_->log(
-        ILog::Level::DEBUG, "Normal estimation. {} / {} points. Took: {} us",
-        map_points.size(), correspondences.size(), normal_timer.stop());
+    logger_->log(ILog::Level::DEBUG,
+                 "Normal estimation. {} / {} points. Took: {} us",
+                 map_points_buffer_.size(), correspondences_buffer_.size(),
+                 normal_timer.stop());
 
-    if (map_points.empty()) {
+    if (map_points_buffer_.empty()) {
       logger_->log(
           ILog::Level::WARNING,
           "3D registration found no correspondences; returning prior pose.");
@@ -74,12 +74,12 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
     lm.addCost(
         std::make_shared<moptim::NumericalCostForwardEuler<
             Point3PlaneDistance, double, moptim::SE3PlusOperator<double>>>(
-            inputs[0].data(), map_points[0].data(), map_points.size(), 6, 3,
-            6));
+            inputs_buffer_[0].data(), map_points_buffer_[0].data(),
+            map_points_buffer_.size(), 6, 3, 6));
     const auto status = lm.optimize(delta.data());
 
     const auto delta_T = moptim::se3Exp(delta);
-    transformCloud(delta_T, source);
+    transformCloud(delta_T, source_buffer_);
     total_T = delta_T * total_T;
 
     logger_->log(ILog::Level::DEBUG, "Opt. Took: {} us", stage_timer.stop());

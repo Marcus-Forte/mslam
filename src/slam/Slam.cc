@@ -21,6 +21,8 @@ namespace {
 constexpr int g_init_scans = 10;
 constexpr double g_gravity_mps2 = 9.80665;
 constexpr double g_min_acceleration_norm_mps2 = 1e-3;
+constexpr double g_dense_map_voxel_size = 0.01;
+constexpr int g_dense_map_voxel_bucket_size = 10;
 
 mslam::PointCloud toPointCloud3(const mslam::VectorPoint3d &points) {
   mslam::PointCloud point_cloud;
@@ -94,7 +96,8 @@ Slam::Slam(const std::shared_ptr<ILog> &logger, const SlamConfiguration &config,
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
           std::make_shared<CorrespondenceFinder>(logger))),
-      map_(map), dense_map_{std::make_unique<VoxelHashMap>(0.01, 10)} {
+      map_(map), dense_map_{std::make_unique<VoxelHashMap>(
+                     g_dense_map_voxel_size, g_dense_map_voxel_bucket_size)} {
   ResetPose();
 }
 
@@ -221,6 +224,9 @@ void Slam::Update(const Scan &lidarData) {
     current_state.gyro_bias = previous_state_.gyro_bias;
     current_state.accel_bias = previous_state_.accel_bias;
 
+    logger_->log(ILog::Level::DEBUG, "Before IMU registration");
+    logState(logger_, state_);
+
     // Joint 15-DOF optimization: pose + velocity + biases
     state_ = imu_registration_->Align(current_state, *map_, *lidarData.points,
                                       previous_state_, preintegrator_);
@@ -298,6 +304,10 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
   Eigen::Affine3d last_delta = Eigen::Affine3d::Identity();
   uint64_t last_scan_timestamp_ns = 0;
 
+  const bool with_imu = config_.with_imu;
+  const bool with_lidar = config_.with_lidar;
+  Preprocessor preprocessor(config_.preprocessor);
+
   while (!should_stop_.load()) {
 
     if (!running_.load()) {
@@ -327,7 +337,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       continue;
     }
 
-    if (config_.with_imu) {
+    if (with_imu) {
       static uint64_t last_imu_time = 0;
 
       while (true) {
@@ -340,16 +350,13 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
           break;
         }
 
-        logger_->log(
-            ILog::Level::DEBUG,
-            "Processing IMU @ {}, delta {} ms, seq nr {}, raw_acc=[{}, {}, "
-            "{}], |acc|={}, raw_gyro=[{}, {}, {}]",
-            imudata->header.timestamp,
-            (imudata->header.timestamp - last_imu_time) * 1e-6,
-            imudata->header.sequence_number, imudata->ax, imudata->ay,
-            imudata->az,
-            std::hypot(imudata->ax, std::hypot(imudata->ay, imudata->az)),
-            imudata->gx, imudata->gy, imudata->gz);
+        logger_->log(ILog::Level::DEBUG,
+                     "Processing IMU @ {}, delta {} ms, seq nr {}, "
+                     "raw_acc=[{}, {}, {}], raw_gyro=[{}, {}, {}]",
+                     imudata->header.timestamp,
+                     (imudata->header.timestamp - last_imu_time) * 1e-6,
+                     imudata->header.sequence_number, imudata->ax, imudata->ay,
+                     imudata->az, imudata->gx, imudata->gy, imudata->gz);
 
         last_imu_time = imudata->header.timestamp;
 
@@ -366,8 +373,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
     if (init_scan_count < g_init_scans) {
       stage_timer.start();
 
-      auto filtered_scan = removePointsNearCenter(
-          *scan, config_.preprocessor.min_distance_to_center);
+      auto filtered_scan = preprocessor.filterNearCenter(*scan);
 
       exporter.addTransformedScan(*filtered_scan->points);
       stage_timer.start();
@@ -390,67 +396,19 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       ResetImuPreintegration();
       continue;
     }
-    if (config_.with_lidar) {
+    if (with_lidar) {
       logger_->log(ILog::Level::DEBUG,
                    "Processing Lidar scan with {} points @ {}, seq nr {}",
                    scan->points->size(), scan->header.timestamp,
                    scan->header.sequence_number);
 
-      if (config_.preprocessor.deskew_mode != DeskewMode::Off) {
-        stage_timer.start();
-        if (config_.preprocessor.points_per_second > 0 &&
-            last_scan_timestamp_ns > 0) {
-          const double delta_t = static_cast<double>(scan->header.timestamp -
-                                                     last_scan_timestamp_ns) *
-                                 1e-9;
-          if (delta_t > 0.0) {
-            scan = deskew(*scan, last_delta,
-                          config_.preprocessor.points_per_second, delta_t);
-          } else {
-            scan = deskew(*scan, last_delta);
-          }
-        } else {
-          scan = deskew(*scan, last_delta);
-        }
-        const auto deskew_us = stage_timer.stop();
-        logger_->log(ILog::Level::DEBUG, "Deskew took: {} us", deskew_us);
-      }
-
-      const auto pts_in = scan->points->size();
-
       stage_timer.start();
-      auto filtered_scan = removePointsNearCenter(
-          *scan, config_.preprocessor.min_distance_to_center);
-      const auto range_filter_us = stage_timer.stop();
-      logger_->log(ILog::Level::DEBUG,
-                   "Range filter:     {:6} -> {:6} pts  ({} us)", pts_in,
-                   filtered_scan->points->size(), range_filter_us);
-
-      const auto pts_after_range = filtered_scan->points->size();
-
-      stage_timer.start();
-      filtered_scan =
-          downsample(*filtered_scan, config_.preprocessor.voxel_size,
-                     config_.preprocessor.downsample_filter);
-      const auto downsample_us = stage_timer.stop();
-      logger_->log(
-          ILog::Level::DEBUG, "Downsample ({}): {:6} -> {:6} pts  ({} us)",
-          toString(config_.preprocessor.downsample_filter), pts_after_range,
-          filtered_scan->points->size(), downsample_us);
-
-      const auto pts_after_downsample = filtered_scan->points->size();
-
-      stage_timer.start();
-      filtered_scan =
-          filterByIntensity(*filtered_scan, config_.preprocessor.min_intensity);
-      const auto intensity_filter_us = stage_timer.stop();
-      logger_->log(ILog::Level::DEBUG,
-                   "Intensity filter: {:6} -> {:6} pts  ({} us)",
-                   pts_after_downsample, filtered_scan->points->size(),
-                   intensity_filter_us);
-
-      const auto preprocessor_us =
-          range_filter_us + downsample_us + intensity_filter_us;
+      auto filtered_scan =
+          preprocessor.process(*scan, last_delta, last_scan_timestamp_ns);
+      const auto preprocessor_us = stage_timer.stop();
+      logger_->log(ILog::Level::DEBUG, "Preprocess: {} -> {} pts  ({} us)",
+                   scan->points->size(), filtered_scan->points->size(),
+                   preprocessor_us);
 
       stage_timer.start();
       Update(*filtered_scan);

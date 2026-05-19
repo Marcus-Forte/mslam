@@ -6,14 +6,14 @@ namespace mslam {
 CorrespondenceFinder::CorrespondenceFinder(const std::shared_ptr<ILog> &logger)
     : logger_(logger) {}
 
-Correspondences
-CorrespondenceFinder::find(const IMap &map, const PointCloud &scan,
-                           float max_correspondence_distance) const {
+void CorrespondenceFinder::find(const IMap &map, const PointCloud &scan,
+                                float max_correspondence_distance,
+                                Correspondences &correspondences) const {
 
   const float max_correspondence_distance_squared =
       max_correspondence_distance * max_correspondence_distance;
 
-  Correspondences correspondences;
+  correspondences.clear();
   correspondences.reserve(scan.size());
 
   uint64_t knn_us = 0;
@@ -37,8 +37,6 @@ CorrespondenceFinder::find(const IMap &map, const PointCloud &scan,
                  "KNN Search. Correspondences: {} / {}. Took: {} us",
                  correspondences.size(), scan.size(), knn_us);
   }
-
-  return correspondences;
 }
 
 } // namespace mslam

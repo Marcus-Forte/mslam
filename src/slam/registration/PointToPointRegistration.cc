@@ -14,8 +14,6 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
                                           const PointCloud &scan) {
   static constexpr int k_maxSmallDeltaHits = 3;
 
-  std::vector<Eigen::Vector3d> inputs;
-  VectorPoint3d map_points;
   int small_delta_hits = 0;
   Timer iteration_timer;
   Timer stage_timer;
@@ -23,11 +21,11 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
   auto total_T =
       toAffine(state.position.x(), state.position.y(), state.position.z(),
                state.rotation.x(), state.rotation.y(), state.rotation.z());
-  auto source = scan;
-  transformCloud(total_T, source);
+  source_buffer_ = scan;
+  transformCloud(total_T, source_buffer_);
 
-  inputs.reserve(scan.size());
-  map_points.reserve(scan.size());
+  inputs_buffer_.reserve(scan.size());
+  map_points_buffer_.reserve(scan.size());
 
   moptim::LevenbergMarquardt<double, moptim::SE3PlusOperator<double>> lm(
       6, logger_);
@@ -37,17 +35,18 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
     iteration_timer.start();
-    const auto correspondences =
-        correspondence_finder_->find(map, source, max_correspondence_distance_);
+    correspondence_finder_->find(map, source_buffer_,
+                                 max_correspondence_distance_,
+                                 correspondences_buffer_);
 
-    inputs.clear();
-    map_points.clear();
-    for (const auto &[scan_point, map_point] : correspondences) {
-      inputs.emplace_back(scan_point.x, scan_point.y, scan_point.z);
-      map_points.emplace_back(map_point.x, map_point.y, map_point.z);
+    inputs_buffer_.clear();
+    map_points_buffer_.clear();
+    for (const auto &[scan_point, map_point] : correspondences_buffer_) {
+      inputs_buffer_.emplace_back(scan_point.x, scan_point.y, scan_point.z);
+      map_points_buffer_.emplace_back(map_point.x, map_point.y, map_point.z);
     }
 
-    if (map_points.empty()) {
+    if (map_points_buffer_.empty()) {
       logger_->log(
           ILog::Level::WARNING,
           "3D registration found no correspondences; returning prior pose.");
@@ -59,11 +58,12 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     lm.clearCosts();
     lm.addCost(std::make_shared<moptim::NumericalCostForwardEuler<
                    Point3Distance, double, moptim::SE3PlusOperator<double>>>(
-        inputs[0].data(), map_points[0].data(), map_points.size(), 3, 3, 6));
+        inputs_buffer_[0].data(), map_points_buffer_[0].data(),
+        map_points_buffer_.size(), 3, 3, 6));
     const auto status = lm.optimize(delta.data());
 
     const auto delta_T = moptim::se3Exp(delta);
-    transformCloud(delta_T, source);
+    transformCloud(delta_T, source_buffer_);
     total_T = delta_T * total_T;
 
     logger_->log(ILog::Level::DEBUG, "Opt. Took: {} us", stage_timer.stop());

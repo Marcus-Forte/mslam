@@ -12,7 +12,7 @@
 				"llvm-vs-code-extensions.vscode-clangd",
 				"cschlosser.doxdocgen",
 				"DrBlury.protobuf-vsc",
-				"jebbs.plantuml"
+				"bpruitt-goddard.mermaid-markdown-syntax-highlighting"
 			],
 			"settings": {
 				"C_Cpp.intelliSenseEngine": "disabled",

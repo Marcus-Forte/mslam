@@ -25,6 +25,8 @@
 	"appPort": [50052],
 
 	"mounts": [
-		"source=mslam-app-cache,target=${containerWorkspaceFolder}/build,type=volume"
+		"source=mslam-build-${devcontainerId},target=${containerWorkspaceFolder}/build,type=volume",
+		"source=mslam-venv-${devcontainerId},target=${containerWorkspaceFolder}/client/.venv,type=volume",
+		"source=opencode-sessions,target=/root/.local/share/opencode,type=volume"
 	]
 }

@@ -7,20 +7,24 @@
   },
   "configurePresets": [
     {
-      "name": "gcc-native",
-      "displayName": "gcc Native",
+      "name": "gcc",
+      "displayName": "GCC",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/native",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "/opt/toolchain/gcc.cmake",
+      "installDir": "${sourceDir}/build/${presetName}/install",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "/opt/toolchains/native.cmake",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_TYPE": "Release"
       }
+      
     }
   ],
   "buildPresets": [
     {
-      "name": "build-native",
-      "configurePreset": "gcc-native"
+      "name": "build-gcc",
+      "configurePreset": "gcc",
+      "verbose": true
     }
   ]
 }

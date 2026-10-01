@@ -306,6 +306,26 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
   const bool with_imu = config_.with_imu;
   const bool with_lidar = config_.with_lidar;
+
+  // Playback is pulled directly for determinism; live sensors via hubs.
+  auto scan_sub =
+      playback_player
+          ? nullptr
+          : lidar->scans().subscribe(msensor::SubscribePolicy::latestOnly());
+  auto imu_sub =
+      playback_player
+          ? nullptr
+          : imu->imu().subscribe(msensor::SubscribePolicy::bounded(1000));
+  auto nextScan = [&]() -> std::shared_ptr<const Scan> {
+    return playback_player ? playback_player->getScan() : scan_sub->tryPop();
+  };
+  auto nextImu = [&]() -> std::optional<msensor::IMUData> {
+    if (playback_player)
+      return playback_player->getImuData();
+    if (auto m = imu_sub->tryPop())
+      return *m;
+    return std::nullopt;
+  };
   Preprocessor preprocessor(config_.preprocessor);
 
   while (!should_stop_.load()) {
@@ -315,7 +335,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       continue;
     }
 
-    auto scan = lidar->getScan();
+    auto scan = nextScan();
 
     if (!scan) {
       if (playback_player && playback_player->isFinished()) {
@@ -345,7 +365,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
           break;
         }
 
-        const auto imudata = imu->getImuData();
+        const auto imudata = nextImu();
         if (!imudata.has_value()) {
           break;
         }

@@ -24,11 +24,17 @@ public:
   void init() override;
   void startSampling() override;
   void stopSampling() override;
-  std::shared_ptr<Scan> getScan() override;
-  std::optional<msensor::IMUData> getImuData() override;
+  /// Hubs are never published to; playback is pulled via getScan/getImuData
+  /// so replay stays deterministic.
+  msensor::SensorHub<msensor::Scan3DI> &scans() override { return scan_hub_; }
+  msensor::SensorHub<msensor::IMUData> &imu() override { return imu_hub_; }
+  std::shared_ptr<Scan> getScan();
+  std::optional<msensor::IMUData> getImuData();
   bool isFinished() const;
 
 private:
+  msensor::SensorHub<msensor::Scan3DI> scan_hub_;
+  msensor::SensorHub<msensor::IMUData> imu_hub_;
   msensor::ScanPlayer player_;
   std::shared_ptr<ILog> logger_;
   bool with_imu_ = false;

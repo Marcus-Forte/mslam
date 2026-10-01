@@ -9,7 +9,7 @@
 
     "preprocessor": {
         "voxel_size": 0.1,
-        "min_distance_to_center": 0.7,
+        "min_distance_to_center": 1.0,
         "min_intensity": 0,
         "downsample_filter": "voxel_hash", // voxel_hash || voxel_grid
         "deskew": "constant_velocity", // off || constant_velocity

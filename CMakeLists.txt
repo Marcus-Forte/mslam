@@ -37,7 +37,7 @@ add_subdirectory(src/slam)
 
 add_executable(mslam
 src/main.cc)
-target_link_libraries(mslam maps slam mslam::config)
+target_link_libraries(mslam maps slam mslam::config msensor::server)
 
 
 add_executable(register_scans2d EXCLUDE_FROM_ALL
@@ -58,7 +58,7 @@ install(
 )
 
 install(
-	FILES ${CMAKE_CURRENT_SOURCE_DIR}/config/mslam.json
+	FILES ${CMAKE_CURRENT_SOURCE_DIR}/config/mslam.jsonc
 	DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
 )
 

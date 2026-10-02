@@ -5,6 +5,7 @@
 
 #include <Eigen/Dense>
 #include <cstdint>
+#include <memory>
 
 namespace mslam {
 

@@ -10,6 +10,7 @@
 
 #include <Eigen/Dense>
 #include <atomic>
+#include <memory>
 #include <optional>
 
 namespace mslam {

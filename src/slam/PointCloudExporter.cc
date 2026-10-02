@@ -1,20 +1,11 @@
 #include "slam/PointCloudExporter.hh"
 
 #include "map/VoxelHashMap.hh"
+#include "slam/PointCloudIO.hh"
 
 #include <filesystem>
-#include <pcl/io/ply_io.h>
-#include <stdexcept>
 
 namespace {
-
-mslam::PointCloud preparePointCloudForExport(const mslam::PointCloud &cloud) {
-  auto export_cloud = cloud;
-  export_cloud.width = static_cast<std::uint32_t>(export_cloud.points.size());
-  export_cloud.height = 1;
-  export_cloud.is_dense = false;
-  return export_cloud;
-}
 
 std::filesystem::path buildPlyExportPath(const std::string &prefix,
                                          const std::string &suffix) {
@@ -28,15 +19,7 @@ std::filesystem::path buildPlyExportPath(const std::string &prefix,
 
 void savePointCloudAsPly(const std::filesystem::path &path,
                          const mslam::PointCloud &cloud) {
-  const auto parent_path = path.parent_path();
-  if (!parent_path.empty()) {
-    std::filesystem::create_directories(parent_path);
-  }
-
-  auto export_cloud = preparePointCloudForExport(cloud);
-  if (pcl::io::savePLYFileBinary(path.string(), export_cloud) != 0) {
-    throw std::runtime_error("Failed to save PLY file: " + path.string());
-  }
+  mslam::writePlyPointCloudBinary(path, cloud);
 }
 
 } // namespace
@@ -68,9 +51,8 @@ void PointCloudExporter::addTransformedScan(const PointCloud &scan) {
   }
 
   voxel_hash_map_->addScan(scan);
-  accumulated_transformed_scans_.points.insert(
-      accumulated_transformed_scans_.points.end(), scan.points.begin(),
-      scan.points.end());
+  accumulated_transformed_scans_.insert(accumulated_transformed_scans_.end(),
+                                        scan.begin(), scan.end());
 }
 
 void PointCloudExporter::save() const {

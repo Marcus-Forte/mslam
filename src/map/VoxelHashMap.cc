@@ -33,20 +33,20 @@ VoxelHashMap::VoxelHashMap(float voxel_size, size_t max_points_per_voxel)
 
 PointCloud VoxelHashMap::addScan(const PointCloud &scan) {
   PointCloud added;
-  added.points.reserve(scan.points.size());
+  added.reserve(scan.size());
 
-  for (const auto &point : scan.points) {
+  for (const auto &point : scan) {
 
     const auto voxel = PointToVoxel(point, inverse_voxel_size_);
 
     auto &bucket = map_[voxel];
-    if (bucket.points.empty()) {
-      bucket.points.reserve(max_points_per_voxel_);
+    if (bucket.empty()) {
+      bucket.reserve(max_points_per_voxel_);
     }
-    if (bucket.points.size() < max_points_per_voxel_) {
-      bucket.points.emplace_back(point);
-      added.points.emplace_back(point);
-      map_rep_.points.emplace_back(point);
+    if (bucket.size() < max_points_per_voxel_) {
+      bucket.emplace_back(point);
+      added.emplace_back(point);
+      map_rep_.emplace_back(point);
     }
   }
 
@@ -66,7 +66,7 @@ IMap::Neighbor VoxelHashMap::getClosestNeighbor(const Point &query) const {
     }
 
     const auto &bucket_points = search->second;
-    for (const auto &point : bucket_points.points) {
+    for (const auto &point : bucket_points) {
       const float squared_distance = squaredDistance(point, query);
       if (squared_distance < best_neighbor.second) {
         best_neighbor = {Point{point.x, point.y, point.z}, squared_distance};
@@ -95,7 +95,7 @@ VoxelHashMap::getClosestNNeighbors(const Point &query, int N) const {
     const auto search = map_.find(query_voxel);
     if (search != map_.end()) {
       const auto &bucket_points = search->second;
-      for (const auto &point : bucket_points.points) {
+      for (const auto &point : bucket_points) {
         const float squared_distance = squaredDistance(point, query);
         neighbors.emplace_back(Point{point.x, point.y, point.z},
                                squared_distance);
@@ -140,7 +140,7 @@ const PointCloud &VoxelHashMap::getPointCloudRepresentation() const {
  */
 void VoxelHashMap::clear() {
   map_.clear();
-  map_rep_.points.clear();
+  map_rep_.clear();
 }
 
 void VoxelHashMap::setNumAdjacentVoxelSearch(int adjacent_voxels) {

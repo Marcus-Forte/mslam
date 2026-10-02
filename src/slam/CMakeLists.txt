@@ -7,6 +7,7 @@ NormalEstimator.cc
 Transform.cc
 Preprocessor.cc
 PointCloudExporter.cc
+PointCloudIO.cc
 Conversion.cc
 SlamServer.cc
 RecordingSensorPlayer.cc

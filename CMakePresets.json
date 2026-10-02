@@ -24,7 +24,7 @@
     {
       "name": "build-gcc",
       "configurePreset": "gcc",
-      "verbose": true
+      "verbose": false
     }
   ]
 }

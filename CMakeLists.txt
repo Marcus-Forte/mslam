@@ -4,17 +4,11 @@ project(mslam)
 include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 20)
-find_package(PCL REQUIRED COMPONENTS kdtree search filters io)
 find_package(Eigen3 REQUIRED)
 find_package(jsoncpp REQUIRED)
 
 link_libraries(Eigen3::Eigen)
 
-# PCL injects arch-specific flags (e.g. -march=native, -mavx2) via
-# PCL_COMPILE_OPTIONS. These affect Eigen's alignment / vectorisation
-# macros, so they must be applied globally to avoid ODR violations
-# between translation units that share Eigen template instantiations.
-add_compile_options(${PCL_COMPILE_OPTIONS})
 add_compile_options("-march=native")
 # add_compile_definitions(EIGEN_DONT_VECTORIZE)
 

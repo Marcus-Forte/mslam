@@ -2,7 +2,6 @@
 #include "ConsoleLogger.hh"
 #include "config/JsonConfig.hh"
 
-#include "map/KDTreeMap.hh"
 #include "map/VoxelHashMap.hh"
 #include "sensors_remote_client.hh"
 #include "slam/PointCloudExporter.hh"
@@ -81,15 +80,11 @@ int main(int argc, char **argv) {
 
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
-  if (config.map_type == mslam::MapType::Voxel) {
-    map = std::make_shared<mslam::VoxelHashMap>(
-        config.map_parameters.resolution,
-        config.map_parameters.max_points_per_voxel);
-    reinterpret_cast<mslam::VoxelHashMap *>(map.get())
-        ->setNumAdjacentVoxelSearch(1); /// \todo add configurable?
-  } else {
-    map = std::make_shared<mslam::KDTreeMap>(config.map_parameters.resolution);
-  }
+  auto voxel_map = std::make_shared<mslam::VoxelHashMap>(
+      config.map_parameters.resolution,
+      config.map_parameters.max_points_per_voxel);
+  voxel_map->setNumAdjacentVoxelSearch(1); /// \todo add configurable?
+  map = std::move(voxel_map);
 
   mslam::SlamServer slam_server(logger, map);
   slam_server.start();

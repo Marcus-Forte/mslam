@@ -1,6 +1,6 @@
 # mslam
 
-C++20 LiDAR/IMU SLAM (Eigen, PCL, jsoncpp, gRPC). Entrypoint `src/main.cc`; libs in `src/{slam,map,config}`; proto in `grpc/slam.proto`; architecture notes in `docs/arch.md`.
+C++20 LiDAR/IMU SLAM (Eigen, jsoncpp, gRPC). Entrypoint `src/main.cc`; libs in `src/{slam,map,config}`; proto in `grpc/slam.proto`; architecture notes in `docs/arch.md`.
 
 ## Build & test
 - Configure/build via presets: `cmake --preset gcc && cmake --build --preset build-gcc` (Ninja, toolchain `/opt/toolchain/gcc.cmake`, output `build/gcc/`). The readme's `build/default/` paths are stale; use `build/gcc/`.

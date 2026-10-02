@@ -7,7 +7,7 @@
 
 namespace mslam {
 
-enum class MapType { KdTree, Voxel };
+enum class MapType { Voxel };
 enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
 enum class DeskewMode { Off, ConstantVelocity };
@@ -93,7 +93,7 @@ struct SlamConfiguration {
   bool with_lidar = true;
   double imu_acceleration_scale = 1.0;
   ILog::Level log_level = ILog::Level::INFO;
-  MapType map_type = MapType::KdTree;
+  MapType map_type = MapType::Voxel;
   std::string remote_scanner = "local";
 
   PreProcessor preprocessor;
@@ -108,7 +108,7 @@ struct SlamConfiguration {
        << "Scanner: " << config.remote_scanner << "\n"
        << "# MAP Parameters #" << "\n"
        << "Map Type: "
-       << (config.map_type == MapType::KdTree ? "KDtree" : "Voxel") << "\n"
+       << "VoxelHash" << "\n"
        << "Map resolution: " << config.map_parameters.resolution << "\n"
        << "Max pts per voxel: " << config.map_parameters.max_points_per_voxel
        << "\n"

@@ -20,6 +20,14 @@ void RecordingSensorPlayer::stopSampling() {
   end_of_file_ = true;
 }
 
+void RecordingSensorPlayer::setScanCallback(ScanCallback callback) {
+  scan_callback_ = std::move(callback);
+}
+
+void RecordingSensorPlayer::setImuCallback(ImuCallback callback) {
+  imu_callback_ = std::move(callback);
+}
+
 std::shared_ptr<Scan> RecordingSensorPlayer::getScan() {
   if (!started_) {
     return nullptr;
@@ -61,11 +69,19 @@ bool RecordingSensorPlayer::fillUntilScanAvailable() {
 
     if (entry.entry_case() == sensors::RecordingEntry::kImu) {
       if (with_imu_) {
-        imu_queue_.push(fromEntryToImu(entry));
+        auto imu = fromEntryToImu(entry);
+        imu_queue_.push(imu);
+        if (imu_callback_) {
+          imu_callback_(imu);
+        }
       }
     } else if (entry.entry_case() == sensors::RecordingEntry::kScan) {
       if (with_lidar_) {
-        scan_queue_.push(fromEntryScan3D(entry));
+        auto scan = fromEntryScan3D(entry);
+        scan_queue_.push(scan);
+        if (scan_callback_) {
+          scan_callback_(*scan);
+        }
       }
     }
 
@@ -91,7 +107,7 @@ RecordingSensorPlayer::fromEntryToImu(const sensors::RecordingEntry &entry) {
 
 std::shared_ptr<Scan>
 RecordingSensorPlayer::fromEntryScan3D(const sensors::RecordingEntry &entry) {
-  return fromProtobuf(entry.scan());
+  return std::make_shared<Scan>(fromProtobuf(entry.scan()));
 }
 
 } // namespace mslam

@@ -1,9 +1,13 @@
 #include "ConsoleLogger.hh"
 #include "common/Points.hh"
-#include "map/KDTreeMap.hh"
-#include "slam/Registration.hh"
+#include "common/State.hh"
+#include "map/VoxelHashMap.hh"
+#include "slam/CorrespondenceFinder.hh"
+#include "slam/PointCloudIO.hh"
+#include "slam/Transform.hh"
+#include "slam/registration/PointToPointRegistration.hh"
 #include <filesystem>
-#include <pcl/io/ply_io.h>
+#include <iostream>
 
 void printUsage() {
   std::cout << "register_scans: <scan1.ply> <scan2.ply> ..." << std::endl;
@@ -27,28 +31,34 @@ int main(int argc, char **argv) {
                   argv[1]);
       exit(-1);
     }
-    mslam::PointCloud &&scan{};
-    pcl::io::loadPLYFile(argv[i], scan);
-    scans.emplace_back(scan);
+    scans.emplace_back(mslam::readPlyPointCloud(argv[i]));
     logger->log(ILog::Level::INFO, "loaded points: source: {}",
                 scans.back().size());
   }
 
   /// Add the first scan as a map
-  auto map = std::make_shared<mslam::KDTreeMap>(0.1F);
-  map->addScan(scans[0]);
+  auto map = std::make_shared<mslam::VoxelHashMap>(0.1F, 1);
+  map->addScan(scans.front());
 
-  mslam::IRegistration registration(50, 3, 0.5, logger);
+  mslam::PointToPointRegistration registration(
+      50, 3, 0.5F, logger,
+      std::make_shared<mslam::CorrespondenceFinder>(logger));
 
-  mslam::Pose2D pose{0, 0, 0};
+  mslam::SlamState state;
 
   for (auto scan_idx = 1; scan_idx < num_scans; ++scan_idx) {
-
-    pose = registration.Align2D(pose, *map, scans[scan_idx]);
-    logger->log(ILog::Level::INFO, "Pose {}: x={}, y={}, theta={}", scan_idx,
-                pose[0], pose[1], pose[2]);
+    state = registration.Align(state, *map, scans[scan_idx]);
+    auto transformed_scan = scans[scan_idx];
+    transformCloud(toAffine(state.position.x(), state.position.y(),
+                            state.position.z(), state.rotation.x(),
+                            state.rotation.y(), state.rotation.z()),
+                   transformed_scan);
+    map->addScan(transformed_scan);
+    logger->log(ILog::Level::INFO, "Pose {}: x={}, y={}, z={}, theta={}",
+                scan_idx, state.position.x(), state.position.y(),
+                state.position.z(), state.rotation.z());
   }
 
   logger->log(ILog::Level::INFO, "Estimated transform: x: {}, y: {}, theta: {}",
-              pose[0], pose[1], pose[2]);
+              state.position.x(), state.position.y(), state.rotation.z());
 }

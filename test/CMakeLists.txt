@@ -8,6 +8,12 @@ target_link_libraries(test_preprocessor slam GTest::gtest_main)
 
 gtest_discover_tests(test_preprocessor)
 
+add_executable(test_point_cloud_io
+test_point_cloud_io.cc)
+target_link_libraries(test_point_cloud_io slam GTest::gtest_main)
+
+gtest_discover_tests(test_point_cloud_io)
+
 add_executable(test_slam
 test_slam.cc)
 target_link_libraries(test_slam slam GTest::gtest_main)

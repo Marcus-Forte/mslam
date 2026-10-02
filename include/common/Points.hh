@@ -8,7 +8,7 @@
 namespace mslam {
 
 using PointCloud = msensor::PointCloud3I;
-using Point = PointCloud::PointType;
+using Point = msensor::Point3I;
 using Scan = msensor::Scan3DI;
 
 // Correspondence layout: [source scan point, target map point].

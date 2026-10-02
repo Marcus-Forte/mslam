@@ -76,8 +76,6 @@ void JsonConfig::load() {
   const auto &map_type = root["map_type"].asString();
   if (map_type == "voxel") {
     config_.map_type = MapType::Voxel;
-  } else if (map_type == "kdtree") {
-    config_.map_type = MapType::KdTree;
   } else {
     throw std::runtime_error("Invalid map_type field: " + map_type);
   }
@@ -108,6 +106,10 @@ void JsonConfig::load() {
   }
   config_.preprocessor.voxel_size =
       root["preprocessor"]["voxel_size"].asFloat();
+  if (!std::isfinite(config_.preprocessor.voxel_size) ||
+      config_.preprocessor.voxel_size <= 0.0F) {
+    throw std::runtime_error("Invalid preprocessor voxel_size setting");
+  }
   config_.preprocessor.min_distance_to_center =
       root["preprocessor"]["min_distance_to_center"].asFloat();
   config_.preprocessor.min_intensity =
@@ -154,6 +156,11 @@ void JsonConfig::load() {
   config_.map_parameters.resolution = root["map"]["resolution"].asFloat();
   config_.map_parameters.max_points_per_voxel =
       root["map"]["max_points_per_voxel"].asUInt();
+  if (!std::isfinite(config_.map_parameters.resolution) ||
+      config_.map_parameters.resolution <= 0.0F ||
+      config_.map_parameters.max_points_per_voxel == 0) {
+    throw std::runtime_error("Invalid map parameters");
+  }
 
   // Slam parameters
   if (root["slam"]["optimizer_iterations"].empty()) {

@@ -5,6 +5,7 @@
 #include "common/State.hh"
 #include "map/IMap.hh"
 #include "slam/ICorrespondenceFinder.hh"
+#include <memory>
 
 namespace mslam {
 

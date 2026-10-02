@@ -1,6 +1,6 @@
 # mslam Core Class Model
 
-This document summarizes the main runtime structure around the three core
+This document summarizes the main runtime structure around the core
 classes: `Map` (via `IMap`), `Slam`, and `SlamServer` (gRPC endpoint).
 
 At a high level:
@@ -8,8 +8,8 @@ At a high level:
 - `Slam` depends on `IMap` for map storage and nearest-neighbor queries.
 - `SlamServer` exposes map/pose/controls over gRPC and delegates control
 	commands (`Start`, `Stop`, `Reset`) to a bound `Slam` instance.
-- Concrete map types (`VoxelHashMap`, `KDTreeMap`, `OctreeMap`) implement
-	`IMap` and can be selected by configuration.
+- `VoxelHashMap` is the concrete `IMap` implementation and is selected by
+	configuration.
 
 ```mermaid
 classDiagram
@@ -58,8 +58,6 @@ class ImuRegistration {
 }
 
 class VoxelHashMap
-class KDTreeMap
-class OctreeMap
 
 class SlamService_Service {
 	<<gRPC generated base>>
@@ -88,8 +86,6 @@ class SlamServer {
 
 ISlam <|.. Slam
 IMap <|.. VoxelHashMap
-IMap <|.. KDTreeMap
-IMap <|.. OctreeMap
 IRegistration <|.. ImuRegistration
 SlamService_Service <|-- SlamServer
 

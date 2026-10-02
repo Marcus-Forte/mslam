@@ -29,7 +29,7 @@ public:
     return points_;
   }
 
-  void clear() override { points_.points.clear(); }
+  void clear() override { points_.clear(); }
 
 private:
   mslam::PointCloud points_;

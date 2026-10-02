@@ -14,6 +14,9 @@
 
 #include <cmath>
 #include <csignal>
+#include <deque>
+#include <mutex>
+#include <stdexcept>
 #include <thread>
 
 namespace {
@@ -23,6 +26,26 @@ constexpr double g_gravity_mps2 = 9.80665;
 constexpr double g_min_acceleration_norm_mps2 = 1e-3;
 constexpr double g_dense_map_voxel_size = 0.01;
 constexpr int g_dense_map_voxel_bucket_size = 10;
+
+struct SensorCallbackReset {
+  std::shared_ptr<msensor::ILidar> lidar;
+  std::shared_ptr<msensor::IImu> imu;
+
+  ~SensorCallbackReset() {
+    if (lidar) {
+      lidar->setScanCallback({});
+    }
+    if (imu) {
+      imu->setImuCallback({});
+    }
+  }
+};
+
+struct SensorQueues {
+  std::mutex mutex;
+  std::deque<std::shared_ptr<const mslam::Scan>> scans;
+  std::deque<msensor::IMUData> imus;
+};
 
 mslam::PointCloud toPointCloud3(const mslam::VectorPoint3d &points) {
   mslam::PointCloud point_cloud;
@@ -228,7 +251,7 @@ void Slam::Update(const Scan &lidarData) {
     logState(logger_, state_);
 
     // Joint 15-DOF optimization: pose + velocity + biases
-    state_ = imu_registration_->Align(current_state, *map_, *lidarData.points,
+    state_ = imu_registration_->Align(current_state, *map_, lidarData.points,
                                       previous_state_, preintegrator_);
     previous_state_ = state_;
 
@@ -239,7 +262,7 @@ void Slam::Update(const Scan &lidarData) {
     return;
   }
 
-  state_ = registration_->Align(state_, *map_, *lidarData.points);
+  state_ = registration_->Align(state_, *map_, lidarData.points);
   ResetImuPreintegration();
   logger_->log(ILog::Level::DEBUG, "Update");
   logState(logger_, state_);
@@ -307,24 +330,57 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
   const bool with_imu = config_.with_imu;
   const bool with_lidar = config_.with_lidar;
 
-  // Playback is pulled directly for determinism; live sensors via hubs.
-  auto scan_sub =
-      playback_player
-          ? nullptr
-          : lidar->scans().subscribe(msensor::SubscribePolicy::latestOnly());
-  auto imu_sub =
-      playback_player
-          ? nullptr
-          : imu->imu().subscribe(msensor::SubscribePolicy::bounded(1000));
+  auto sensor_queues = std::make_shared<SensorQueues>();
+  SensorCallbackReset callback_reset{playback_player ? nullptr : lidar,
+                                     playback_player ? nullptr : imu};
+  if (!playback_player && with_lidar) {
+    if (!lidar) {
+      throw std::invalid_argument("LiDAR sensor is required for live SLAM");
+    }
+    lidar->setScanCallback([sensor_queues](const Scan &scan) {
+      auto queued_scan = std::make_shared<Scan>(scan);
+      std::lock_guard lock(sensor_queues->mutex);
+      sensor_queues->scans.push_back(std::move(queued_scan));
+      if (sensor_queues->scans.size() > 1) {
+        sensor_queues->scans.pop_front();
+      }
+    });
+  }
+  if (!playback_player && with_imu) {
+    if (!imu) {
+      throw std::invalid_argument("IMU sensor is required for live SLAM");
+    }
+    imu->setImuCallback([sensor_queues](const msensor::IMUData &data) {
+      std::lock_guard lock(sensor_queues->mutex);
+      sensor_queues->imus.push_back(data);
+      if (sensor_queues->imus.size() > 1000) {
+        sensor_queues->imus.pop_front();
+      }
+    });
+  }
   auto nextScan = [&]() -> std::shared_ptr<const Scan> {
-    return playback_player ? playback_player->getScan() : scan_sub->tryPop();
+    if (playback_player) {
+      return playback_player->getScan();
+    }
+    std::lock_guard lock(sensor_queues->mutex);
+    if (sensor_queues->scans.empty()) {
+      return nullptr;
+    }
+    auto scan = std::move(sensor_queues->scans.front());
+    sensor_queues->scans.pop_front();
+    return scan;
   };
   auto nextImu = [&]() -> std::optional<msensor::IMUData> {
-    if (playback_player)
+    if (playback_player) {
       return playback_player->getImuData();
-    if (auto m = imu_sub->tryPop())
-      return *m;
-    return std::nullopt;
+    }
+    std::lock_guard lock(sensor_queues->mutex);
+    if (sensor_queues->imus.empty()) {
+      return std::nullopt;
+    }
+    auto data = sensor_queues->imus.front();
+    sensor_queues->imus.pop_front();
+    return data;
   };
   Preprocessor preprocessor(config_.preprocessor);
 
@@ -352,7 +408,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
     scan_timer.start();
 
-    if (scan->points->empty()) {
+    if (scan->points.empty()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
@@ -395,14 +451,14 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
       auto filtered_scan = preprocessor.filterNearCenter(*scan);
 
-      exporter.addTransformedScan(*filtered_scan->points);
+      exporter.addTransformedScan(filtered_scan->points);
       stage_timer.start();
-      auto map_increment = map_->addScan(*filtered_scan->points);
-      auto dense_map_increment = dense_map_->addScan(*filtered_scan->points);
+      auto map_increment = map_->addScan(filtered_scan->points);
+      auto dense_map_increment = dense_map_->addScan(filtered_scan->points);
       const auto map_update_us = stage_timer.stop();
       init_scan_count++;
 
-      server.updateTransformedScan(*filtered_scan->points);
+      server.updateTransformedScan(filtered_scan->points);
 
       server.updateMapIncrement(map_increment);
       // server.updateMapIncrement(dense_map_increment);
@@ -419,7 +475,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
     if (with_lidar) {
       logger_->log(ILog::Level::DEBUG,
                    "Processing Lidar scan with {} points @ {}, seq nr {}",
-                   scan->points->size(), scan->header.timestamp,
+                   scan->points.size(), scan->header.timestamp,
                    scan->header.sequence_number);
 
       stage_timer.start();
@@ -427,7 +483,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
           preprocessor.process(*scan, last_delta, last_scan_timestamp_ns);
       const auto preprocessor_us = stage_timer.stop();
       logger_->log(ILog::Level::DEBUG, "Preprocess: {} -> {} pts  ({} us)",
-                   scan->points->size(), filtered_scan->points->size(),
+                   scan->points.size(), filtered_scan->points.size(),
                    preprocessor_us);
 
       stage_timer.start();
@@ -442,21 +498,21 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       stage_timer.start();
       server.updatePose(getPose());
 
-      transformCloud(getTransform(), *filtered_scan->points);
+      transformCloud(getTransform(), filtered_scan->points);
       const auto transform_us = stage_timer.stop();
 
-      exporter.addTransformedScan(*filtered_scan->points);
+      exporter.addTransformedScan(filtered_scan->points);
 
       stage_timer.start();
-      auto map_increment = map_->addScan(*filtered_scan->points);
+      auto map_increment = map_->addScan(filtered_scan->points);
       const auto add_scan_us = stage_timer.stop();
 
       stage_timer.start();
-      auto dense_map_increment = dense_map_->addScan(*filtered_scan->points);
+      auto dense_map_increment = dense_map_->addScan(filtered_scan->points);
       const auto dense_add_scan_us = stage_timer.stop();
 
       stage_timer.start();
-      server.updateTransformedScan(*filtered_scan->points);
+      server.updateTransformedScan(filtered_scan->points);
 
       server.updateMapIncrement(map_increment);
       // server.updateMapIncrement(dense_map_increment);

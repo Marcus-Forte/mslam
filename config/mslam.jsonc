@@ -4,7 +4,7 @@
     "imu_acceleration_scale": 9.80665,
     "camera": false,
     "log_level": "debug", // trace || debug || info || warning || error
-    "map_type": "voxel", // kdtree || voxel
+    "map_type": "voxel",
     "remote_scanner": "192.168.178.129:50051", // ignored if .pbscan is used
 
     "preprocessor": {

@@ -7,6 +7,9 @@
 #include "msensor/interface/ILidar.hh"
 #include "msensor/recorder/scan_player.hh"
 #include <filesystem>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <queue>
 
 namespace mslam {
@@ -24,17 +27,13 @@ public:
   void init() override;
   void startSampling() override;
   void stopSampling() override;
-  /// Hubs are never published to; playback is pulled via getScan/getImuData
-  /// so replay stays deterministic.
-  msensor::SensorHub<msensor::Scan3DI> &scans() override { return scan_hub_; }
-  msensor::SensorHub<msensor::IMUData> &imu() override { return imu_hub_; }
+  void setScanCallback(ScanCallback callback) override;
+  void setImuCallback(ImuCallback callback) override;
   std::shared_ptr<Scan> getScan();
   std::optional<msensor::IMUData> getImuData();
   bool isFinished() const;
 
 private:
-  msensor::SensorHub<msensor::Scan3DI> scan_hub_;
-  msensor::SensorHub<msensor::IMUData> imu_hub_;
   msensor::ScanPlayer player_;
   std::shared_ptr<ILog> logger_;
   bool with_imu_ = false;
@@ -42,6 +41,8 @@ private:
   unsigned int entry_delay_ms_ = 0;
   bool started_ = false;
   bool end_of_file_ = false;
+  ScanCallback scan_callback_;
+  ImuCallback imu_callback_;
   std::queue<std::shared_ptr<Scan>> scan_queue_;
   std::queue<msensor::IMUData> imu_queue_;
 

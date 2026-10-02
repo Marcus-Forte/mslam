@@ -16,15 +16,6 @@ std::filesystem::path makeTemporaryPlyPath() {
          ("mslam_point_cloud_" + std::to_string(timestamp) + ".ply");
 }
 
-mslam::Point makePoint(float x, float y, float z, float intensity) {
-  mslam::Point point;
-  point.x = x;
-  point.y = y;
-  point.z = z;
-  point.intensity = intensity;
-  return point;
-}
-
 TEST(PointCloudIO, ReadsAsciiVerticesAndSkipsFollowingListElements) {
   const auto path = makeTemporaryPlyPath();
   {
@@ -53,25 +44,6 @@ TEST(PointCloudIO, ReadsAsciiVerticesAndSkipsFollowingListElements) {
   EXPECT_FLOAT_EQ(cloud[1].x, -1.5F);
   EXPECT_FLOAT_EQ(cloud[1].z, 8.0F);
   EXPECT_FLOAT_EQ(cloud[1].intensity, 9.0F);
-}
-
-TEST(PointCloudIO, BinaryWriterRoundTripsPointFields) {
-  const auto path = makeTemporaryPlyPath();
-  mslam::PointCloud input;
-  input.push_back(makePoint(1.25F, -2.5F, 3.75F, 42.0F));
-  input.push_back(makePoint(-4.0F, 5.5F, 6.25F, 7.0F));
-
-  mslam::writePlyPointCloudBinary(path, input);
-  const auto output = mslam::readPlyPointCloud(path);
-  std::filesystem::remove(path);
-
-  ASSERT_EQ(output.size(), input.size());
-  for (std::size_t i = 0; i < input.size(); ++i) {
-    EXPECT_FLOAT_EQ(output[i].x, input[i].x);
-    EXPECT_FLOAT_EQ(output[i].y, input[i].y);
-    EXPECT_FLOAT_EQ(output[i].z, input[i].z);
-    EXPECT_FLOAT_EQ(output[i].intensity, input[i].intensity);
-  }
 }
 
 } // namespace

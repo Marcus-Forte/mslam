@@ -3,7 +3,6 @@
 #include "map/VoxelHashMap.hh"
 #include "slam/CorrespondenceFinder.hh"
 #include "slam/ImuPreintegration.hh"
-#include "slam/PointCloudExporter.hh"
 #include "slam/Preprocessor.hh"
 #include "slam/RecordingSensorPlayer.hh"
 #include "slam/SlamServer.hh"
@@ -307,7 +306,6 @@ void Slam::signalHandler(int signal_number) {
 
 void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
                std::shared_ptr<msensor::IImu> imu, SlamServer &server,
-               PointCloudExporter &exporter,
                std::shared_ptr<RecordingSensorPlayer> playback_player) {
 
   std::signal(SIGINT, signalHandler);
@@ -451,7 +449,6 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
       auto filtered_scan = preprocessor.filterNearCenter(*scan);
 
-      exporter.addTransformedScan(filtered_scan->points);
       stage_timer.start();
       auto map_increment = map_->addScan(filtered_scan->points);
       auto dense_map_increment = dense_map_->addScan(filtered_scan->points);
@@ -500,8 +497,6 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
       transformCloud(getTransform(), filtered_scan->points);
       const auto transform_us = stage_timer.stop();
-
-      exporter.addTransformedScan(filtered_scan->points);
 
       stage_timer.start();
       auto map_increment = map_->addScan(filtered_scan->points);

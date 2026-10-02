@@ -4,7 +4,7 @@
 
 Check `config/mslam.json` for the current SLAM configuration. The main SLAM binary loads this JSON file at startup. The configuration includes: 
 - which sensors to use (IMU, LiDAR, camera)
-- sensor source (local or remote) (currently only remote supported)
+- sensor source (local or remote)
 - logging level
 - map type (voxel or kdtree)
 - remote scanner address for live SLAM
@@ -37,18 +37,18 @@ Use the main SLAM binary with a recorded `.pbscan` file:
 ./build/default/mslam -c config/mslam.json -f test/data/rotate.pbscan -d 10
 ```
 
-To export the final clouds at the end of playback:
-
-```bash
-./build/default/mslam -c config/mslam.json -f room.pbscan -d 1 -o out/final_cloud
-```
-
 Arguments:
 
 - `-c <file>` loads the SLAM JSON configuration.
 - `-f <file>` replays a recorded sensor file instead of connecting remotely.
 - `-d <ms>` sets the playback delay between recording entries when using `-f`.
-- `-o <path>` writes two PLY files on exit: `<path>_voxel_hash.ply` and `<path>_transformed_scans.ply`.
+
+Set `remote_scanner` to `"local"` in the SLAM configuration to use a local
+Mid360. Its enable flag, SDK config path, and scan accumulation count are read
+from `config/publisher_config.json` (or the `publisher_config.json` beside the
+SLAM config passed with `-c`). Relative Mid360 config paths are resolved
+relative to that file. The repository's sensor configs are installed alongside
+the SLAM config.
 
 When playback reaches the end of the recording and no more scans are available,
 the process exits cleanly.

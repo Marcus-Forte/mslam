@@ -154,15 +154,6 @@ std::size_t readListCount(std::istream &input, ScalarType type,
   return static_cast<std::size_t>(count);
 }
 
-void writeFloatLittleEndian(std::ostream &output, float value) {
-  const auto bits = std::bit_cast<std::uint32_t>(value);
-  std::array<char, 4> bytes{};
-  for (std::size_t i = 0; i < bytes.size(); ++i) {
-    bytes[i] = static_cast<char>((bits >> (8 * i)) & 0xffU);
-  }
-  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-}
-
 } // namespace
 
 PointCloud readPlyPointCloud(const std::filesystem::path &path) {
@@ -303,37 +294,6 @@ PointCloud readPlyPointCloud(const std::filesystem::path &path) {
     }
   }
   return cloud;
-}
-
-void writePlyPointCloudBinary(const std::filesystem::path &path,
-                              const PointCloud &cloud) {
-  const auto parent_path = path.parent_path();
-  if (!parent_path.empty()) {
-    std::filesystem::create_directories(parent_path);
-  }
-
-  std::ofstream output(path, std::ios::binary);
-  if (!output) {
-    throw std::runtime_error("Failed to create PLY file: " + path.string());
-  }
-  output << "ply\n"
-            "format binary_little_endian 1.0\n"
-            "element vertex "
-         << cloud.size()
-         << "\nproperty float x\n"
-            "property float y\n"
-            "property float z\n"
-            "property float intensity\n"
-            "end_header\n";
-  for (const auto &point : cloud) {
-    writeFloatLittleEndian(output, point.x);
-    writeFloatLittleEndian(output, point.y);
-    writeFloatLittleEndian(output, point.z);
-    writeFloatLittleEndian(output, point.intensity);
-  }
-  if (!output) {
-    throw std::runtime_error("Failed to write PLY file: " + path.string());
-  }
 }
 
 } // namespace mslam

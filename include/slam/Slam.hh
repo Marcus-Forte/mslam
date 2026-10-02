@@ -16,7 +16,6 @@
 namespace mslam {
 
 class SlamServer;
-class PointCloudExporter;
 class RecordingSensorPlayer;
 
 class Slam : public ISlam {
@@ -31,7 +30,6 @@ public:
 
   void run(std::shared_ptr<msensor::ILidar> lidar,
            std::shared_ptr<msensor::IImu> imu, SlamServer &server,
-           PointCloudExporter &exporter,
            std::shared_ptr<RecordingSensorPlayer> playback_player = {});
 
   void startProcessing();

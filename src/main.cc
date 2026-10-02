@@ -3,11 +3,13 @@
 #include "config/JsonConfig.hh"
 
 #include "map/VoxelHashMap.hh"
+#include "msensor/config/config.hh"
+#include "msensor/lidar/mid360.hh"
 #include "sensors_remote_client.hh"
-#include "slam/PointCloudExporter.hh"
 #include "slam/RecordingSensorPlayer.hh"
 #include "slam/Slam.hh"
 #include "slam/SlamServer.hh"
+#include <filesystem>
 #include <getopt.h>
 #include <iostream>
 #include <memory>
@@ -20,13 +22,11 @@ namespace {
 void printUsage(const char *program_name) {
   std::cout << "Usage: " << program_name
             << " [-c config.json] [-d delay_ms] [-f recording.pbscan] "
-               "[-o output_prefix] [-h]\n"
+               "[-h]\n"
             << "  -c <file>  Load SLAM configuration from JSON\n"
             << "  -d <ms>    Delay between playback entries when using -f\n"
             << "  -f <file>  Replay a recorded scan file instead of connecting "
                "remotely\n"
-            << "  -o <path>  Save final point clouds as <path>_voxel_hash.ply "
-               "and <path>_transformed_scans.ply\n"
             << "  -h         Show this help message\n";
 }
 } // namespace
@@ -34,13 +34,14 @@ void printUsage(const char *program_name) {
 int main(int argc, char **argv) {
   int opt;
   mslam::SlamConfiguration config;
+  std::filesystem::path slam_config_path;
   std::string slam_play_file = "";
-  std::string ply_export_prefix;
   unsigned int playback_delay_ms = g_default_playback_delay_ms;
-  while ((opt = getopt(argc, argv, "c:d:f:ho:")) != -1) {
+  while ((opt = getopt(argc, argv, "c:d:f:h")) != -1) {
     switch (opt) {
     case 'c': {
       std::cout << "Using config: " << optarg << std::endl;
+      slam_config_path = optarg;
       mslam::JsonConfig json_config(optarg);
       json_config.load();
       config = json_config.getConfig();
@@ -53,9 +54,6 @@ int main(int argc, char **argv) {
       std::cout << "Using recorded sensor playback with: " << optarg
                 << std::endl;
       slam_play_file = optarg;
-      break;
-    case 'o':
-      ply_export_prefix = optarg;
       break;
     case 'h':
       printUsage(argv[0]);
@@ -106,8 +104,44 @@ int main(int argc, char **argv) {
                 "Initialized recording playback player with file: {}",
                 slam_play_file);
   } else if (config.remote_scanner == "local") {
-    /// \todo lidar factory
-    throw std::runtime_error("Local mode not yet supported");
+    auto sensor_config_path =
+        slam_config_path.empty()
+            ? std::filesystem::path("config/publisher_config.json")
+            : slam_config_path.parent_path() / "publisher_config.json";
+    if (!std::filesystem::exists(sensor_config_path)) {
+      sensor_config_path = msensor::Config::defaultConfigPath();
+    }
+    auto sensor_config = msensor::Config::fromFile(sensor_config_path);
+    if (!sensor_config.mid360.enable) {
+      throw std::runtime_error(
+          "Local mode requires mid360.enable in the msensor publisher config");
+    }
+    if (sensor_config.mid360.config.empty()) {
+      throw std::runtime_error(
+          "Local mode requires mid360.config in the msensor publisher config");
+    }
+
+    std::filesystem::path mid360_config_path(sensor_config.mid360.config);
+    if (mid360_config_path.is_relative()) {
+      mid360_config_path =
+          sensor_config_path.parent_path() / mid360_config_path;
+    }
+    if (!std::filesystem::exists(mid360_config_path)) {
+      throw std::runtime_error("Mid360 config file does not exist: " +
+                               mid360_config_path.string());
+    }
+
+    auto mid360 = std::make_shared<msensor::Mid360>(
+        mid360_config_path.string(),
+        sensor_config.mid360.accumulate_scan_count);
+    mid360->init();
+    mid360->setMode(msensor::Mid360::Mode::Normal);
+    mid360->setScanPattern(msensor::Mid360::ScanPattern::NonRepetitive);
+    mid360->startSampling();
+    lidar_sensor = mid360;
+    imu_sensor = mid360;
+    logger->log(ILog::Level::INFO, "Initialized local Mid360 using config: {}",
+                mid360_config_path.string());
 
   } else {
     auto remote = std::make_shared<SensorsRemoteClient>(config.remote_scanner);
@@ -120,24 +154,7 @@ int main(int argc, char **argv) {
   mslam::Slam slam(logger, config, map);
   slam_server.setSlam(&slam);
 
-  mslam::PointCloudExporter point_cloud_exporter(
-      ply_export_prefix, config.map_parameters.resolution,
-      config.map_parameters.max_points_per_voxel);
-
-  slam.run(lidar_sensor, imu_sensor, slam_server, point_cloud_exporter,
-           playback_player);
-
-  if (point_cloud_exporter.isEnabled()) {
-    point_cloud_exporter.save();
-    logger->log(ILog::Level::INFO,
-                "Saved final voxel-hash cloud to {} ({} points)",
-                point_cloud_exporter.getVoxelHashPath().string(),
-                point_cloud_exporter.getVoxelHashPointCount());
-    logger->log(ILog::Level::INFO,
-                "Saved accumulated transformed scans to {} ({} points)",
-                point_cloud_exporter.getTransformedScansPath().string(),
-                point_cloud_exporter.getTransformedScanPointCount());
-  }
+  slam.run(lidar_sensor, imu_sensor, slam_server, playback_player);
 
   return 0;
 }

@@ -1,6 +1,6 @@
 #include "slam/Preprocessor.hh"
 #include "map/VoxelHashMap.hh"
-#include "moptim/PlusOperations/SE3.h"
+#include "slam/SE3.hh"
 
 #include <Eigen/Geometry>
 #include <array>
@@ -121,14 +121,14 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
     return result;
   }
 
-  const auto omega = moptim::se3Log(relative_motion);
+  const auto omega = se3Log(relative_motion);
 
   result->points.resize(num_points);
 
   for (std::size_t i = 0; i < num_points; ++i) {
     const double stamp =
         static_cast<double>(i) / static_cast<double>(num_points - 1);
-    const Eigen::Affine3d pose = moptim::se3Exp((stamp - 1.0) * omega);
+    const Eigen::Affine3d pose = se3Exp((stamp - 1.0) * omega);
 
     const auto &pt = scan.points[i];
     const Eigen::Vector3d p(pt.x, pt.y, pt.z);
@@ -153,7 +153,7 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
     return result;
   }
 
-  const auto omega_ref = moptim::se3Log(relative_motion);
+  const auto omega_ref = se3Log(relative_motion);
 
   // Scale twist: relative_motion was observed over delta_t seconds,
   // but this scan spans scan_duration seconds at the known scan_rate.
@@ -166,7 +166,7 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
   for (std::size_t i = 0; i < num_points; ++i) {
     const double stamp =
         static_cast<double>(i) / static_cast<double>(num_points - 1);
-    const Eigen::Affine3d pose = moptim::se3Exp((stamp - 1.0) * omega);
+    const Eigen::Affine3d pose = se3Exp((stamp - 1.0) * omega);
 
     const auto &pt = scan.points[i];
     const Eigen::Vector3d p(pt.x, pt.y, pt.z);

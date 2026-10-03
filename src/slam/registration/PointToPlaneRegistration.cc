@@ -1,9 +1,10 @@
 #include "slam/registration/PointToPlaneRegistration.hh"
+#include "OptimizerObserver.hh"
 #include "Timer.hh"
-#include "moptim/LevenbergMarquardt.h"
-#include "moptim/NumericalCostForwardEuler.h"
-#include "moptim/PlusOperations/SE3PlusOperator.h"
+#include "moptim/LevenbergMarquardt.hh"
+#include "moptim/NumericalCostForwardEuler.hh"
 #include "slam/NormalEstimator.hh"
+#include "slam/SE3.hh"
 #include "slam/Transform.hh"
 #include "slam/registration/PointDistance.hh"
 #include <Eigen/Dense>
@@ -33,9 +34,10 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
 
   Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
 
-  moptim::LevenbergMarquardt<double, moptim::SE3PlusOperator<double>> lm(
-      6, logger_);
+  moptim::LevenbergMarquardt<double> lm(6);
   lm.setMaxIterations(num_optimizer_iterations_);
+  OptimizerObserver<double> observer(logger_);
+  lm.setObserver(&observer);
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
     iteration_timer.start();
@@ -71,14 +73,13 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
     stage_timer.start();
     delta.setZero();
     lm.clearCosts();
-    lm.addCost(
-        std::make_shared<moptim::NumericalCostForwardEuler<
-            Point3PlaneDistance, double, moptim::SE3PlusOperator<double>>>(
-            inputs_buffer_[0].data(), map_points_buffer_[0].data(),
-            map_points_buffer_.size(), 6, 3, 6));
-    const auto status = lm.optimize(delta.data());
+    lm.addCost(std::make_shared<
+               moptim::NumericalCostForwardEuler<Point3PlaneDistance, double>>(
+        inputs_buffer_[0].data(), map_points_buffer_[0].data(),
+        map_points_buffer_.size(), 6, 3, 6));
+    const auto result = lm.optimize(delta.data());
 
-    const auto delta_T = moptim::se3Exp(delta);
+    const auto delta_T = se3Exp(delta);
     transformCloud(delta_T, source_buffer_);
     total_T = delta_T * total_T;
 
@@ -87,7 +88,7 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
                  "Registration Iteration: {}/{}. Total: {} us", i + 1,
                  num_registration_iterations_, iteration_timer.stop());
 
-    if (status == moptim::Status::SMALL_DELTA) {
+    if (result.status == moptim::Status::SMALL_DELTA) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {
         break;
       }

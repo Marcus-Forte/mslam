@@ -16,7 +16,7 @@ Check `config/mslam.json` for the current SLAM configuration. The main SLAM bina
 Build and run from the repository root:
 
 ```bash
-docker build -f docker/Dockerfile -t mslam .
+docker build -f deployment/Dockerfile -t mslam .
 docker run -it --rm -v ./config/:/config/ mslam mslam -c /config/mslam.json
 ```
 
@@ -25,7 +25,7 @@ pass that path with `-c`.
 
 For the Python viewer client.
 ```bash
-docker build -f docker/DockerfileViewer -t mslam-viewer .
+docker build -f deployment/DockerfileViewer -t mslam-viewer .
 docker run --rm -it mslam-viewer --server-addr <address>
 ```
 
@@ -102,7 +102,7 @@ running pairwise registration experiments.
 
 ## Inspecting generated SIMD instructions
 
-The project compiles with `-march=native`, which allows the compiler to emit
+The project compiles with `-march=native` (x86) / `-mcpu=native` (ARM) by default, set via the `MSLAM_CPU` cache variable (the `pi5` preset and the Docker image use `cortex-a76`). This allows the compiler to emit
 AVX/FMA instructions for Eigen operations. To verify which source lines produce
 SIMD code, disassemble an object file with line annotations:
 

@@ -1,8 +1,9 @@
 #include "slam/registration/PointToPointRegistration.hh"
+#include "OptimizerObserver.hh"
 #include "Timer.hh"
-#include "moptim/LevenbergMarquardt.h"
-#include "moptim/NumericalCostForwardEuler.h"
-#include "moptim/PlusOperations/SE3PlusOperator.h"
+#include "moptim/LevenbergMarquardt.hh"
+#include "moptim/NumericalCostForwardEuler.hh"
+#include "slam/SE3.hh"
 #include "slam/Transform.hh"
 #include "slam/registration/PointDistance.hh"
 #include <Eigen/Dense>
@@ -27,9 +28,10 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
   inputs_buffer_.reserve(scan.size());
   map_points_buffer_.reserve(scan.size());
 
-  moptim::LevenbergMarquardt<double, moptim::SE3PlusOperator<double>> lm(
-      6, logger_);
+  moptim::LevenbergMarquardt<double> lm(6);
   lm.setMaxIterations(num_optimizer_iterations_);
+  OptimizerObserver<double> observer(logger_);
+  lm.setObserver(&observer);
 
   Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
 
@@ -56,13 +58,13 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     stage_timer.start();
     delta.setZero();
     lm.clearCosts();
-    lm.addCost(std::make_shared<moptim::NumericalCostForwardEuler<
-                   Point3Distance, double, moptim::SE3PlusOperator<double>>>(
+    lm.addCost(std::make_shared<
+               moptim::NumericalCostForwardEuler<Point3Distance, double>>(
         inputs_buffer_[0].data(), map_points_buffer_[0].data(),
         map_points_buffer_.size(), 3, 3, 6));
-    const auto status = lm.optimize(delta.data());
+    const auto result = lm.optimize(delta.data());
 
-    const auto delta_T = moptim::se3Exp(delta);
+    const auto delta_T = se3Exp(delta);
     transformCloud(delta_T, source_buffer_);
     total_T = delta_T * total_T;
 
@@ -71,7 +73,7 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
                  "Registration Iteration: {}/{}. Total: {} us", i + 1,
                  num_registration_iterations_, iteration_timer.stop());
 
-    if (status == moptim::Status::SMALL_DELTA) {
+    if (result.status == moptim::Status::SMALL_DELTA) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {
         break;
       }

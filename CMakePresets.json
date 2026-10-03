@@ -17,13 +17,29 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_TYPE": "Release"
       }
-      
+    },
+    {
+      "name": "pi5",
+      "displayName": "Raspberry Pi 5 (Cortex-A76)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "installDir": "${sourceDir}/build/${presetName}/install",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "MSLAM_CPU": "cortex-a76"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "build-gcc",
       "configurePreset": "gcc",
+      "verbose": false
+    },
+    {
+      "name": "build-pi5",
+      "configurePreset": "pi5",
       "verbose": false
     }
   ]

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "slam/SE3.hh"
 #include "slam/Transform.hh"
 #include <Eigen/Dense>
 
@@ -101,7 +102,7 @@ struct Point2Distance {
  */
 struct Point3Distance {
   void setState(const double *x) {
-    transform_ = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
+    transform_ = se3Exp(Eigen::Map<const Eigen::Matrix<double, 6, 1>>(x));
   }
 
   void residual(const double * /*x*/, const double *input,
@@ -142,7 +143,7 @@ struct Point3Distance {
  */
 struct Point3PlaneDistance {
   void setState(const double *x) {
-    transform_ = toAffine(x[0], x[1], x[2], x[3], x[4], x[5]);
+    transform_ = se3Exp(Eigen::Map<const Eigen::Matrix<double, 6, 1>>(x));
   }
 
   void residual(const double * /*x*/, const double *input,

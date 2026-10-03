@@ -9,7 +9,12 @@ find_package(jsoncpp REQUIRED)
 
 link_libraries(Eigen3::Eigen)
 
-add_compile_options("-march=native")
+set(MSLAM_CPU "native" CACHE STRING "Target CPU (e.g. cortex-a76 for Raspberry Pi 5, or native)")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  add_compile_options("-march=${MSLAM_CPU}")
+else()
+  add_compile_options("-mcpu=${MSLAM_CPU}")
+endif()
 # add_compile_definitions(EIGEN_DONT_VECTORIZE)
 
 include(cmake/findGRPC.cmake)
@@ -25,13 +30,14 @@ link_libraries(msensor::msensor)
 # recorder binary so the top-level install target can stage it.
 set_property(TARGET remote_recorder PROPERTY EXCLUDE_FROM_ALL FALSE)
 
+add_subdirectory(src/log)
 add_subdirectory(src/map)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)
 
 add_executable(mslam
 src/main.cc)
-target_link_libraries(mslam maps slam mslam::config msensor::server)
+target_link_libraries(mslam maps slam mslam::config msensor::server mid360 config)
 
 
 add_executable(register_scans2d EXCLUDE_FROM_ALL
@@ -52,7 +58,10 @@ install(
 )
 
 install(
-	FILES ${CMAKE_CURRENT_SOURCE_DIR}/config/mslam.jsonc
+	FILES
+		${CMAKE_CURRENT_SOURCE_DIR}/config/mslam.jsonc
+		${CMAKE_CURRENT_SOURCE_DIR}/config/publisher_config.json
+		${CMAKE_CURRENT_SOURCE_DIR}/config/mid360_config.json
 	DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
 )
 

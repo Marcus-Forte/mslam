@@ -3,9 +3,12 @@ FROM mdnf1992/cpp-dev AS build
 WORKDIR /tmp
 COPY . .
 
-RUN cmake --preset gcc -DBUILD_TESTING=OFF && \
-    cmake --build --preset build-gcc && \
-    cmake --install build/gcc
+# Raspberry Pi 5 (Cortex-A76) build. Override with e.g. --build-arg PRESET=gcc.
+ARG PRESET=pi5
+RUN cmake --preset ${PRESET} -DBUILD_TESTING=OFF \
+        -DCMAKE_C_COMPILER=/usr/bin/gcc-16 -DCMAKE_CXX_COMPILER=/usr/bin/g++-16 && \
+    cmake --build --preset build-${PRESET} && \
+    cmake --install build/${PRESET}
 
 # Can be distroless
 FROM debian:trixie-slim AS runtime
@@ -19,6 +22,7 @@ RUN printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: sid\nCompone
     libflann1.9 liborc-0.4-0 libjsoncpp26 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /tmp/build/gcc/install/ /usr/local/
+ARG PRESET=pi5
+COPY --from=build /tmp/build/${PRESET}/install/ /usr/local/
 
 RUN ldconfig

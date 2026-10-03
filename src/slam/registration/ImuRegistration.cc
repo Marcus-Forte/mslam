@@ -172,8 +172,7 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
     }
 
     if (map_points_buffer_.empty()) {
-      logger_->log(ILog::Level::WARNING,
-                   "ImuRegistration found no correspondences.");
+      logger_->warn("ImuRegistration found no correspondences.");
       break;
     }
 

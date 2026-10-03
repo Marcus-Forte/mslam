@@ -1,6 +1,7 @@
 
-#include "ConsoleLogger.hh"
 #include "config/JsonConfig.hh"
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 #include "map/VoxelHashMap.hh"
 #include "msensor/config/config.hh"
@@ -73,8 +74,10 @@ int main(int argc, char **argv) {
   std::cout << config << std::endl;
 
   // Create logger.
-  const auto logger = std::make_shared<ConsoleLogger>();
-  logger->setLevel(config.log_level);
+  const auto spdlog_logger = std::make_shared<spdlog::logger>(
+      "mslam", std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+  spdlog_logger->set_level(config.log_level);
+  const auto logger = spdlog_logger;
 
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
@@ -100,9 +103,8 @@ int main(int argc, char **argv) {
     playback_player->startSampling();
     lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(playback_player);
     imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(playback_player);
-    logger->log(ILog::Level::INFO,
-                "Initialized recording playback player with file: {}",
-                slam_play_file);
+    logger->info("Initialized recording playback player with file: {}",
+                 slam_play_file);
   } else if (config.remote_scanner == "local") {
     auto sensor_config_path =
         slam_config_path.empty()
@@ -140,8 +142,8 @@ int main(int argc, char **argv) {
     mid360->startSampling();
     lidar_sensor = mid360;
     imu_sensor = mid360;
-    logger->log(ILog::Level::INFO, "Initialized local Mid360 using config: {}",
-                mid360_config_path.string());
+    logger->info("Initialized local Mid360 using config: {}",
+                 mid360_config_path.string());
 
   } else {
     auto remote = std::make_shared<SensorsRemoteClient>(config.remote_scanner);

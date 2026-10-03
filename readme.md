@@ -2,7 +2,7 @@
 
 ## Configuration
 
-Check `config/mslam.json` for the current SLAM configuration. The main SLAM binary loads this JSON file at startup. The configuration includes: 
+Check `config/mslam.jsonc` for the current SLAM configuration. The main SLAM binary loads this JSON file at startup. The configuration includes: 
 - which sensors to use (IMU, LiDAR, camera)
 - sensor source (local or remote)
 - logging level
@@ -10,6 +10,21 @@ Check `config/mslam.json` for the current SLAM configuration. The main SLAM bina
 - remote scanner address for live SLAM
 - scan preprocessing parameters (downsampling, deskewing)
 - map resolution
+
+### Configure log level
+
+Set the top-level `log_level` field in the configuration file passed with `-c`.
+Supported values are `trace`, `debug`, `info`, `warning`, and `error`.
+`trace` produces the most output; `error` produces the least. For example, set
+the field to `"info"` to show informational messages and more severe messages:
+
+```json
+{
+  "log_level": "info"
+}
+```
+
+Restart `mslam` after changing the value for the new level to take effect.
 
 ## Docker
 

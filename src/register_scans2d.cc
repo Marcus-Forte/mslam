@@ -1,4 +1,3 @@
-#include "ConsoleLogger.hh"
 #include "common/Points.hh"
 #include "common/State.hh"
 #include "map/VoxelHashMap.hh"
@@ -8,6 +7,7 @@
 #include "slam/registration/PointToPointRegistration.hh"
 #include <filesystem>
 #include <iostream>
+#include <spdlog/spdlog.h>
 
 void printUsage() {
   std::cout << "register_scans: <scan1.ply> <scan2.ply> ..." << std::endl;
@@ -21,19 +21,17 @@ int main(int argc, char **argv) {
   }
 
   const auto num_scans = argc - 1;
-  auto logger = std::make_shared<ConsoleLogger>();
+  auto logger = spdlog::default_logger();
 
   std::vector<mslam::PointCloud> scans;
 
   for (int i = 1; i < argc; ++i) {
     if (!std::filesystem::exists(argv[i])) {
-      logger->log(ILog::Level::ERROR, "File of source  does not exist: {}",
-                  argv[1]);
+      logger->error("File of source  does not exist: {}", argv[1]);
       exit(-1);
     }
     scans.emplace_back(mslam::readPlyPointCloud(argv[i]));
-    logger->log(ILog::Level::INFO, "loaded points: source: {}",
-                scans.back().size());
+    logger->info("loaded points: source: {}", scans.back().size());
   }
 
   /// Add the first scan as a map
@@ -54,11 +52,11 @@ int main(int argc, char **argv) {
                             state.rotation.y(), state.rotation.z()),
                    transformed_scan);
     map->addScan(transformed_scan);
-    logger->log(ILog::Level::INFO, "Pose {}: x={}, y={}, z={}, theta={}",
-                scan_idx, state.position.x(), state.position.y(),
-                state.position.z(), state.rotation.z());
+    logger->info("Pose {}: x={}, y={}, z={}, theta={}", scan_idx,
+                 state.position.x(), state.position.y(), state.position.z(),
+                 state.rotation.z());
   }
 
-  logger->log(ILog::Level::INFO, "Estimated transform: x: {}, y: {}, theta: {}",
-              state.position.x(), state.position.y(), state.rotation.z());
+  logger->info("Estimated transform: x: {}, y: {}, theta: {}",
+               state.position.x(), state.position.y(), state.rotation.z());
 }

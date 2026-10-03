@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ILog.hh"
 #include "common/Points.hh"
 #include "common/State.hh"
 #include "map/IMap.hh"
@@ -10,6 +9,7 @@
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #include <mutex>
+#include <spdlog/logger.h>
 #include <string>
 
 namespace mslam {
@@ -18,8 +18,8 @@ class Slam;
 
 class SlamServer : public sensors::SlamService::Service {
 public:
-  explicit SlamServer(std::shared_ptr<ILog> logger, std::shared_ptr<IMap> map,
-                      std::string address = {});
+  explicit SlamServer(std::shared_ptr<spdlog::logger> logger,
+                      std::shared_ptr<IMap> map, std::string address = {});
   ~SlamServer();
 
   SlamServer(const SlamServer &) = delete;
@@ -63,7 +63,7 @@ private:
   grpc::Status Reset(grpc::ServerContext *, const sensors::Empty *,
                      sensors::Empty *response) override;
 
-  std::shared_ptr<ILog> logger_;
+  std::shared_ptr<spdlog::logger> logger_;
   std::shared_ptr<IMap> map_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;

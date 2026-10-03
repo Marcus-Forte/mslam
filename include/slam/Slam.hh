@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ILog.hh"
 #include "ISlam.hh"
 #include "config/IConfig.hh"
 #include "map/IMap.hh"
@@ -12,6 +11,7 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <spdlog/logger.h>
 
 namespace mslam {
 
@@ -20,8 +20,8 @@ class RecordingSensorPlayer;
 
 class Slam : public ISlam {
 public:
-  Slam(const std::shared_ptr<ILog> &logger, const SlamConfiguration &config,
-       const std::shared_ptr<IMap> &map);
+  Slam(const std::shared_ptr<spdlog::logger> &logger,
+       const SlamConfiguration &config, const std::shared_ptr<IMap> &map);
   void ResetPose() override;
   void Predict(const msensor::IMUData &imuData) override;
   void Update(const Scan &lidarData) override;
@@ -52,7 +52,7 @@ private:
   SlamState state_;
   std::optional<uint64_t> last_imu_timestamp_ns_;
   bool imu_gravity_aligned_ = false;
-  std::shared_ptr<ILog> logger_;
+  std::shared_ptr<spdlog::logger> logger_;
   std::atomic<bool> running_{true};
 
   // IMU preintegration state

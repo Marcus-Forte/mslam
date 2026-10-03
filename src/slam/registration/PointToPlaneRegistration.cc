@@ -1,6 +1,5 @@
 #include "slam/registration/PointToPlaneRegistration.hh"
 #include "OptimizerObserver.hh"
-#include "Timer.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostForwardEuler.hh"
 #include "slam/NormalEstimator.hh"
@@ -21,9 +20,6 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
                state.rotation.x(), state.rotation.y(), state.rotation.z());
 
   int small_delta_hits = 0;
-  Timer iteration_timer;
-  Timer stage_timer;
-  Timer normal_timer;
 
   inputs_buffer_.reserve(scan.size());
   map_points_buffer_.reserve(scan.size());
@@ -40,12 +36,10 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
   lm.setObserver(&observer);
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
-    iteration_timer.start();
     correspondence_finder_->find(map, source_buffer_,
                                  max_correspondence_distance_,
                                  correspondences_buffer_);
 
-    normal_timer.start();
     inputs_buffer_.clear();
     map_points_buffer_.clear();
     for (const auto &[scan_point, map_point] : correspondences_buffer_) {
@@ -58,19 +52,15 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
                                   normal->x(), normal->y(), normal->z());
       map_points_buffer_.emplace_back(map_point.x, map_point.y, map_point.z);
     }
-    logger_->log(ILog::Level::DEBUG,
-                 "Normal estimation. {} / {} points. Took: {} us",
-                 map_points_buffer_.size(), correspondences_buffer_.size(),
-                 normal_timer.stop());
+    logger_->debug("Normal estimation. {} / {} points",
+                   map_points_buffer_.size(), correspondences_buffer_.size());
 
     if (map_points_buffer_.empty()) {
-      logger_->log(
-          ILog::Level::WARNING,
+      logger_->warn(
           "3D registration found no correspondences; returning prior pose.");
       break;
     }
 
-    stage_timer.start();
     delta.setZero();
     lm.clearCosts();
     lm.addCost(std::make_shared<
@@ -83,10 +73,8 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
     transformCloud(delta_T, source_buffer_);
     total_T = delta_T * total_T;
 
-    logger_->log(ILog::Level::DEBUG, "Opt. Took: {} us", stage_timer.stop());
-    logger_->log(ILog::Level::DEBUG,
-                 "Registration Iteration: {}/{}. Total: {} us", i + 1,
-                 num_registration_iterations_, iteration_timer.stop());
+    logger_->debug("Registration Iteration: {}/{}", i + 1,
+                   num_registration_iterations_);
 
     if (result.status == moptim::Status::SMALL_DELTA) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {

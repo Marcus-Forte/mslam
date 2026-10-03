@@ -6,6 +6,7 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 20)
 find_package(Eigen3 REQUIRED)
 find_package(jsoncpp REQUIRED)
+find_package(spdlog REQUIRED)
 
 link_libraries(Eigen3::Eigen)
 
@@ -26,11 +27,6 @@ add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
 link_libraries(msensor::msensor)
 
-# Keep the full msensor subproject out of the default build, but include the
-# recorder binary so the top-level install target can stage it.
-set_property(TARGET remote_recorder PROPERTY EXCLUDE_FROM_ALL FALSE)
-
-add_subdirectory(src/log)
 add_subdirectory(src/map)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)
@@ -45,7 +41,7 @@ src/register_scans2d.cc)
 target_link_libraries(register_scans2d maps slam mslam::config)
 
 install(
-	TARGETS mslam remote_recorder
+	TARGETS mslam
 	DESTINATION ${CMAKE_INSTALL_BINDIR}
 	RUNTIME_DEPENDENCY_SET mslam_runtime_targets
 )

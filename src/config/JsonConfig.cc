@@ -8,21 +8,21 @@
 namespace mslam {
 
 namespace {
-ILog::Level parseLogLevel(const std::string &log_level) {
+spdlog::level::level_enum parseLogLevel(const std::string &log_level) {
   if (log_level == "trace") {
-    return ILog::Level::TRACE;
+    return spdlog::level::trace;
   }
   if (log_level == "debug") {
-    return ILog::Level::DEBUG;
+    return spdlog::level::debug;
   }
   if (log_level == "info") {
-    return ILog::Level::INFO;
+    return spdlog::level::info;
   }
   if (log_level == "warning") {
-    return ILog::Level::WARNING;
+    return spdlog::level::warn;
   }
   if (log_level == "error") {
-    return ILog::Level::ERROR;
+    return spdlog::level::err;
   }
 
   throw std::runtime_error("Invalid log_level field: " + log_level);

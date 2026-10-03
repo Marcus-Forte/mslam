@@ -36,8 +36,8 @@ struct PoseSnapshot {
 
 namespace mslam {
 
-SlamServer::SlamServer(std::shared_ptr<ILog> logger, std::shared_ptr<IMap> map,
-                       std::string address)
+SlamServer::SlamServer(std::shared_ptr<spdlog::logger> logger,
+                       std::shared_ptr<IMap> map, std::string address)
     : logger_(std::move(logger)), map_(std::move(map)),
       address_(address.empty() ? g_default_slam_server_address : address),
       pose_(Pose3D::Zero()) {}
@@ -63,8 +63,7 @@ void SlamServer::start() {
   }
 
   if (logger_) {
-    logger_->log(ILog::Level::INFO, "SLAM gRPC server listening on {}",
-                 address_);
+    logger_->info("SLAM gRPC server listening on {}", address_);
   }
 }
 

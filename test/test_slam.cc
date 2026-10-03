@@ -2,13 +2,19 @@
 
 #include "slam/Transform.hh"
 
-#include "NullLogger.hh"
+#include <spdlog/spdlog.h>
 
 #include <gtest/gtest.h>
 
 namespace {
 
 constexpr double k_gravity_mps2 = 9.80665;
+
+std::shared_ptr<spdlog::logger> makeSilentLogger() {
+  auto spdlog_logger = spdlog::default_logger();
+  spdlog_logger->set_level(spdlog::level::off);
+  return spdlog_logger;
+}
 
 class StaticMap final : public mslam::IMap {
 public:
@@ -36,7 +42,7 @@ private:
 };
 
 TEST(Slam, PredictIntegratesAllAngularAxes) {
-  auto logger = std::make_shared<NullLogger>();
+  auto logger = makeSilentLogger();
   auto map = std::make_shared<StaticMap>();
   mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
 
@@ -57,7 +63,7 @@ TEST(Slam, PredictIntegratesAllAngularAxes) {
 }
 
 TEST(Slam, PredictPreintegratesLinearAcceleration) {
-  auto logger = std::make_shared<NullLogger>();
+  auto logger = makeSilentLogger();
   auto map = std::make_shared<StaticMap>();
   mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
 
@@ -79,7 +85,7 @@ TEST(Slam, PredictPreintegratesLinearAcceleration) {
 }
 
 TEST(Slam, PredictSeedsGravityAlignmentBeforeLinearAcceleration) {
-  auto logger = std::make_shared<NullLogger>();
+  auto logger = makeSilentLogger();
   auto map = std::make_shared<StaticMap>();
   mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
 
@@ -108,7 +114,7 @@ TEST(Slam, PredictSeedsGravityAlignmentBeforeLinearAcceleration) {
 }
 
 TEST(Slam, PredictUsesConfiguredGravityScaleForUnitGravityImu) {
-  auto logger = std::make_shared<NullLogger>();
+  auto logger = makeSilentLogger();
   auto map = std::make_shared<StaticMap>();
   mslam::SlamConfiguration config;
   config.imu_acceleration_scale = k_gravity_mps2;
@@ -131,7 +137,7 @@ TEST(Slam, PredictUsesConfiguredGravityScaleForUnitGravityImu) {
 }
 
 TEST(Slam, UpdateResetsImuPreintegrationAtScanBoundary) {
-  auto logger = std::make_shared<NullLogger>();
+  auto logger = makeSilentLogger();
   auto map = std::make_shared<StaticMap>();
   mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
 

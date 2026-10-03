@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ILog.hh"
 #include "common/Points.hh"
 #include "config/IConfig.hh"
 #include "msensor/interface/IImu.hh"
@@ -11,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <spdlog/logger.h>
 
 namespace mslam {
 
@@ -21,8 +21,9 @@ namespace mslam {
 class RecordingSensorPlayer : public msensor::ILidar, public msensor::IImu {
 public:
   RecordingSensorPlayer(const std::filesystem::path &file,
-                        const std::shared_ptr<ILog> &logger, bool with_imu,
-                        bool with_lidar, unsigned int entry_delay_ms);
+                        const std::shared_ptr<spdlog::logger> &logger,
+                        bool with_imu, bool with_lidar,
+                        unsigned int entry_delay_ms);
 
   void init() override;
   void startSampling() override;
@@ -35,7 +36,7 @@ public:
 
 private:
   msensor::ScanPlayer player_;
-  std::shared_ptr<ILog> logger_;
+  std::shared_ptr<spdlog::logger> logger_;
   bool with_imu_ = false;
   bool with_lidar_ = true;
   unsigned int entry_delay_ms_ = 0;

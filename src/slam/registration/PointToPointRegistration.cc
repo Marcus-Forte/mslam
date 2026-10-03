@@ -1,6 +1,5 @@
 #include "slam/registration/PointToPointRegistration.hh"
 #include "OptimizerObserver.hh"
-#include "Timer.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostForwardEuler.hh"
 #include "slam/SE3.hh"
@@ -16,8 +15,6 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
   static constexpr int k_maxSmallDeltaHits = 3;
 
   int small_delta_hits = 0;
-  Timer iteration_timer;
-  Timer stage_timer;
 
   auto total_T =
       toAffine(state.position.x(), state.position.y(), state.position.z(),
@@ -36,7 +33,6 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
   Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
 
   for (int i = 0; i < num_registration_iterations_; ++i) {
-    iteration_timer.start();
     correspondence_finder_->find(map, source_buffer_,
                                  max_correspondence_distance_,
                                  correspondences_buffer_);
@@ -49,13 +45,11 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     }
 
     if (map_points_buffer_.empty()) {
-      logger_->log(
-          ILog::Level::WARNING,
+      logger_->warn(
           "3D registration found no correspondences; returning prior pose.");
       break;
     }
 
-    stage_timer.start();
     delta.setZero();
     lm.clearCosts();
     lm.addCost(std::make_shared<
@@ -68,10 +62,8 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     transformCloud(delta_T, source_buffer_);
     total_T = delta_T * total_T;
 
-    logger_->log(ILog::Level::DEBUG, "Opt. Took: {} us", stage_timer.stop());
-    logger_->log(ILog::Level::DEBUG,
-                 "Registration Iteration: {}/{}. Total: {} us", i + 1,
-                 num_registration_iterations_, iteration_timer.stop());
+    logger_->debug("Registration Iteration: {}/{}", i + 1,
+                   num_registration_iterations_);
 
     if (result.status == moptim::Status::SMALL_DELTA) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {

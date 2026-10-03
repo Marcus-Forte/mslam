@@ -6,8 +6,9 @@
 namespace mslam {
 
 RecordingSensorPlayer::RecordingSensorPlayer(
-    const std::filesystem::path &file, const std::shared_ptr<ILog> &logger,
-    bool with_imu, bool with_lidar, unsigned int entry_delay_ms)
+    const std::filesystem::path &file,
+    const std::shared_ptr<spdlog::logger> &logger, bool with_imu,
+    bool with_lidar, unsigned int entry_delay_ms)
     : player_(file), logger_(logger), with_imu_(with_imu),
       with_lidar_(with_lidar), entry_delay_ms_(entry_delay_ms) {}
 
@@ -94,7 +95,7 @@ bool RecordingSensorPlayer::fillUntilScanAvailable() {
   }
 
   if (end_of_file_ && scan_queue_.empty()) {
-    logger_->log(ILog::Level::INFO, "Finished sensor recording playback.");
+    logger_->info("Finished sensor recording playback.");
   }
 
   return !scan_queue_.empty();

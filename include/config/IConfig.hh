@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ILog.hh"
 #include <ostream>
+#include <spdlog/logger.h>
 #include <stdexcept>
 #include <string>
 
@@ -12,17 +12,17 @@ enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
 enum class DeskewMode { Off, ConstantVelocity };
 
-inline constexpr std::string_view toString(ILog::Level level) {
+inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   switch (level) {
-  case ILog::Level::TRACE:
+  case spdlog::level::trace:
     return "TRACE";
-  case ILog::Level::DEBUG:
+  case spdlog::level::debug:
     return "DEBUG";
-  case ILog::Level::INFO:
+  case spdlog::level::info:
     return "INFO";
-  case ILog::Level::WARNING:
+  case spdlog::level::warn:
     return "WARNING";
-  case ILog::Level::ERROR:
+  case spdlog::level::err:
     return "ERROR";
   }
 
@@ -92,7 +92,7 @@ struct SlamConfiguration {
   bool with_imu = false;
   bool with_lidar = true;
   double imu_acceleration_scale = 1.0;
-  ILog::Level log_level = ILog::Level::INFO;
+  spdlog::level::level_enum log_level = spdlog::level::info;
   MapType map_type = MapType::Voxel;
   std::string remote_scanner = "local";
 

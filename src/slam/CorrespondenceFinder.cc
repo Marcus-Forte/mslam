@@ -1,13 +1,14 @@
 #include "slam/CorrespondenceFinder.hh"
+#include <chrono>
 
 namespace mslam {
-CorrespondenceFinder::CorrespondenceFinder(
-    const std::shared_ptr<spdlog::logger> &logger)
-    : logger_(logger) {}
 
 void CorrespondenceFinder::find(const IMap &map, const PointCloud &scan,
                                 float max_correspondence_distance,
                                 Correspondences &correspondences) const {
+  const auto start = observer_ != nullptr
+                         ? std::chrono::steady_clock::now()
+                         : std::chrono::steady_clock::time_point{};
 
   const float max_correspondence_distance_squared =
       max_correspondence_distance * max_correspondence_distance;
@@ -26,9 +27,14 @@ void CorrespondenceFinder::find(const IMap &map, const PointCloud &scan,
     correspondences.emplace_back(scan_point, nearest.first);
   }
 
-  if (logger_ != nullptr) {
-    logger_->debug("KNN Search. Correspondences: {} / {}",
-                   correspondences.size(), scan.size());
+  if (observer_ != nullptr) {
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    observer_->onCorrespondenceSearch(
+        {.scan_size = scan.size(),
+         .correspondence_count = correspondences.size(),
+         .max_correspondence_distance = max_correspondence_distance,
+         .elapsed =
+             std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed)});
   }
 }
 

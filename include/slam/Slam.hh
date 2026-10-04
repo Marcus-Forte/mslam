@@ -40,6 +40,8 @@ public:
 private:
   void ResetImuPreintegration();
   bool TryInitializeGravityAlignment(const msensor::IMUData &imuData);
+  /// Bound the registration map around the current pose.
+  void pruneMap();
 
   static void signalHandler(int signal_number);
   static std::atomic<bool> should_stop_;

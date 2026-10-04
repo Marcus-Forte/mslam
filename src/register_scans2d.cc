@@ -39,8 +39,7 @@ int main(int argc, char **argv) {
   map->addScan(scans.front());
 
   mslam::PointToPointRegistration registration(
-      50, 3, 0.5F, logger,
-      std::make_shared<mslam::CorrespondenceFinder>(logger));
+      50, 3, 0.5F, logger, std::make_shared<mslam::CorrespondenceFinder>());
 
   mslam::SlamState state;
 

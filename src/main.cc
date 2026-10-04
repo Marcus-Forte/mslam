@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
   voxel_map->setNumAdjacentVoxelSearch(1); /// \todo add configurable?
   map = std::move(voxel_map);
 
-  mslam::SlamServer slam_server(logger, map);
+  mslam::SlamServer slam_server(logger);
   slam_server.start();
 
   // Create sensor readers.

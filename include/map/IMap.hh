@@ -53,6 +53,25 @@ public:
   virtual const PointCloud &getPointCloudRepresentation() const = 0;
 
   /**
+   * @brief Bound the map around the current pose.
+   *
+   * Keeps the map size (and therefore nearest-neighbour lookup cost)
+   * independent of how long the session has been running. Implementations
+   * may ignore values <= 0 to disable a bound.
+   *
+   * @param center Current pose position in map coordinates.
+   * @param max_range Drop entries farther than this from `center` (m,
+   *        <= 0 disables).
+   * @param max_voxels Hard upper bound on the number of stored voxels,
+   *        evicting those farthest from `center` (<= 0 disables).
+   */
+  virtual void prune(const Point &center, float max_range, size_t max_voxels) {
+    (void)center;
+    (void)max_range;
+    (void)max_voxels;
+  }
+
+  /**
    * @brief Remove all points from the map.
    */
   virtual void clear() = 0;

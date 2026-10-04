@@ -156,9 +156,20 @@ void JsonConfig::load() {
   config_.map_parameters.resolution = root["map"]["resolution"].asFloat();
   config_.map_parameters.max_points_per_voxel =
       root["map"]["max_points_per_voxel"].asUInt();
+  if (!root["map"]["max_range"].empty()) {
+    config_.map_parameters.max_range = root["map"]["max_range"].asFloat();
+  }
+  if (!root["map"]["max_voxels"].empty()) {
+    config_.map_parameters.max_voxels = root["map"]["max_voxels"].asUInt();
+  }
+  if (!root["map"]["dense_map"].empty()) {
+    config_.map_parameters.dense_map = root["map"]["dense_map"].asBool();
+  }
   if (!std::isfinite(config_.map_parameters.resolution) ||
       config_.map_parameters.resolution <= 0.0F ||
-      config_.map_parameters.max_points_per_voxel == 0) {
+      config_.map_parameters.max_points_per_voxel == 0 ||
+      !std::isfinite(config_.map_parameters.max_range) ||
+      config_.map_parameters.max_range < 0.0F) {
     throw std::runtime_error("Invalid map parameters");
   }
 

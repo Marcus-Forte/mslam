@@ -82,6 +82,11 @@ struct PreProcessor {
 struct MapParameters {
   float resolution = 0.2;
   unsigned int max_points_per_voxel = 5;
+  // Bound on the registration map so per-scan cost does not grow with the
+  // session. 0 disables the corresponding bound.
+  float max_range = 0.0F; // drop voxels farther than this from the pose
+  unsigned int max_voxels = 300000; // hard voxel budget, evict farthest
+  bool dense_map = false;           // additionally build a 1 cm dense map
 };
 
 /**
@@ -112,6 +117,9 @@ struct SlamConfiguration {
        << "Map resolution: " << config.map_parameters.resolution << "\n"
        << "Max pts per voxel: " << config.map_parameters.max_points_per_voxel
        << "\n"
+       << "Max map range: " << config.map_parameters.max_range << "\n"
+       << "Max map voxels: " << config.map_parameters.max_voxels << "\n"
+       << "Dense map: " << config.map_parameters.dense_map << "\n"
        << "# Preprocessor Parameters #" << "\n"
        << "Voxel Size: " << config.preprocessor.voxel_size << "\n"
        << "Min Distance To Center: "

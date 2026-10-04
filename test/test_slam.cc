@@ -62,6 +62,33 @@ TEST(Slam, PredictIntegratesAllAngularAxes) {
   EXPECT_DOUBLE_EQ(pose[5], 0.25);
 }
 
+TEST(Slam, PredictIntegratesRotationOnSo3) {
+  auto logger = makeSilentLogger();
+  auto map = std::make_shared<StaticMap>();
+  mslam::Slam slam(logger, mslam::SlamConfiguration{}, map);
+
+  // First sample aligns gravity (level attitude) and seeds the integrator.
+  msensor::IMUData imu{};
+  imu.header.timestamp = 1'000'000'000ULL;
+  imu.az = k_gravity_mps2;
+  slam.Predict(imu);
+
+  // Rotate about the non-principal axis (1, 0, 1) for one second.
+  imu.gx = 1.0F;
+  imu.gz = 1.0F;
+  imu.header.timestamp = 2'000'000'000ULL;
+  slam.Predict(imu);
+
+  const Eigen::Vector3d omega(1.0, 0.0, 1.0);
+  const Eigen::Matrix3d expected =
+      Eigen::AngleAxisd(omega.norm(), omega.normalized()).toRotationMatrix();
+
+  const auto pose = slam.getPose();
+  const Eigen::Matrix3d actual =
+      toAffine(0.0, 0.0, 0.0, pose[3], pose[4], pose[5]).linear();
+  EXPECT_NEAR((actual - expected).norm(), 0.0, 1e-9);
+}
+
 TEST(Slam, PredictPreintegratesLinearAcceleration) {
   auto logger = makeSilentLogger();
   auto map = std::make_shared<StaticMap>();

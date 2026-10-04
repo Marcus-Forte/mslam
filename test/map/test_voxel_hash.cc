@@ -1,5 +1,6 @@
 #include "map/VoxelHashMap.hh"
 #include <gtest/gtest.h>
+#include <random>
 
 using namespace mslam;
 
@@ -145,4 +146,69 @@ TEST_F(TestVoxelHashMap, query_multiple_closest_neighbors) {
 TEST_F(TestVoxelHashMap, query_multiple_neighbors_invalid_count) {
   const auto neighbors = map_->getClosestNNeighbors({0.0, 0.0, 0.0}, 0);
   EXPECT_TRUE(neighbors.empty());
+}
+
+TEST_F(TestVoxelHashMap, prune_removes_voxels_beyond_range) {
+  map_ = std::make_unique<VoxelHashMap>(1.0, 5);
+  PointCloud scan;
+  scan.emplace_back(0.5, 0.5, 0.5);
+  scan.emplace_back(10.5, 10.5, 10.5);
+  map_->addScan(scan);
+
+  map_->prune(Point{0.0F, 0.0F, 0.0F}, 2.0F, 0);
+  EXPECT_EQ(map_->size(), 1U);
+
+  const auto representation = map_->getPointCloudRepresentation();
+  ASSERT_EQ(representation.size(), 1U);
+  EXPECT_FLOAT_EQ(representation[0].x, 0.5F);
+}
+
+TEST_F(TestVoxelHashMap, prune_budget_keeps_voxels_nearest_to_center) {
+  map_ = std::make_unique<VoxelHashMap>(1.0, 5);
+  for (int i = 0; i < 10; ++i) {
+    PointCloud scan;
+    scan.emplace_back(static_cast<float>(i) + 0.5F, 0.5F, 0.5F);
+    map_->addScan(scan);
+  }
+  ASSERT_EQ(map_->size(), 10U);
+
+  map_->prune(Point{0.5F, 0.5F, 0.5F}, 0.0F, 4);
+  EXPECT_LE(map_->size(), 4U);
+
+  // Only the voxels closest to the center survive.
+  for (const auto &point : map_->getPointCloudRepresentation()) {
+    EXPECT_LE(point.x, 4.5F);
+  }
+}
+
+TEST_F(TestVoxelHashMap, prune_bounds_unbounded_insertion) {
+  map_ = std::make_unique<VoxelHashMap>(0.1, 5);
+  const Point center{0.0F, 0.0F, 0.0F};
+
+  std::mt19937 rng(42);
+  std::uniform_real_distribution<float> noise(-5.0F, 5.0F);
+
+  for (int scan = 0; scan < 200; ++scan) {
+    PointCloud cloud;
+    cloud.reserve(500);
+    for (int i = 0; i < 500; ++i) {
+      cloud.emplace_back(noise(rng), noise(rng), noise(rng));
+    }
+    map_->addScan(cloud);
+    map_->prune(center, 0.0F, 1000);
+  }
+
+  EXPECT_LE(map_->size(), 1000U);
+}
+
+TEST_F(TestVoxelHashMap, representation_is_rebuilt_after_prune) {
+  map_ = std::make_unique<VoxelHashMap>(1.0, 5);
+  PointCloud scan;
+  scan.emplace_back(0.5, 0.5, 0.5);
+  scan.emplace_back(10.5, 10.5, 10.5);
+  map_->addScan(scan);
+  ASSERT_EQ(map_->getPointCloudRepresentation().size(), 2U);
+
+  map_->prune(Point{0.0F, 0.0F, 0.0F}, 2.0F, 0);
+  EXPECT_EQ(map_->getPointCloudRepresentation().size(), 1U);
 }

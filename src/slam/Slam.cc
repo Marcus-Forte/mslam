@@ -1,58 +1,50 @@
 #include "slam/Slam.hh"
 #include "map/VoxelHashMap.hh"
-#include "slam/CorrespondenceFinder.hh"
+#include "slam/CorrespondenceFinderLogger.hh"
+#include "slam/ImuMath.hh"
 #include "slam/ImuPreintegration.hh"
 #include "slam/Preprocessor.hh"
 #include "slam/RecordingSensorPlayer.hh"
+#include "slam/SensorInput.hh"
 #include "slam/SlamServer.hh"
 #include "slam/Transform.hh"
 #include "slam/registration/ImuRegistration.hh"
 #include "slam/registration/PointToPlaneRegistration.hh"
 // #include "slam/registration/PointToPointRegistration.hh"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <csignal>
-#include <deque>
-#include <mutex>
-#include <stdexcept>
 #include <thread>
 
 namespace {
 
 constexpr int g_init_scans = 10;
-constexpr double g_gravity_mps2 = 9.80665;
-constexpr double g_min_acceleration_norm_mps2 = 1e-3;
 constexpr double g_dense_map_voxel_size = 0.01;
 constexpr int g_dense_map_voxel_bucket_size = 10;
 
-struct SensorCallbackReset {
-  std::shared_ptr<msensor::ILidar> lidar;
-  std::shared_ptr<msensor::IImu> imu;
+// Logs the wall-clock time between construction and destruction.
+class ScopedElapsedLogger {
+public:
+  ScopedElapsedLogger(std::shared_ptr<spdlog::logger> logger, const char *name)
+      : logger_(std::move(logger)), name_(name),
+        start_(std::chrono::steady_clock::now()) {}
 
-  ~SensorCallbackReset() {
-    if (lidar) {
-      lidar->setScanCallback({});
-    }
-    if (imu) {
-      imu->setImuCallback({});
-    }
+  ~ScopedElapsedLogger() {
+    const auto elapsed = std::chrono::steady_clock::now() - start_;
+    logger_->info("{} elapsed: {:.3f} ms", name_,
+                  std::chrono::duration<double, std::milli>(elapsed).count());
   }
-};
 
-struct SensorQueues {
-  std::mutex mutex;
-  std::deque<std::shared_ptr<const mslam::Scan>> scans;
-  std::deque<msensor::IMUData> imus;
-};
+  ScopedElapsedLogger(const ScopedElapsedLogger &) = delete;
+  ScopedElapsedLogger &operator=(const ScopedElapsedLogger &) = delete;
 
-mslam::PointCloud toPointCloud3(const mslam::VectorPoint3d &points) {
-  mslam::PointCloud point_cloud;
-  point_cloud.reserve(points.size());
-  for (const auto &point : points) {
-    point_cloud.emplace_back(point.x(), point.y(), point.z());
-  }
-  return point_cloud;
-}
+private:
+  std::shared_ptr<spdlog::logger> logger_;
+  const char *name_;
+  std::chrono::steady_clock::time_point start_;
+};
 
 void logState(const std::shared_ptr<spdlog::logger> &logger,
               const mslam::SlamState &state) {
@@ -67,40 +59,6 @@ void logState(const std::shared_ptr<spdlog::logger> &logger,
                state.accel_bias.z());
 }
 
-Eigen::Vector3d
-toGravityCompensatedWorldAcceleration(const Eigen::Vector3d &rotation,
-                                      const msensor::IMUData &imu_data,
-                                      double acceleration_scale) {
-  const auto orientation =
-      toAffine(0.0, 0.0, 0.0, rotation.x(), rotation.y(), rotation.z())
-          .linear();
-  Eigen::Vector3d world_acceleration =
-      orientation * (acceleration_scale *
-                     Eigen::Vector3d(imu_data.ax, imu_data.ay, imu_data.az));
-  world_acceleration.z() -= g_gravity_mps2;
-  return world_acceleration;
-}
-
-std::optional<Eigen::Vector2d>
-estimateGravityAlignedRollPitch(const msensor::IMUData &imu_data) {
-  const Eigen::Vector3d body_acceleration(imu_data.ax, imu_data.ay,
-                                          imu_data.az);
-  const double acceleration_norm = body_acceleration.norm();
-  if (!std::isfinite(acceleration_norm) ||
-      acceleration_norm < g_min_acceleration_norm_mps2) {
-    return std::nullopt;
-  }
-
-  const Eigen::Vector3d gravity_direction =
-      body_acceleration / acceleration_norm;
-  const double roll =
-      std::atan2(gravity_direction.y(),
-                 std::hypot(gravity_direction.x(), gravity_direction.z()));
-  const double pitch =
-      std::atan2(-gravity_direction.x(), gravity_direction.z());
-  return Eigen::Vector2d(roll, pitch);
-}
-
 } // namespace
 namespace mslam {
 
@@ -112,13 +70,16 @@ Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
       registration_(std::make_unique<PointToPlaneRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          std::make_shared<CorrespondenceFinder>(logger))),
+          createLoggingCorrespondenceFinder(logger))),
       imu_registration_(std::make_unique<ImuRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          std::make_shared<CorrespondenceFinder>(logger))),
-      map_(map), dense_map_{std::make_unique<VoxelHashMap>(
-                     g_dense_map_voxel_size, g_dense_map_voxel_bucket_size)} {
+          createLoggingCorrespondenceFinder(logger))),
+      map_(map) {
+  if (config_.map_parameters.dense_map) {
+    dense_map_ = std::make_unique<VoxelHashMap>(g_dense_map_voxel_size,
+                                                g_dense_map_voxel_bucket_size);
+  }
   ResetPose();
 }
 
@@ -159,6 +120,8 @@ bool Slam::TryInitializeGravityAlignment(const msensor::IMUData &imuData) {
 }
 
 void Slam::Predict(const msensor::IMUData &imuData) {
+  const ScopedElapsedLogger elapsed_logger(logger_, "Slam::Predict");
+
   const bool just_initialized_gravity = TryInitializeGravityAlignment(imuData);
 
   if (!last_imu_timestamp_ns_.has_value()) {
@@ -166,23 +129,24 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     return;
   }
 
-  const auto delta = (static_cast<double>(imuData.header.timestamp) -
-                      static_cast<double>(*last_imu_timestamp_ns_)) *
-                     1e-9;
+  const auto delta_between_imu_samples =
+      (static_cast<double>(imuData.header.timestamp) -
+       static_cast<double>(*last_imu_timestamp_ns_)) *
+      1e-9;
 
   last_imu_timestamp_ns_ = imuData.header.timestamp;
 
-  if (delta < 0) {
+  if (delta_between_imu_samples < 0) {
     logger_->warn("IMU Loopback detected.");
     ResetImuPreintegration();
     last_imu_timestamp_ns_ = imuData.header.timestamp;
     return;
   }
 
-  if (delta > 1.0) {
+  if (delta_between_imu_samples > 1.0) {
     logger_->warn(
         "Large IMU delta detected: {} seconds. Possible timestamp issue.",
-        delta);
+        delta_between_imu_samples);
     ResetImuPreintegration();
     last_imu_timestamp_ns_ = imuData.header.timestamp;
     return;
@@ -194,9 +158,9 @@ void Slam::Predict(const msensor::IMUData &imuData) {
   }
 
   if (!imu_gravity_aligned_) {
-    state_.rotation.x() += delta * imuData.gx;
-    state_.rotation.y() += delta * imuData.gy;
-    state_.rotation.z() += delta * imuData.gz;
+    state_.rotation.x() += delta_between_imu_samples * imuData.gx;
+    state_.rotation.y() += delta_between_imu_samples * imuData.gy;
+    state_.rotation.z() += delta_between_imu_samples * imuData.gz;
     return;
   }
 
@@ -205,30 +169,49 @@ void Slam::Predict(const msensor::IMUData &imuData) {
   const Eigen::Vector3d accel(config_.imu_acceleration_scale * imuData.ax,
                               config_.imu_acceleration_scale * imuData.ay,
                               config_.imu_acceleration_scale * imuData.az);
-  preintegrator_.integrate(gyro, accel, delta);
+  preintegrator_.integrate(gyro, accel, delta_between_imu_samples);
 
-  const Eigen::Vector3d world_acceleration =
+  const Eigen::Matrix3d R = toAffine(0.0, 0.0, 0.0, state_.rotation.x(),
+                                     state_.rotation.y(), state_.rotation.z())
+                                .linear();
+
+  // Remove the estimated accelerometer bias in the body frame before the
+  // helper rotates the specific force into the world frame and removes
+  // gravity.
+  Eigen::Vector3d world_acceleration =
       toGravityCompensatedWorldAcceleration(state_.rotation, imuData,
-                                            config_.imu_acceleration_scale);
+                                            config_.imu_acceleration_scale) -
+      R * state_.accel_bias;
 
-  state_.position +=
-      delta * state_.velocity + 0.5 * delta * delta * world_acceleration;
+  state_.position += delta_between_imu_samples * state_.velocity +
+                     0.5 * delta_between_imu_samples *
+                         delta_between_imu_samples * world_acceleration;
 
-  state_.velocity += delta * world_acceleration;
-  state_.rotation.x() += delta * imuData.gx;
-  state_.rotation.y() += delta * imuData.gy;
-  state_.rotation.z() += delta * imuData.gz;
+  state_.velocity += delta_between_imu_samples * world_acceleration;
 
-  logger_->debug("IMU preintegration dt: {} s, acc_w: [{}, {}, {}], vel_w: "
-                 "[{}, {}, {}]",
-                 delta, world_acceleration.x(), world_acceleration.y(),
-                 world_acceleration.z(), state_.velocity.x(),
-                 state_.velocity.y(), state_.velocity.z());
-  logger_->debug("Predict");
+  const Eigen::Vector3d unbiased_gyro = gyro - state_.gyro_bias;
+  const double angle = unbiased_gyro.norm() * delta_between_imu_samples;
+  if (angle > 0.0) {
+    const Eigen::Matrix3d dR =
+        Eigen::AngleAxisd(angle, unbiased_gyro.normalized()).toRotationMatrix();
+    const Eigen::Matrix3d new_R = R * dR;
+    state_.rotation.x() = std::atan2(-new_R(1, 2), new_R(2, 2));
+    state_.rotation.y() = std::asin(std::clamp(new_R(0, 2), -1.0, 1.0));
+    state_.rotation.z() = std::atan2(-new_R(0, 1), new_R(0, 0));
+  }
+
+  logger_->debug(
+      "Predict stage: IMU preintegration dt: {} s, acc_w: [{}, {}, {}], vel_w: "
+      "[{}, {}, {}]",
+      delta_between_imu_samples, world_acceleration.x(), world_acceleration.y(),
+      world_acceleration.z(), state_.velocity.x(), state_.velocity.y(),
+      state_.velocity.z());
   logState(logger_, state_);
 }
 
 void Slam::Update(const Scan &lidarData) {
+  const ScopedElapsedLogger elapsed_logger(logger_, "Slam::Update");
+
   if (config_.with_imu && preintegrator_.deltaTime() > 0.0) {
     // Initialize previous state on first call
     if (!has_previous_state_) {
@@ -241,9 +224,6 @@ void Slam::Update(const Scan &lidarData) {
     current_state.velocity = previous_state_.velocity;
     current_state.gyro_bias = previous_state_.gyro_bias;
     current_state.accel_bias = previous_state_.accel_bias;
-
-    logger_->debug("Before IMU registration");
-    logState(logger_, state_);
 
     // Joint 15-DOF optimization: pose + velocity + biases
     state_ = imu_registration_->Align(current_state, *map_, lidarData.points,
@@ -289,10 +269,21 @@ void Slam::reset() {
   running_.store(false);
   ResetPose();
   map_->clear();
+  if (dense_map_) {
+    dense_map_->clear();
+  }
   logger_->info("SLAM reset: pose and map cleared");
 }
 
 bool Slam::isRunning() const { return running_.load(); }
+
+void Slam::pruneMap() {
+  const auto &position = state_.position;
+  map_->prune(
+      Point{static_cast<float>(position.x()), static_cast<float>(position.y()),
+            static_cast<float>(position.z())},
+      config_.map_parameters.max_range, config_.map_parameters.max_voxels);
+}
 
 void Slam::signalHandler(int signal_number) {
   if (signal_number == SIGINT || signal_number == SIGTERM) {
@@ -322,58 +313,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
   const bool with_imu = config_.with_imu;
   const bool with_lidar = config_.with_lidar;
 
-  auto sensor_queues = std::make_shared<SensorQueues>();
-  SensorCallbackReset callback_reset{playback_player ? nullptr : lidar,
-                                     playback_player ? nullptr : imu};
-  if (!playback_player && with_lidar) {
-    if (!lidar) {
-      throw std::invalid_argument("LiDAR sensor is required for live SLAM");
-    }
-    lidar->setScanCallback([sensor_queues](const Scan &scan) {
-      auto queued_scan = std::make_shared<Scan>(scan);
-      std::lock_guard lock(sensor_queues->mutex);
-      sensor_queues->scans.push_back(std::move(queued_scan));
-      if (sensor_queues->scans.size() > 1) {
-        sensor_queues->scans.pop_front();
-      }
-    });
-  }
-  if (!playback_player && with_imu) {
-    if (!imu) {
-      throw std::invalid_argument("IMU sensor is required for live SLAM");
-    }
-    imu->setImuCallback([sensor_queues](const msensor::IMUData &data) {
-      std::lock_guard lock(sensor_queues->mutex);
-      sensor_queues->imus.push_back(data);
-      if (sensor_queues->imus.size() > 1000) {
-        sensor_queues->imus.pop_front();
-      }
-    });
-  }
-  auto nextScan = [&]() -> std::shared_ptr<const Scan> {
-    if (playback_player) {
-      return playback_player->getScan();
-    }
-    std::lock_guard lock(sensor_queues->mutex);
-    if (sensor_queues->scans.empty()) {
-      return nullptr;
-    }
-    auto scan = std::move(sensor_queues->scans.front());
-    sensor_queues->scans.pop_front();
-    return scan;
-  };
-  auto nextImu = [&]() -> std::optional<msensor::IMUData> {
-    if (playback_player) {
-      return playback_player->getImuData();
-    }
-    std::lock_guard lock(sensor_queues->mutex);
-    if (sensor_queues->imus.empty()) {
-      return std::nullopt;
-    }
-    auto data = sensor_queues->imus.front();
-    sensor_queues->imus.pop_front();
-    return data;
-  };
+  SensorInput sensors(lidar, imu, playback_player, with_lidar, with_imu);
   Preprocessor preprocessor(config_.preprocessor);
 
   while (!should_stop_.load()) {
@@ -383,7 +323,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       continue;
     }
 
-    auto scan = nextScan();
+    auto scan = sensors.nextScan();
 
     if (!scan) {
       if (playback_player && playback_player->isFinished()) {
@@ -410,7 +350,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
           break;
         }
 
-        const auto imudata = nextImu();
+        const auto imudata = sensors.nextImu();
         if (!imudata.has_value()) {
           break;
         }
@@ -434,7 +374,10 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       auto filtered_scan = preprocessor.filterNearCenter(*scan);
 
       auto map_increment = map_->addScan(filtered_scan->points);
-      dense_map_->addScan(filtered_scan->points);
+      if (dense_map_) {
+        dense_map_->addScan(filtered_scan->points);
+      }
+      pruneMap();
       init_scan_count++;
 
       server.updateTransformedScan(filtered_scan->points);
@@ -469,7 +412,10 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
       auto map_increment = map_->addScan(filtered_scan->points);
 
-      dense_map_->addScan(filtered_scan->points);
+      if (dense_map_) {
+        dense_map_->addScan(filtered_scan->points);
+      }
+      pruneMap();
 
       server.updateTransformedScan(filtered_scan->points);
 

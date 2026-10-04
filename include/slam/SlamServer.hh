@@ -19,7 +19,7 @@ class Slam;
 class SlamServer : public sensors::SlamService::Service {
 public:
   explicit SlamServer(std::shared_ptr<spdlog::logger> logger,
-                      std::shared_ptr<IMap> map, std::string address = {});
+                      std::string address = {});
   ~SlamServer();
 
   SlamServer(const SlamServer &) = delete;
@@ -64,7 +64,6 @@ private:
                      sensors::Empty *response) override;
 
   std::shared_ptr<spdlog::logger> logger_;
-  std::shared_ptr<IMap> map_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
   std::atomic<bool> stopping_{false};
@@ -81,6 +80,10 @@ private:
   mutable std::condition_variable pose_cv_;
   Pose3D pose_;
   PointCloud map_increment_;
+  // Full map history for GetMap. The SLAM registration map is bounded, so the
+  // client-facing snapshot is accumulated here from the published increments
+  // (pointers only, to keep the SLAM thread's cost O(1)).
+  std::vector<std::shared_ptr<const PointCloud>> map_history_;
   PointCloud transformed_scan_;
   PointCloud correspondences_;
   uint64_t scan_version_ = 0;

@@ -3,6 +3,7 @@ registration/PointToPointRegistration.cc
 registration/PointToPlaneRegistration.cc
 registration/ImuRegistration.cc
 CorrespondenceFinder.cc
+CorrespondenceFinderLogger.cc
 NormalEstimator.cc
 Transform.cc
 Preprocessor.cc
@@ -11,6 +12,8 @@ Conversion.cc
 SlamServer.cc
 RecordingSensorPlayer.cc
 ImuPreintegration.cc
+ImuMath.cc
+SensorInput.cc
 Slam.cc)
 target_link_libraries(slam
   PUBLIC spdlog::spdlog slam_grpc

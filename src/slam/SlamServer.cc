@@ -37,8 +37,8 @@ struct PoseSnapshot {
 namespace mslam {
 
 SlamServer::SlamServer(std::shared_ptr<spdlog::logger> logger,
-                       std::shared_ptr<IMap> map, std::string address)
-    : logger_(std::move(logger)), map_(std::move(map)),
+                       std::string address)
+    : logger_(std::move(logger)),
       address_(address.empty() ? g_default_slam_server_address : address),
       pose_(Pose3D::Zero()) {}
 
@@ -92,6 +92,10 @@ void SlamServer::updatePose(const Pose3D &pose) {
 void SlamServer::updateMapIncrement(const PointCloud &increment) {
   std::scoped_lock lock(map_increment_mutex_);
   map_increment_ = increment;
+  // Retain every increment so GetMap can serve the full accumulated map even
+  // though the registration map is bounded. Storing a shared handle keeps the
+  // per-scan cost independent of the map size.
+  map_history_.emplace_back(std::make_shared<const PointCloud>(increment));
   ++map_increment_version_;
   map_increment_cv_.notify_all();
 }
@@ -112,7 +116,24 @@ void SlamServer::updateCorrespondences(const PointCloud &correspondences) {
 
 grpc::Status SlamServer::GetMap(grpc::ServerContext *, const sensors::Empty *,
                                 sensors::PointCloud3 *response) {
-  *response = toGRPC(map_->getPointCloudRepresentation());
+  std::vector<std::shared_ptr<const PointCloud>> history;
+  {
+    std::scoped_lock lock(map_increment_mutex_);
+    history = map_history_;
+  }
+
+  size_t total_points = 0;
+  for (const auto &chunk : history) {
+    total_points += chunk->size();
+  }
+
+  PointCloud full_map;
+  full_map.reserve(total_points);
+  for (const auto &chunk : history) {
+    full_map.insert(full_map.end(), chunk->begin(), chunk->end());
+  }
+
+  *response = toGRPC(full_map);
   return grpc::Status::OK;
 }
 
@@ -270,6 +291,13 @@ grpc::Status SlamServer::Reset(grpc::ServerContext *, const sensors::Empty *,
     slam_->reset();
     updatePose(slam_->getPose());
   }
+
+  {
+    std::scoped_lock lock(map_increment_mutex_);
+    map_increment_.clear();
+    map_history_.clear();
+  }
+
   return grpc::Status::OK;
 }
 

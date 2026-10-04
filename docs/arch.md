@@ -79,7 +79,7 @@ class SlamServer {
 	+updateMapIncrement(increment)
 	+updateTransformedScan(scan)
 	+updateCorrespondences(correspondences)
-	-map_ shared_ptr~IMap~
+	-map_history_ vector~shared_ptr~PointCloud~~
 	-slam_ Slam*
 	-server_ unique_ptr~grpc::Server~
 }
@@ -94,7 +94,7 @@ Slam --> IRegistration : scan matching
 Slam --> ImuRegistration : IMU+LiDAR optimization
 Slam ..> SlamServer : publishes pose/scan/map increment
 SlamServer --> Slam : control calls\nStart/Stop/Reset
-SlamServer --> IMap : serves full map
+SlamServer ..> IMap : registration map is bounded\n(full map accumulated separately)
 ```
 
 ## Notes

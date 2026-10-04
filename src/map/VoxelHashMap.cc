@@ -35,6 +35,10 @@ PointCloud VoxelHashMap::addScan(const PointCloud &scan) {
   PointCloud added;
   added.reserve(scan.size());
 
+  if (max_points_per_voxel_ == 0) {
+    return added;
+  }
+
   for (const auto &point : scan) {
 
     const auto voxel = PointToVoxel(point, inverse_voxel_size_);
@@ -46,7 +50,7 @@ PointCloud VoxelHashMap::addScan(const PointCloud &scan) {
     if (bucket.size() < max_points_per_voxel_) {
       bucket.emplace_back(point);
       added.emplace_back(point);
-      map_rep_.emplace_back(point);
+      map_rep_dirty_ = true;
     }
   }
 
@@ -124,11 +128,94 @@ VoxelHashMap::getClosestNNeighbors(const Point &query, int N) const {
 }
 
 /**
- * @brief Get a Point Cloud Representation. Copy might be made.
+ * @brief Bound the map around the current pose.
+ *
+ * The common case (map already within bounds) is O(1): the range pass is only
+ * executed when `max_range` is configured, and the budget pass only when the
+ * voxel count exceeds `max_voxels`. Eviction keeps the voxels nearest to
+ * `center`, so the map behaves like a local (sliding) map regardless of how
+ * far the session has travelled.
+ */
+void VoxelHashMap::prune(const Point &center, float max_range,
+                         size_t max_voxels) {
+  const bool bounded_by_range = max_range > 0.0F;
+  const bool over_budget = max_voxels > 0 && map_.size() > max_voxels;
+
+  if (!bounded_by_range && !over_budget) {
+    return;
+  }
+
+  const Eigen::Vector3d center_vec(center.x, center.y, center.z);
+  const float max_range_squared =
+      bounded_by_range ? max_range * max_range : 0.0F;
+  const float half_voxel = 0.5F * voxel_size_;
+
+  auto voxel_center_squared_distance = [&](const Voxel3 &voxel) {
+    const Eigen::Vector3d voxel_center =
+        voxel.cast<double>() * static_cast<double>(voxel_size_) +
+        Eigen::Vector3d::Constant(static_cast<double>(half_voxel));
+    return static_cast<float>((voxel_center - center_vec).squaredNorm());
+  };
+
+  if (over_budget) {
+    // Keep the nearest voxels, with some headroom below the budget so that a
+    // stationary sensor does not trigger an O(n) eviction on every scan.
+    const size_t target = std::max<size_t>(1, max_voxels - max_voxels / 10);
+
+    prune_distances_.clear();
+    prune_distances_.reserve(map_.size());
+    for (const auto &entry : map_) {
+      prune_distances_.push_back(voxel_center_squared_distance(entry.first));
+    }
+    std::nth_element(prune_distances_.begin(),
+                     prune_distances_.begin() + (target - 1),
+                     prune_distances_.end());
+    const float threshold = prune_distances_[target - 1];
+
+    for (auto it = map_.begin(); it != map_.end();) {
+      if (voxel_center_squared_distance(it->first) > threshold) {
+        it = map_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  if (bounded_by_range) {
+    for (auto it = map_.begin(); it != map_.end();) {
+      if (voxel_center_squared_distance(it->first) > max_range_squared) {
+        it = map_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  map_rep_dirty_ = true;
+}
+
+/**
+ * @brief Get a Point Cloud Representation, built lazily on request.
  *
  * @return PointCloud2D
  */
 const PointCloud &VoxelHashMap::getPointCloudRepresentation() const {
+  if (!map_rep_dirty_) {
+    return map_rep_;
+  }
+
+  size_t total_points = 0;
+  for (const auto &entry : map_) {
+    total_points += entry.second.size();
+  }
+
+  map_rep_.clear();
+  map_rep_.reserve(total_points);
+  for (const auto &entry : map_) {
+    map_rep_.insert(map_rep_.end(), entry.second.begin(), entry.second.end());
+  }
+  map_rep_dirty_ = false;
+
   return map_rep_;
 }
 
@@ -141,6 +228,7 @@ const PointCloud &VoxelHashMap::getPointCloudRepresentation() const {
 void VoxelHashMap::clear() {
   map_.clear();
   map_rep_.clear();
+  map_rep_dirty_ = true;
 }
 
 void VoxelHashMap::setNumAdjacentVoxelSearch(int adjacent_voxels) {

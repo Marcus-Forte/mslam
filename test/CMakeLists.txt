@@ -14,6 +14,18 @@ target_link_libraries(test_point_cloud_io slam GTest::gtest_main)
 
 gtest_discover_tests(test_point_cloud_io)
 
+add_executable(test_correspondence_finder
+test_correspondence_finder.cc)
+target_link_libraries(test_correspondence_finder slam GTest::gtest_main)
+
+gtest_discover_tests(test_correspondence_finder)
+
+add_executable(test_imu_math
+test_imu_math.cc)
+target_link_libraries(test_imu_math slam GTest::gtest_main)
+
+gtest_discover_tests(test_imu_math)
+
 add_executable(test_slam
 test_slam.cc)
 target_link_libraries(test_slam slam GTest::gtest_main)

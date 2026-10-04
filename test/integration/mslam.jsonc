@@ -13,22 +13,22 @@
     "preprocessor": {
         "voxel_size": 0.05,
         "min_distance_to_center": 1.0,
-        "min_intensity": 20,
+        "min_intensity": 50,
         "downsample_filter": "voxel_hash",
         "deskew": true,
         "points_per_second": 200000
     },
     "map": {
-        "resolution": 0.05,
-        "max_points_per_voxel": 1,
+        "resolution": 0.5,
+        "max_points_per_voxel": 10,
         "max_voxels": 0,
         "max_range": 0,
         "dense_map": false
     },
 
     "slam": {
-        "optimizer_iterations": 3,
-        "reg_iterations": 3,
+        "optimizer_iterations": 30,
+        "reg_iterations": 30,
         "max_correspondence_distance": 0.5
     }
 }

@@ -1,0 +1,34 @@
+// SLAM configuration scoped to the integration test. Pinned on purpose so the
+// regression assertion does not depend on config/mslam.jsonc, which is tuned
+// interactively. Values match the run used to calibrate the origin tolerance.
+{
+    "imu": true,
+    "lidar": true,
+    "camera": false,
+    "imu_acceleration_scale": 9.80665,
+    "log_level": "info", // trace || debug || info || warning || error
+    "map_type": "voxel",
+    "remote_scanner": "local", // ignored for .pbscan playback
+
+    "preprocessor": {
+        "voxel_size": 0.05,
+        "min_distance_to_center": 1.0,
+        "min_intensity": 20,
+        "downsample_filter": "voxel_hash",
+        "deskew": true,
+        "points_per_second": 200000
+    },
+    "map": {
+        "resolution": 0.05,
+        "max_points_per_voxel": 1,
+        "max_voxels": 0,
+        "max_range": 0,
+        "dense_map": false
+    },
+
+    "slam": {
+        "optimizer_iterations": 3,
+        "reg_iterations": 3,
+        "max_correspondence_distance": 0.5
+    }
+}

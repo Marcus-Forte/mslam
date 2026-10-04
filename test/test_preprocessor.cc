@@ -9,11 +9,12 @@
 
 namespace {
 
-mslam::Point makePoint(float x, float y, float z) {
+mslam::Point makePoint(float x, float y, float z, float intensity = 0.0F) {
   mslam::Point point;
   point.x = x;
   point.y = y;
   point.z = z;
+  point.intensity = intensity;
   return point;
 }
 
@@ -36,9 +37,9 @@ TEST(Preprocessor, RemovesPointsCloserThanConfiguredCenterDistance) {
 TEST(Preprocessor, DownsampleCanKeepOriginalPointPositions) {
   mslam::Scan input;
   input.header.timestamp = 55U;
-  input.points.push_back(makePoint(0.1F, 0.2F, 0.3F));
-  input.points.push_back(makePoint(0.8F, 0.7F, 0.6F));
-  input.points.push_back(makePoint(1.2F, 1.3F, 1.4F));
+  input.points.push_back(makePoint(0.1F, 0.2F, 0.3F, 2.0F));
+  input.points.push_back(makePoint(0.8F, 0.7F, 0.6F, 3.0F));
+  input.points.push_back(makePoint(1.2F, 1.3F, 1.4F, 4.0F));
 
   const auto filtered =
       mslam::downsample(input, 1.0F, mslam::DownsampleFilter::VoxelHash);
@@ -55,6 +56,21 @@ TEST(Preprocessor, DownsampleCanKeepOriginalPointPositions) {
                             return point.x == 1.2F && point.y == 1.3F &&
                                    point.z == 1.4F;
                           }));
+  EXPECT_FLOAT_EQ(filtered->points.at(0).intensity, 2.0F);
+  EXPECT_FLOAT_EQ(filtered->points.at(1).intensity, 4.0F);
+}
+
+TEST(Preprocessor, VoxelHashDownsamplePreservesIntensityForFiltering) {
+  mslam::Scan input;
+  input.points.push_back(makePoint(0.1F, 0.2F, 0.3F, 2.0F));
+  input.points.push_back(makePoint(1.1F, 1.2F, 1.3F, 8.0F));
+
+  const auto downsampled =
+      mslam::downsample(input, 1.0F, mslam::DownsampleFilter::VoxelHash);
+  const auto filtered = mslam::filterByIntensity(*downsampled, 5.0F);
+
+  ASSERT_EQ(filtered->points.size(), 1U);
+  EXPECT_FLOAT_EQ(filtered->points.front().intensity, 8.0F);
 }
 
 TEST(Preprocessor, VoxelGridDownsampleReturnsVoxelCentroids) {

@@ -212,3 +212,23 @@ TEST_F(TestVoxelHashMap, representation_is_rebuilt_after_prune) {
   map_->prune(Point{0.0F, 0.0F, 0.0F}, 2.0F, 0);
   EXPECT_EQ(map_->getPointCloudRepresentation().size(), 1U);
 }
+
+TEST_F(TestVoxelHashMap, reuses_storage_after_pruning_voxels) {
+  map_ = std::make_unique<VoxelHashMap>(1.0, 2);
+  PointCloud scan;
+  scan.emplace_back(0.5F, 0.5F, 0.5F);
+  scan.emplace_back(10.5F, 10.5F, 10.5F);
+  map_->addScan(scan);
+
+  map_->prune(Point{0.5F, 0.5F, 0.5F}, 0.0F, 1);
+
+  PointCloud next_scan;
+  next_scan.emplace_back(20.5F, 20.5F, 20.5F);
+  map_->addScan(next_scan);
+
+  ASSERT_EQ(map_->getPointCloudRepresentation().size(), 2U);
+  const auto neighbor = map_->getClosestNeighbor({20.5F, 20.5F, 20.5F});
+  EXPECT_FLOAT_EQ(neighbor.first.x, 20.5F);
+  EXPECT_FLOAT_EQ(neighbor.first.y, 20.5F);
+  EXPECT_FLOAT_EQ(neighbor.first.z, 20.5F);
+}

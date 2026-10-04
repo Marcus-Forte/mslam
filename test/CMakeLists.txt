@@ -1,5 +1,6 @@
 find_package(GTest REQUIRED)
 add_subdirectory(map)
+add_subdirectory(integration)
 
 
 add_executable(test_preprocessor

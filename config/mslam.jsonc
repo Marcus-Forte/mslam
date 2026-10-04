@@ -8,9 +8,9 @@
     "remote_scanner": "192.168.178.129:50051", // use "local" for the local Mid360; ignored if .pbscan is used
 
     "preprocessor": {
-        "voxel_size": 0.1,
+        "voxel_size": 0.05,
         "min_distance_to_center": 1.0,
-        "min_intensity": 0,
+        "min_intensity": 20,
         "downsample_filter": "voxel_hash", // voxel_hash
         "deskew": true, // on/off: deskew scans using a constant-velocity twist
         "points_per_second": 200000 // 0 to disable time-aware deskew

@@ -63,6 +63,8 @@ install(
 
 
 ## Testing ##
+option(MSLAM_INTEGRATION_TESTS
+  "Build and register the slow end-to-end integration tests with CTest" OFF)
 include(CTest)
 if(BUILD_TESTING)
 add_subdirectory(test)

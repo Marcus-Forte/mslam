@@ -7,6 +7,7 @@ CorrespondenceFinderLogger.cc
 NormalEstimator.cc
 Transform.cc
 Preprocessor.cc
+Deskew.cc
 PointCloudIO.cc
 Conversion.cc
 SlamServer.cc

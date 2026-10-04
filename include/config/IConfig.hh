@@ -10,7 +10,6 @@ namespace mslam {
 enum class MapType { Voxel };
 enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
-enum class DeskewMode { Off, ConstantVelocity };
 
 inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   switch (level) {
@@ -71,8 +70,8 @@ struct PreProcessor {
   float min_intensity = 0.0F; // reject points with intensity below this
   DownsampleFilter downsample_filter = DownsampleFilter::VoxelGrid;
   unsigned int points_per_second =
-      0; // lidar scan rate (pts/s), used for deskewing
-  DeskewMode deskew_mode = DeskewMode::Off;
+      0;               // lidar scan rate (pts/s), used for deskewing
+  bool deskew = false; // on/off: deskew scans using a constant-velocity twist
 };
 
 /**

@@ -1,3 +1,4 @@
+#include "slam/Deskew.hh"
 #include "slam/Preprocessor.hh"
 
 #include <gtest/gtest.h>

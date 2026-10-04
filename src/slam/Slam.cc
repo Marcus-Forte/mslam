@@ -17,6 +17,7 @@
 #include <cmath>
 #include <csignal>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -306,15 +307,11 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
 
   int init_scan_count = 0;
 
-  Eigen::Affine3d last_pose = Eigen::Affine3d::Identity();
-  Eigen::Affine3d last_delta = Eigen::Affine3d::Identity();
-  uint64_t last_scan_timestamp_ns = 0;
-
   const bool with_imu = config_.with_imu;
   const bool with_lidar = config_.with_lidar;
 
   SensorInput sensors(lidar, imu, playback_player, with_lidar, with_imu);
-  Preprocessor preprocessor(config_.preprocessor);
+  Preprocessor preprocessor(config_.preprocessor, logger_);
 
   while (!should_stop_.load()) {
 
@@ -342,6 +339,8 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
       continue;
     }
 
+    std::vector<msensor::IMUData> scan_imu_samples;
+
     if (with_imu) {
       static uint64_t last_imu_time = 0;
 
@@ -364,6 +363,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
                        imudata->gz);
 
         last_imu_time = imudata->header.timestamp;
+        scan_imu_samples.push_back(*imudata);
 
         Predict(*imudata);
         server.updatePose(getPose());
@@ -394,17 +394,11 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
                      scan->points.size(), scan->header.timestamp,
                      scan->header.sequence_number);
 
-      auto filtered_scan =
-          preprocessor.process(*scan, last_delta, last_scan_timestamp_ns);
+      auto filtered_scan = preprocessor.process(*scan, scan_imu_samples);
       logger_->debug("Preprocess: {} -> {} pts", scan->points.size(),
                      filtered_scan->points.size());
 
       Update(*filtered_scan);
-
-      const Eigen::Affine3d new_pose = getTransform();
-      last_delta = last_pose.inverse() * new_pose;
-      last_pose = new_pose;
-      last_scan_timestamp_ns = scan->header.timestamp;
 
       server.updatePose(getPose());
 

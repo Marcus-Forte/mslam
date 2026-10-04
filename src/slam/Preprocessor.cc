@@ -1,6 +1,6 @@
 #include "slam/Preprocessor.hh"
 #include "map/VoxelHashMap.hh"
-#include "slam/SE3.hh"
+#include "slam/Deskew.hh"
 
 #include <Eigen/Geometry>
 #include <array>
@@ -112,101 +112,26 @@ std::shared_ptr<Scan> filterByIntensity(const Scan &input,
   return filtered_scan;
 }
 
-std::shared_ptr<Scan> deskew(const Scan &scan,
-                             const Eigen::Affine3d &relative_motion) {
-  auto result = std::make_shared<Scan>();
-  result->header = scan.header;
-  const std::size_t num_points = scan.points.size();
-  if (num_points == 0) {
-    return result;
-  }
-
-  const auto omega = se3Log(relative_motion);
-
-  result->points.resize(num_points);
-
-  for (std::size_t i = 0; i < num_points; ++i) {
-    const double stamp =
-        static_cast<double>(i) / static_cast<double>(num_points - 1);
-    const Eigen::Affine3d pose = se3Exp((stamp - 1.0) * omega);
-
-    const auto &pt = scan.points[i];
-    const Eigen::Vector3d p(pt.x, pt.y, pt.z);
-    const Eigen::Vector3d p_corrected = pose * p;
-
-    result->points[i].x = static_cast<float>(p_corrected.x());
-    result->points[i].y = static_cast<float>(p_corrected.y());
-    result->points[i].z = static_cast<float>(p_corrected.z());
-    result->points[i].intensity = pt.intensity;
-  }
-
-  return result;
-}
-
-std::shared_ptr<Scan> deskew(const Scan &scan,
-                             const Eigen::Affine3d &relative_motion,
-                             unsigned int scan_rate, double delta_t) {
-  auto result = std::make_shared<Scan>();
-  result->header = scan.header;
-  const std::size_t num_points = scan.points.size();
-  if (num_points == 0) {
-    return result;
-  }
-
-  const auto omega_ref = se3Log(relative_motion);
-
-  // Scale twist: relative_motion was observed over delta_t seconds,
-  // but this scan spans scan_duration seconds at the known scan_rate.
-  const double scan_duration =
-      static_cast<double>(num_points - 1) / static_cast<double>(scan_rate);
-  const auto omega = omega_ref * (scan_duration / delta_t);
-
-  result->points.resize(num_points);
-
-  for (std::size_t i = 0; i < num_points; ++i) {
-    const double stamp =
-        static_cast<double>(i) / static_cast<double>(num_points - 1);
-    const Eigen::Affine3d pose = se3Exp((stamp - 1.0) * omega);
-
-    const auto &pt = scan.points[i];
-    const Eigen::Vector3d p(pt.x, pt.y, pt.z);
-    const Eigen::Vector3d p_corrected = pose * p;
-
-    result->points[i].x = static_cast<float>(p_corrected.x());
-    result->points[i].y = static_cast<float>(p_corrected.y());
-    result->points[i].z = static_cast<float>(p_corrected.z());
-    result->points[i].intensity = pt.intensity;
-  }
-
-  return result;
-}
-
 } // namespace mslam
 
 namespace mslam {
 
-Preprocessor::Preprocessor(const PreProcessor &config) : config_(config) {}
+Preprocessor::Preprocessor(const PreProcessor &config,
+                           std::shared_ptr<spdlog::logger> logger)
+    : config_(config), logger_(std::move(logger)) {}
 
 std::shared_ptr<Scan> Preprocessor::filterNearCenter(const Scan &scan) const {
   return removePointsNearCenter(scan, config_.min_distance_to_center);
 }
 
 std::shared_ptr<Scan>
-Preprocessor::process(const Scan &scan, const Eigen::Affine3d &last_delta,
-                      uint64_t last_scan_timestamp_ns) const {
+Preprocessor::process(const Scan &scan,
+                      const std::vector<msensor::IMUData> &imu_samples) const {
   std::shared_ptr<Scan> result;
 
-  if (config_.deskew_mode != DeskewMode::Off) {
-    if (config_.points_per_second > 0 && last_scan_timestamp_ns > 0) {
-      const double delta_t =
-          static_cast<double>(scan.header.timestamp - last_scan_timestamp_ns) *
-          1e-9;
-      result = delta_t > 0.0 ? deskew(scan, last_delta,
-                                      config_.points_per_second, delta_t)
-                             : deskew(scan, last_delta);
-    } else {
-      result = deskew(scan, last_delta);
-    }
+  if (config_.deskew && config_.points_per_second > 0) {
+    const double delta_t = 1.0 / static_cast<double>(config_.points_per_second);
+    result = deskew(scan, imu_samples, delta_t, logger_);
   } else {
     result = std::make_shared<Scan>(scan);
   }

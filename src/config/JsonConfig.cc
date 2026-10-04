@@ -118,22 +118,11 @@ void JsonConfig::load() {
   config_.preprocessor.downsample_filter = parseDownsampleFilter(
       root["preprocessor"]["downsample_filter"].asString());
 
-  const auto &deskew_val = root["preprocessor"]["deskew"];
-  if (deskew_val.isBool()) {
-    config_.preprocessor.deskew_mode = deskew_val.asBool()
-                                           ? mslam::DeskewMode::ConstantVelocity
-                                           : mslam::DeskewMode::Off;
-  } else {
-    const auto deskew_str = deskew_val.asString();
-    if (deskew_str == "off") {
-      config_.preprocessor.deskew_mode = mslam::DeskewMode::Off;
-    } else if (deskew_str == "constant_velocity") {
-      config_.preprocessor.deskew_mode = mslam::DeskewMode::ConstantVelocity;
-    } else {
-      throw std::runtime_error("Invalid preprocessor deskew mode: " +
-                               deskew_str);
-    }
+  if (!root["preprocessor"]["deskew"].isBool()) {
+    throw std::runtime_error(
+        "Invalid preprocessor deskew setting: expected on/off");
   }
+  config_.preprocessor.deskew = root["preprocessor"]["deskew"].asBool();
   if (config_.preprocessor.min_distance_to_center < 0.0F) {
     throw std::runtime_error(
         "Invalid preprocessor min_distance_to_center setting");

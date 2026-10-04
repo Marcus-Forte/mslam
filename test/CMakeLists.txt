@@ -8,6 +8,12 @@ target_link_libraries(test_preprocessor slam GTest::gtest_main)
 
 gtest_discover_tests(test_preprocessor)
 
+add_executable(test_deskew
+test_deskew.cc)
+target_link_libraries(test_deskew slam GTest::gtest_main)
+
+gtest_discover_tests(test_deskew)
+
 add_executable(test_point_cloud_io
 test_point_cloud_io.cc)
 target_link_libraries(test_point_cloud_io slam GTest::gtest_main)

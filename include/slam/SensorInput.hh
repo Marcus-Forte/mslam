@@ -10,24 +10,20 @@
 
 namespace mslam {
 
-class RecordingSensorPlayer;
-
 /**
  * @brief Uniform scan / IMU source for the SLAM loop.
  *
- * Reads from a recording player when one is given. Otherwise registers
- * callbacks on the live sensors, buffers the latest samples in bounded queues,
- * and unregisters the callbacks on destruction.
+ * Registers callbacks on the live sensors, buffers the latest samples in
+ * bounded queues, and unregisters the callbacks on destruction.
  */
 class SensorInput {
 public:
   /**
-   * @throws std::invalid_argument if a live sensor is required but missing.
+   * @throws std::invalid_argument if a required sensor is missing.
    */
   SensorInput(std::shared_ptr<msensor::ILidar> lidar,
-              std::shared_ptr<msensor::IImu> imu,
-              std::shared_ptr<RecordingSensorPlayer> playback_player,
-              bool with_lidar, bool with_imu);
+              std::shared_ptr<msensor::IImu> imu, bool with_lidar,
+              bool with_imu);
   ~SensorInput();
 
   SensorInput(const SensorInput &) = delete;
@@ -45,8 +41,7 @@ private:
     std::deque<msensor::IMUData> imus;
   };
 
-  std::shared_ptr<RecordingSensorPlayer> playback_player_;
-  // Live sensors whose callbacks this object owns; null when playing back.
+  // Sensors whose callbacks this object owns.
   std::shared_ptr<msensor::ILidar> lidar_;
   std::shared_ptr<msensor::IImu> imu_;
   std::shared_ptr<Queues> queues_ = std::make_shared<Queues>();

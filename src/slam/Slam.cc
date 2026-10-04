@@ -4,7 +4,6 @@
 #include "slam/ImuMath.hh"
 #include "slam/ImuPreintegration.hh"
 #include "slam/Preprocessor.hh"
-#include "slam/RecordingSensorPlayer.hh"
 #include "slam/SensorInput.hh"
 #include "slam/SlamServer.hh"
 #include "slam/Transform.hh"
@@ -293,8 +292,7 @@ void Slam::signalHandler(int signal_number) {
 }
 
 void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
-               std::shared_ptr<msensor::IImu> imu, SlamServer &server,
-               std::shared_ptr<RecordingSensorPlayer> playback_player) {
+               std::shared_ptr<msensor::IImu> imu, SlamServer &server) {
 
   std::signal(SIGINT, signalHandler);
   std::signal(SIGTERM, signalHandler);
@@ -310,7 +308,7 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
   const bool with_imu = config_.with_imu;
   const bool with_lidar = config_.with_lidar;
 
-  SensorInput sensors(lidar, imu, playback_player, with_lidar, with_imu);
+  SensorInput sensors(lidar, imu, with_lidar, with_imu);
   Preprocessor preprocessor(config_.preprocessor, logger_);
 
   while (!should_stop_.load()) {
@@ -323,10 +321,6 @@ void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
     auto scan = sensors.nextScan();
 
     if (!scan) {
-      if (playback_player && playback_player->isFinished()) {
-        logger_->info("Playback exhausted; exiting SLAM process.");
-        break;
-      }
       if (should_stop_.load()) {
         break;
       }

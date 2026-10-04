@@ -33,7 +33,7 @@ class IMap {
 
 class Slam {
 	+Slam(logger, config, map)
-	+run(lidar, imu, server, exporter, playback)
+	+run(lidar, imu, server)
 	+startProcessing()
 	+stopProcessing()
 	+reset()

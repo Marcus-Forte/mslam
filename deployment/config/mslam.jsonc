@@ -5,7 +5,7 @@
     "imu_acceleration_scale": 9.80665,
     "log_level": "debug", // trace || debug || info || warning || error
     "map_type": "voxel",
-    "remote_scanner": "192.168.178.129:50051", // use "local" for the local Mid360; ignored if .pbscan is used
+    "remote_scanner": "192.168.178.129:50051", // "local" for on-board Mid360, or host:port of a sensor/replay server
 
     "preprocessor": {
         "voxel_size": 0.1,

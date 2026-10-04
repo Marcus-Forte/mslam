@@ -16,7 +16,6 @@
 namespace mslam {
 
 class SlamServer;
-class RecordingSensorPlayer;
 
 class Slam : public ISlam {
 public:
@@ -29,8 +28,7 @@ public:
   Eigen::Affine3d getTransform() const;
 
   void run(std::shared_ptr<msensor::ILidar> lidar,
-           std::shared_ptr<msensor::IImu> imu, SlamServer &server,
-           std::shared_ptr<RecordingSensorPlayer> playback_player = {});
+           std::shared_ptr<msensor::IImu> imu, SlamServer &server);
 
   void startProcessing();
   void stopProcessing();

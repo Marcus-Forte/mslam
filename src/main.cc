@@ -1,4 +1,3 @@
-
 #include "config/JsonConfig.hh"
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -7,7 +6,6 @@
 #include "msensor/config/config.hh"
 #include "msensor/lidar/mid360.hh"
 #include "sensors_remote_client.hh"
-#include "slam/RecordingSensorPlayer.hh"
 #include "slam/Slam.hh"
 #include "slam/SlamServer.hh"
 #include <filesystem>
@@ -16,18 +14,11 @@
 #include <memory>
 #include <stdexcept>
 
-const unsigned int g_default_playback_delay_ms = 10;
-
 namespace {
 
 void printUsage(const char *program_name) {
-  std::cout << "Usage: " << program_name
-            << " [-c config.json] [-d delay_ms] [-f recording.pbscan] "
-               "[-h]\n"
+  std::cout << "Usage: " << program_name << " [-c config.json] [-h]\n"
             << "  -c <file>  Load SLAM configuration from JSON\n"
-            << "  -d <ms>    Delay between playback entries when using -f\n"
-            << "  -f <file>  Replay a recorded scan file instead of connecting "
-               "remotely\n"
             << "  -h         Show this help message\n";
 }
 } // namespace
@@ -36,9 +27,7 @@ int main(int argc, char **argv) {
   int opt;
   mslam::SlamConfiguration config;
   std::filesystem::path slam_config_path;
-  std::string slam_play_file = "";
-  unsigned int playback_delay_ms = g_default_playback_delay_ms;
-  while ((opt = getopt(argc, argv, "c:d:f:h")) != -1) {
+  while ((opt = getopt(argc, argv, "c:h")) != -1) {
     switch (opt) {
     case 'c': {
       std::cout << "Using config: " << optarg << std::endl;
@@ -48,14 +37,6 @@ int main(int argc, char **argv) {
       config = json_config.getConfig();
       break;
     }
-    case 'd':
-      playback_delay_ms = static_cast<unsigned int>(std::stoul(optarg));
-      break;
-    case 'f':
-      std::cout << "Using recorded sensor playback with: " << optarg
-                << std::endl;
-      slam_play_file = optarg;
-      break;
     case 'h':
       printUsage(argv[0]);
       return 0;
@@ -65,10 +46,6 @@ int main(int argc, char **argv) {
       return 1;
       break;
     }
-  }
-
-  if (!slam_play_file.empty()) {
-    config.remote_scanner = "local";
   }
 
   std::cout << config << std::endl;
@@ -93,19 +70,8 @@ int main(int argc, char **argv) {
   // Create sensor readers.
   std::shared_ptr<msensor::ILidar> lidar_sensor;
   std::shared_ptr<msensor::IImu> imu_sensor;
-  std::shared_ptr<mslam::RecordingSensorPlayer> playback_player;
 
-  if (!slam_play_file.empty()) {
-    playback_player = std::make_shared<mslam::RecordingSensorPlayer>(
-        slam_play_file, logger, config.with_imu, config.with_lidar,
-        playback_delay_ms);
-    playback_player->init();
-    playback_player->startSampling();
-    lidar_sensor = std::dynamic_pointer_cast<msensor::ILidar>(playback_player);
-    imu_sensor = std::dynamic_pointer_cast<msensor::IImu>(playback_player);
-    logger->info("Initialized recording playback player with file: {}",
-                 slam_play_file);
-  } else if (config.remote_scanner == "local") {
+  if (config.remote_scanner == "local") {
     auto sensor_config_path =
         slam_config_path.empty()
             ? std::filesystem::path("config/publisher_config.json")
@@ -151,12 +117,14 @@ int main(int argc, char **argv) {
     remote->start();
     lidar_sensor = remote;
     imu_sensor = remote;
+    logger->info("Connected to remote sensor server at {}",
+                 config.remote_scanner);
   }
 
   mslam::Slam slam(logger, config, map);
   slam_server.setSlam(&slam);
 
-  slam.run(lidar_sensor, imu_sensor, slam_server, playback_player);
+  slam.run(lidar_sensor, imu_sensor, slam_server);
 
   return 0;
 }

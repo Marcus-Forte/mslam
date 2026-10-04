@@ -46,17 +46,32 @@ docker run --rm -it mslam-viewer --server-addr <address>
 
 ## Running playback
 
-Use the main SLAM binary with a recorded `.pbscan` file:
+Replay a recording by running the replay server (from `msensor`) and pointing
+the SLAM at it as a remote sensor server:
 
 ```bash
-./build/default/mslam -c config/mslam.json -f test/data/rotate.pbscan -d 10
+# Terminal 1: serve the recording (speed 1.0 = real time, 0 = as fast as possible)
+./build/gcc/playback_publisher -f test/data/rotate.pbscan -s 1.0 -p 50051
+
+# Terminal 2: run SLAM against the replay server
+./build/gcc/mslam -c config/mslam.jsonc   # remote_scanner points at 127.0.0.1:50051
 ```
 
-Arguments:
+`playback_publisher` arguments:
 
-- `-c <file>` loads the SLAM JSON configuration.
-- `-f <file>` replays a recorded sensor file instead of connecting remotely.
-- `-d <ms>` sets the playback delay between recording entries when using `-f`.
+- `-f, --file <file>` the recorded `.pbscan` to replay.
+- `-s, --speed <x>` playback speed multiplier (`1.0` = real time, `0` = unlimited).
+- `-p, --port <port>` gRPC listen port (default `50051`).
+- `-a, --autoplay` start immediately instead of waiting for Space (useful for
+  Docker, CI, and background processes without interactive stdin).
+
+Playback starts paused unless `--autoplay` is supplied. Use Space to toggle
+play/pause, `r` to rewind and pause, Right Arrow to double the speed, and Left
+Arrow to halve it (down to 0.125x). Speed `0` means unpaced; Left Arrow changes
+that to 64x. Ctrl-C stops the server. The server stays open at end-of-file, and
+SLAM remains running with no incoming scans; press `r` and then Space to replay.
+Keyboard controls require stdin to remain open; use `--autoplay` for
+non-interactive playback.
 
 Set `remote_scanner` to `"local"` in the SLAM configuration to use a local
 Mid360. Its enable flag, SDK config path, and scan accumulation count are read
@@ -65,8 +80,8 @@ SLAM config passed with `-c`). Relative Mid360 config paths are resolved
 relative to that file. The repository's sensor configs are installed alongside
 the SLAM config.
 
-When playback reaches the end of the recording and no more scans are available,
-the process exits cleanly.
+If the gRPC connection drops, the remote client retries while the SLAM loop
+continues running. This lets playback resume after a reset or server restart.
 
 ## Browser viewer
 

@@ -11,7 +11,6 @@ Deskew.cc
 PointCloudIO.cc
 Conversion.cc
 SlamServer.cc
-RecordingSensorPlayer.cc
 ImuPreintegration.cc
 ImuMath.cc
 SensorInput.cc

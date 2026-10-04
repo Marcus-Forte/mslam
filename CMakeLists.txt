@@ -21,8 +21,12 @@ endif()
 include(cmake/findGRPC.cmake)
 include(cmake/code_format.cmake)
 
+option(MSLAM_INSTALL_REPLAY_SERVER
+  "Install playback_publisher with mslam (disabled by default)" OFF)
+
 add_subdirectory(third_party/robin-map)
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
+set(MSENSOR_INSTALL_PLAYBACK_PUBLISHER ${MSLAM_INSTALL_REPLAY_SERVER})
 add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_subdirectory(grpc)
 link_libraries(msensor::msensor)
@@ -34,6 +38,16 @@ add_subdirectory(src/slam)
 add_executable(mslam
 src/main.cc)
 target_link_libraries(mslam maps slam mslam::config msensor::server mid360 config)
+
+
+# The msensor replay server is a separate executable. Place it next to mslam so
+# it is easy to run from the same build tree. Installation is opt-in via
+# MSLAM_INSTALL_REPLAY_SERVER to keep it out of deployment images by default.
+if(TARGET playback_publisher)
+  set_target_properties(playback_publisher PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+  add_custom_target(replay-server DEPENDS playback_publisher)
+endif()
 
 
 add_executable(register_scans2d EXCLUDE_FROM_ALL

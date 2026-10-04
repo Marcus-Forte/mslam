@@ -9,7 +9,12 @@ from typing import Any
 import grpc
 import numpy as np
 
-from geometry import euler_xyz_to_wxyz, quaternion_rotate_vector
+from geometry import (
+    euler_xyz_to_wxyz,
+    quaternion_conjugate,
+    quaternion_multiply,
+    quaternion_rotate_vector,
+)
 from points import intensity_to_colors, to_viser_colors, to_viser_points
 
 PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
@@ -45,7 +50,7 @@ class SlamViewerClient:
         self._viser: Any = viser
         self._map_point_chunks: list[np.ndarray] = []
         self._map_color_chunks: list[np.ndarray] = []
-        self._viser_server = viser.ViserServer(port=viser_port)
+        self._viser_server = viser.ViserServer(host="0.0.0.0", port=viser_port)
         self._viser_server.scene.set_background_image(np.zeros((1, 1, 3), dtype=np.uint8))
         self._cloud = self._viser_server.scene.add_point_cloud(
             name="/slam/map",
@@ -83,6 +88,9 @@ class SlamViewerClient:
         self._follow_pose_toggle = self._viser_server.gui.add_checkbox(
             "Follow Pose", initial_value=False
         )
+        self._follow_pose_references: dict[
+            int, tuple[np.ndarray, np.ndarray]
+        ] = {}
 
         start_button = self._viser_server.gui.add_button("Start")
         stop_button = self._viser_server.gui.add_button("Stop")
@@ -305,9 +313,52 @@ class SlamViewerClient:
         self._pose_frame.wxyz = rotation_wxyz
 
         if self._follow_pose_toggle.value:
-            self._move_camera_to_pose(position)
+            self._move_camera_to_pose(position, rotation_wxyz)
+        else:
+            self._follow_pose_references.clear()
 
-    def _move_camera_to_pose(self, position: np.ndarray) -> None:
-        # Move the orbit center to the pose; user can still rotate around it.
-        for client in self._viser_server.get_clients().values():
-            client.camera.look_at = position
+    def _move_camera_to_pose(
+        self, position: np.ndarray, rotation_wxyz: np.ndarray
+    ) -> None:
+        clients = list(self._viser_server.get_clients().values())
+        active_client_ids = {id(client) for client in clients}
+        self._follow_pose_references = {
+            client_id: reference
+            for client_id, reference in self._follow_pose_references.items()
+            if client_id in active_client_ids
+        }
+
+        for client in clients:
+            camera = client.camera
+            client_id = id(client)
+            try:
+                camera_position = camera.position.copy()
+                camera_rotation = camera.wxyz.copy()
+            except AssertionError:
+                logger.debug("Waiting for client camera state before following its pose")
+                continue
+
+            reference = self._follow_pose_references.get(client_id)
+            if reference is None:
+                self._follow_pose_references[client_id] = (
+                    position.copy(),
+                    rotation_wxyz.copy(),
+                )
+                continue
+
+            reference_position, reference_rotation = reference
+            inverse_reference_rotation = quaternion_conjugate(reference_rotation)
+            relative_position = quaternion_rotate_vector(
+                inverse_reference_rotation, camera_position - reference_position
+            )
+            relative_rotation = quaternion_multiply(
+                inverse_reference_rotation, camera_rotation
+            )
+            camera.position = position + quaternion_rotate_vector(
+                rotation_wxyz, relative_position
+            )
+            camera.wxyz = quaternion_multiply(rotation_wxyz, relative_rotation)
+            self._follow_pose_references[client_id] = (
+                position.copy(),
+                rotation_wxyz.copy(),
+            )

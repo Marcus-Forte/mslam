@@ -1,0 +1,32 @@
+{
+    "imu": true,
+    "lidar" : true,
+    "camera": false,
+    "imu_acceleration_scale": 9.80665,
+    "log_level": "debug", // trace || debug || info || warning || error
+    "map_type": "voxel",
+    "remote_scanner": "192.168.178.129:50051", // use "local" for the local Mid360; ignored if .pbscan is used
+
+    "preprocessor": {
+        "voxel_size": 0.1,
+        "min_distance_to_center": 1.0,
+        "min_intensity": 0,
+        "downsample_filter": "voxel_hash", // voxel_hash
+        "deskew": "constant_velocity", // off || constant_velocity
+        "points_per_second": 200000 // 0 to disable time-aware deskew
+    },
+    "map": {
+        "resolution": 0.1,
+        "max_points_per_voxel": 10,
+        // Bound the registration map so per-scan cost stays flat over long runs.
+        "max_voxels": 300000, // 0 disables the voxel budget
+        "max_range": 0, // 0 disables radius pruning (m)
+        "dense_map": false // unused 1 cm map: leave off (memory)
+    },
+
+    "slam": {
+        "optimizer_iterations": 3,
+        "reg_iterations": 3,
+        "max_correspondence_distance": 0.5
+    }
+}

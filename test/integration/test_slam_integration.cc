@@ -1,15 +1,12 @@
 #include "config/JsonConfig.hh"
 #include "map/VoxelHashMap.hh"
 #include "msensor/recorder/recording_driver.hh"
-#include "msensor_server.hh"
-#include "sensors_remote_client.hh"
 #include "slam/Slam.hh"
 #include "slam/SlamServer.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -27,10 +24,6 @@ namespace {
 // This is LiDAR-inertial odometry without loop closure, so heading is not
 // expected to return to zero (the living_room_garden run ends ~0.49 rad off).
 constexpr double k_max_origin_offset_m = 0.1;
-
-// The gRPC sensor server is reachable on this test-only port. Using a
-// non-default port avoids clashing with a real `sensor_publisher`.
-constexpr int k_test_port = 50071;
 
 TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
   const std::filesystem::path source_dir{MSLAM_SOURCE_DIR};
@@ -57,14 +50,14 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
   // is not started, so no port is bound.
   mslam::SlamServer slam_server(logger);
 
-  // Replay the recording as a standalone gRPC sensor server and consume it
-  // through the regular remote client, exercising the full production path.
-  const std::string address = "127.0.0.1:" + std::to_string(k_test_port);
-  // Raw max speed (0) replays the file faster than the gRPC stream can drain,
-  // so the server's single-pending-slot policy drops samples and the run
-  // diverges. 16x keeps every sample on this host (verified up to 32x; 64x
-  // drops) while staying well ahead of real time. Override with
-  // MSLAM_REPLAY_SPEED for local experiments.
+  // Replay the recording directly in-process: RecordingSensorDriver
+  // implements both ILidar and IImu, so it can be fed straight to Slam
+  // without going through the gRPC sensor server/client.
+  // Raw max speed (0) replays the file faster than Slam::run can drain
+  // scans, so samples would be dropped and the run would diverge. 16x keeps
+  // every sample on this host (verified up to 32x; 64x drops) while staying
+  // well ahead of real time. Override with MSLAM_REPLAY_SPEED for local
+  // experiments.
   double speed = 16.0;
   if (const char *env = std::getenv("MSLAM_REPLAY_SPEED")) {
     speed = std::stod(env);
@@ -73,17 +66,11 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
       std::make_shared<msensor::RecordingSensorDriver>(recording, speed);
   driver->init();
 
-  SensorsServer sensor_server(nullptr, nullptr, driver, driver, address);
-  sensor_server.start();
-
-  auto client = std::make_shared<SensorsRemoteClient>(address);
-  client->init();
-  client->start();
-
-  // Start the replay only after the client stream and SLAM callbacks are
-  // registered, otherwise the first samples would be dropped. The production
-  // SLAM loop intentionally stays alive when the sensor stream goes idle;
-  // stop this integration run explicitly after the recording is consumed.
+  // Start the replay only after the SLAM callbacks are registered (done
+  // inside slam.run()), otherwise the first samples would be dropped. The
+  // production SLAM loop intentionally stays alive when the sensor stream
+  // goes idle; stop this integration run explicitly after the recording is
+  // consumed.
   std::thread replay_thread([&driver]() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     driver->startSampling();
@@ -94,8 +81,8 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
     std::raise(SIGINT);
   });
 
-  auto lidar = std::static_pointer_cast<msensor::ILidar>(client);
-  auto imu = std::static_pointer_cast<msensor::IImu>(client);
+  auto lidar = std::static_pointer_cast<msensor::ILidar>(driver);
+  auto imu = std::static_pointer_cast<msensor::IImu>(driver);
   mslam::Slam slam(logger, config, map);
   slam_server.setSlam(&slam);
   slam.run(lidar, imu, slam_server);
@@ -122,9 +109,7 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
             << "Final error: position=" << position_error_m
             << " m, rotation=" << rotation_error_rad << " rad\n";
 
-  client->stop();
   driver->stopSampling();
-  sensor_server.stop();
 
   EXPECT_LT(position_error_m, k_max_origin_offset_m)
       << "Final position error is " << position_error_m << " m (pos=["

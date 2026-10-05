@@ -15,7 +15,9 @@
       "installDir": "${sourceDir}/build/${presetName}/install",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "MSLAM_INSTALL_REPLAY_SERVER": "ON",
+        "MSLAM_INTEGRATION_TESTS": "ON"
       }
     },
     {

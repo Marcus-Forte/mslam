@@ -19,7 +19,7 @@ else()
 endif()
 
 target_link_libraries(test_slam_integration
-  slam maps mslam::config msensor::server scan_recorder GTest::gtest_main)
+  slam maps mslam::config scan_recorder GTest::gtest_main)
 
 # The recordings and config live in the repository, not the build tree.
 target_compile_definitions(test_slam_integration

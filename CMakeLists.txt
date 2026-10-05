@@ -47,6 +47,15 @@ if(TARGET playback_publisher)
   set_target_properties(playback_publisher PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
   add_custom_target(replay-server DEPENDS playback_publisher)
+
+  if(MSLAM_INSTALL_REPLAY_SERVER)
+    set_property(TARGET playback_publisher PROPERTY EXCLUDE_FROM_ALL FALSE)
+    install(
+      TARGETS playback_publisher
+      DESTINATION ${CMAKE_INSTALL_BINDIR}
+      RUNTIME_DEPENDENCY_SET mslam_runtime_targets
+    )
+  endif()
 endif()
 
 

@@ -1,87 +1,18 @@
 #include "slam/registration/ImuRegistration.hh"
 
 #include "OptimizerObserver.hh"
-#include "moptim/ICost.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostCentral.hh"
 #include "slam/NormalEstimator.hh"
 #include "slam/SE3.hh"
 #include "slam/Transform.hh"
 #include "slam/registration/ImuPreintegrationFactor.hh"
+#include "slam/registration/PointDistance.hh"
 
 #include <Eigen/Dense>
 
 namespace mslam {
 namespace {
-
-/// Point-to-plane cost over a larger parameter vector, depending only on the
-/// pose increment x[0..5] (se3 exponential map, applied to the already
-/// transformed points). The remaining parameters have zero Jacobian columns,
-/// so only the 6 pose columns are differentiated instead of re-evaluating
-/// every point for each of the param_dim parameters.
-class PointToPlaneSE3Cost : public moptim::ICost<double> {
-public:
-  PointToPlaneSE3Cost(const double *inputs, const double *targets,
-                      size_t num_elements, size_t param_dim)
-      : ICost(6, 3, param_dim, num_elements), inputs_(inputs),
-        targets_(targets) {
-    residual_.resize(3 * num_elements);
-    residual_plus_.resize(3 * num_elements);
-    residual_minus_.resize(3 * num_elements);
-    jacobian_.resize(3 * num_elements, 6);
-  }
-
-  double computeCost(const double *x) override {
-    residuals(x, residual_.data());
-    return residual_.squaredNorm();
-  }
-
-  void computeLinearSystem(const double *x, double *JTJ, double *JTb,
-                           double &cost) override {
-    residuals(x, residual_.data());
-
-    const double step = std::sqrt(std::numeric_limits<double>::epsilon());
-    for (int i = 0; i < 6; ++i) {
-      Eigen::Matrix<double, 6, 1> x_plus =
-          Eigen::Map<const Eigen::Matrix<double, 6, 1>>(x);
-      Eigen::Matrix<double, 6, 1> x_minus = x_plus;
-      x_plus[i] += step;
-      x_minus[i] -= step;
-      residuals(x_plus.data(), residual_plus_.data());
-      residuals(x_minus.data(), residual_minus_.data());
-
-      jacobian_.col(i) = (residual_plus_ - residual_minus_) / (2.0 * step);
-    }
-
-    Eigen::Map<Eigen::MatrixXd> JTJ_map(JTJ, param_dim_, param_dim_);
-    Eigen::Map<Eigen::VectorXd> JTb_map(JTb, param_dim_);
-    JTJ_map.setZero();
-    JTb_map.setZero();
-    JTJ_map.topLeftCorner<6, 6>().noalias() = jacobian_.transpose() * jacobian_;
-    JTb_map.head<6>().noalias() = jacobian_.transpose() * residual_;
-    cost = residual_.squaredNorm();
-  }
-
-private:
-  void residuals(const double *x, double *out) const {
-    const Eigen::Affine3d transform =
-        se3Exp(Eigen::Map<const Eigen::Matrix<double, 6, 1>>(x));
-    for (size_t i = 0; i < num_elements_; ++i) {
-      const Eigen::Map<const Eigen::Vector3d> source{inputs_ + i * 6};
-      const Eigen::Map<const Eigen::Vector3d> normal{inputs_ + i * 6 + 3};
-      const Eigen::Map<const Eigen::Vector3d> target{targets_ + i * 3};
-      Eigen::Map<Eigen::Vector3d>{out + i * 3} =
-          normal * normal.dot(target - transform * source);
-    }
-  }
-
-  const double *inputs_;
-  const double *targets_;
-  Eigen::VectorXd residual_;
-  Eigen::VectorXd residual_plus_;
-  Eigen::VectorXd residual_minus_;
-  Eigen::Matrix<double, Eigen::Dynamic, 6> jacobian_;
-};
 
 constexpr int kStateDim = ImuPreintegrationFactor::kStateDim;
 constexpr int kExtraDim = ImuPreintegrationFactor::kExtraDim;
@@ -152,6 +83,8 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
       Eigen::Matrix<double, kParamDim, 1>::Zero();
   moptim::LevenbergMarquardt<double> lm(kParamDim);
   lm.setMaxIterations(num_optimizer_iterations_);
+  // auto loss_function =
+  //     std::make_shared<moptim::GemanMcClureLoss<double>>(geman_mcclure_kappa_);
   OptimizerObserver<double> observer(logger_);
   lm.setObserver(&observer);
 
@@ -179,9 +112,13 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
     lm.clearCosts();
 
     // Scan-matching cost (point-to-plane, only uses pose DOFs 0-5)
-    lm.addCost(std::make_shared<PointToPlaneSE3Cost>(
+    auto scan_matching_cost = std::make_shared<
+        moptim::NumericalCostCentral<Point3PlaneDistance, double>>(
         inputs_buffer_[0].data(), map_points_buffer_[0].data(),
-        map_points_buffer_.size(), kParamDim));
+        map_points_buffer_.size(), 6, 3, kParamDim, Point3PlaneDistance{},
+        /*active_param_dim=*/6);
+    // scan_matching_cost->setLossFunction(loss_function);
+    lm.addCost(scan_matching_cost);
 
     // IMU preintegration factor between the fixed previous pose and the
     // estimated state_j, with state_i's velocity/biases estimated as well.

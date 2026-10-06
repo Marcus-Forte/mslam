@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/Points.hh"
+#include "mslam/common/Points.hh"
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <cmath>

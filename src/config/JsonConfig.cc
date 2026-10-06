@@ -1,6 +1,6 @@
-#include "config/JsonConfig.hh"
-#include "config/Validation.hh"
+#include "mslam/config/JsonConfig.hh"
 #include "jsoncpp/json/reader.h"
+#include "mslam/config/Validation.hh"
 
 #include <cmath>
 #include <fstream>

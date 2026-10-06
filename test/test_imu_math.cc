@@ -1,4 +1,4 @@
-#include "slam/ImuMath.hh"
+#include "mslam/slam/ImuMath.hh"
 #include <cmath>
 #include <gtest/gtest.h>
 

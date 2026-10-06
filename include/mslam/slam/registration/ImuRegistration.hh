@@ -1,7 +1,7 @@
 #pragma once
 
-#include "IRegistration.hh"
-#include "slam/ImuPreintegration.hh"
+#include "mslam/slam/ImuPreintegration.hh"
+#include "mslam/slam/registration/IRegistration.hh"
 
 #include <Eigen/Dense>
 

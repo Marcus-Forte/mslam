@@ -1,10 +1,10 @@
-#include "common/Points.hh"
-#include "common/State.hh"
-#include "map/VoxelHashMap.hh"
-#include "slam/CorrespondenceFinder.hh"
-#include "slam/PointCloudIO.hh"
-#include "slam/Transform.hh"
-#include "slam/registration/PointToPointRegistration.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/common/State.hh"
+#include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/CorrespondenceFinder.hh"
+#include "mslam/slam/PointCloudIO.hh"
+#include "mslam/slam/Transform.hh"
+#include "mslam/slam/registration/PointToPointRegistration.hh"
 #include <filesystem>
 #include <iostream>
 #include <spdlog/spdlog.h>

@@ -1,4 +1,4 @@
-#include "map/Voxel.hh"
+#include "mslam/map/Voxel.hh"
 
 std::size_t
 std::hash<mslam::Voxel3>::operator()(const mslam::Voxel3 &voxel) const {

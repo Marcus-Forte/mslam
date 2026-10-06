@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Voxel.hh"
-#include "map/IMap.hh"
+#include "mslam/map/IMap.hh"
+#include "mslam/map/Voxel.hh"
 #include <Eigen/Dense>
 #include <tsl/robin_map.h>
 

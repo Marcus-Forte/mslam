@@ -1,19 +1,19 @@
 #pragma once
 
-#include "IRegistration.hh"
+#include "mslam/slam/registration/IRegistration.hh"
 
 #include <Eigen/Dense>
 
 namespace mslam {
 
-class PointToPlaneRegistration : public IRegistration {
+class PointToPointRegistration : public IRegistration {
 public:
   using IRegistration::IRegistration;
   SlamState Align(const SlamState &state, const IMap &map,
                   const PointCloud &scan) override;
 
 private:
-  std::vector<Eigen::Matrix<double, 6, 1>> inputs_buffer_;
+  std::vector<Eigen::Vector3d> inputs_buffer_;
   VectorPoint3d map_points_buffer_;
 };
 

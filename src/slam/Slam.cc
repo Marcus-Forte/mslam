@@ -1,15 +1,16 @@
-#include "slam/Slam.hh"
-#include "map/VoxelHashMap.hh"
-#include "slam/CorrespondenceFinderLogger.hh"
-#include "slam/ImuMath.hh"
-#include "slam/ImuPreintegration.hh"
-#include "slam/Preprocessor.hh"
-#include "slam/SensorInput.hh"
-#include "slam/SlamServer.hh"
-#include "slam/Transform.hh"
-#include "slam/registration/ImuRegistration.hh"
-#include "slam/registration/PointToPlaneRegistration.hh"
-// #include "slam/registration/PointToPointRegistration.hh"
+#include "mslam/slam/Slam.hh"
+#include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/CorrespondenceFinderLogger.hh"
+#include "mslam/slam/ImuMath.hh"
+#include "mslam/slam/ImuPreintegration.hh"
+#include "mslam/slam/Preprocessor.hh"
+#include "mslam/slam/SensorInput.hh"
+#include "mslam/slam/SlamServer.hh"
+#include "mslam/slam/Transform.hh"
+#include "mslam/slam/registration/ImuRegistration.hh"
+#include "mslam/slam/registration/PointToPlaneRegistration.hh"
+#include "mslam/utils/Timing.hh"
+// #include "mslam/slam/registration/PointToPointRegistration.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -23,28 +24,6 @@ namespace {
 constexpr int g_init_scans = 10;
 constexpr double g_dense_map_voxel_size = 0.01;
 constexpr int g_dense_map_voxel_bucket_size = 10;
-
-// Logs the wall-clock time between construction and destruction.
-class ScopedElapsedLogger {
-public:
-  ScopedElapsedLogger(std::shared_ptr<spdlog::logger> logger, const char *name)
-      : logger_(std::move(logger)), name_(name),
-        start_(std::chrono::steady_clock::now()) {}
-
-  ~ScopedElapsedLogger() {
-    const auto elapsed = std::chrono::steady_clock::now() - start_;
-    logger_->info("{} elapsed: {:.3f} ms", name_,
-                  std::chrono::duration<double, std::milli>(elapsed).count());
-  }
-
-  ScopedElapsedLogger(const ScopedElapsedLogger &) = delete;
-  ScopedElapsedLogger &operator=(const ScopedElapsedLogger &) = delete;
-
-private:
-  std::shared_ptr<spdlog::logger> logger_;
-  const char *name_;
-  std::chrono::steady_clock::time_point start_;
-};
 
 void logState(const std::shared_ptr<spdlog::logger> &logger,
               const mslam::SlamState &state) {

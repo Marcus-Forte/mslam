@@ -1,6 +1,6 @@
 #pragma once
 
-#include "IConfig.hh"
+#include "mslam/config/IConfig.hh"
 #include <filesystem>
 
 namespace mslam {

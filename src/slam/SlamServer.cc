@@ -1,7 +1,7 @@
-#include "slam/SlamServer.hh"
+#include "mslam/slam/SlamServer.hh"
 
-#include "Conversion.hh"
-#include "slam/Slam.hh"
+#include "mslam/slam/Conversion.hh"
+#include "mslam/slam/Slam.hh"
 
 #include <chrono>
 #include <cstdlib>

@@ -1,6 +1,6 @@
-#include "slam/Slam.hh"
+#include "mslam/slam/Slam.hh"
 
-#include "slam/Transform.hh"
+#include "mslam/slam/Transform.hh"
 
 #include <spdlog/spdlog.h>
 

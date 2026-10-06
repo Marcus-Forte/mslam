@@ -1,4 +1,4 @@
-#include "slam/SensorInput.hh"
+#include "mslam/slam/SensorInput.hh"
 #include <stdexcept>
 
 namespace mslam {

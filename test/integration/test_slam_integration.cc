@@ -1,8 +1,8 @@
-#include "config/JsonConfig.hh"
-#include "map/VoxelHashMap.hh"
 #include "msensor/recorder/recording_driver.hh"
-#include "slam/Slam.hh"
-#include "slam/SlamServer.hh"
+#include "mslam/config/JsonConfig.hh"
+#include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/Slam.hh"
+#include "mslam/slam/SlamServer.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>

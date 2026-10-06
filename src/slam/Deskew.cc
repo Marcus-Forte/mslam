@@ -1,5 +1,5 @@
-#include "slam/Deskew.hh"
-#include "slam/SE3.hh"
+#include "mslam/slam/Deskew.hh"
+#include "mslam/slam/SE3.hh"
 
 #include <Eigen/Geometry>
 #include <algorithm>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "slam/ICorrespondenceFinder.hh"
+#include "mslam/slam/ICorrespondenceFinder.hh"
 
 namespace mslam {
 

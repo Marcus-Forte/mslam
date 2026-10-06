@@ -1,7 +1,7 @@
 #pragma once
 
-#include "slam/ImuPreintegration.hh"
-#include "slam/SE3.hh"
+#include "mslam/slam/ImuPreintegration.hh"
+#include "mslam/slam/SE3.hh"
 #include <Eigen/Dense>
 
 namespace mslam {

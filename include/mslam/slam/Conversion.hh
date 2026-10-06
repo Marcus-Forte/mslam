@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/Points.hh"
-#include "common/State.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/common/State.hh"
 #include "slam.pb.h"
 
 namespace mslam {

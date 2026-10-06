@@ -1,11 +1,11 @@
-#include "slam/registration/PointToPlaneRegistration.hh"
-#include "OptimizerObserver.hh"
+#include "mslam/slam/registration/PointToPlaneRegistration.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostForwardEuler.hh"
-#include "slam/NormalEstimator.hh"
-#include "slam/SE3.hh"
-#include "slam/Transform.hh"
-#include "slam/registration/PointDistance.hh"
+#include "mslam/OptimizerObserver.hh"
+#include "mslam/slam/NormalEstimator.hh"
+#include "mslam/slam/SE3.hh"
+#include "mslam/slam/Transform.hh"
+#include "mslam/slam/registration/PointDistance.hh"
 #include <Eigen/Dense>
 
 namespace mslam {

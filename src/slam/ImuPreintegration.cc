@@ -1,4 +1,4 @@
-#include "slam/ImuPreintegration.hh"
+#include "mslam/slam/ImuPreintegration.hh"
 
 #include <Eigen/Eigenvalues>
 #include <cmath>

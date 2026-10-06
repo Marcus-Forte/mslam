@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/Points.hh"
 #include "msensor/interface/IImu.hh"
 #include "msensor/interface/ILidar.hh"
+#include "mslam/common/Points.hh"
 #include <deque>
 #include <memory>
 #include <mutex>

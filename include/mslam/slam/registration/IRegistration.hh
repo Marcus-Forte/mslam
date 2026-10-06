@@ -1,9 +1,9 @@
 #pragma once
 
-#include "common/Points.hh"
-#include "common/State.hh"
-#include "map/IMap.hh"
-#include "slam/ICorrespondenceFinder.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/common/State.hh"
+#include "mslam/map/IMap.hh"
+#include "mslam/slam/ICorrespondenceFinder.hh"
 #include <memory>
 #include <spdlog/logger.h>
 

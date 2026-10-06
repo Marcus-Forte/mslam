@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/Points.hh"
-#include "config/IConfig.hh"
 #include "msensor/interface/IImu.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/config/IConfig.hh"
 
 #include <Eigen/Dense>
 #include <cstdint>

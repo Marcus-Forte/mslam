@@ -1,6 +1,6 @@
 #pragma once
 
-#include "slam/CorrespondenceFinder.hh"
+#include "mslam/slam/CorrespondenceFinder.hh"
 #include <memory>
 #include <spdlog/logger.h>
 

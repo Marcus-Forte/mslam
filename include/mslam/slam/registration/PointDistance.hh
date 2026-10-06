@@ -1,7 +1,7 @@
 #pragma once
 
-#include "slam/SE3.hh"
-#include "slam/Transform.hh"
+#include "mslam/slam/SE3.hh"
+#include "mslam/slam/Transform.hh"
 #include <Eigen/Dense>
 
 namespace mslam {

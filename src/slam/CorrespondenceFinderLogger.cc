@@ -1,4 +1,4 @@
-#include "slam/CorrespondenceFinderLogger.hh"
+#include "mslam/slam/CorrespondenceFinderLogger.hh"
 #include <utility>
 
 namespace mslam {

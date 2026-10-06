@@ -1,4 +1,4 @@
-#include "slam/NormalEstimator.hh"
+#include "mslam/slam/NormalEstimator.hh"
 #include <Eigen/Eigenvalues>
 #include <limits>
 

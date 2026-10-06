@@ -1,6 +1,6 @@
-#include "slam/Preprocessor.hh"
-#include "map/VoxelHashMap.hh"
-#include "slam/Deskew.hh"
+#include "mslam/slam/Preprocessor.hh"
+#include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/Deskew.hh"
 
 #include <Eigen/Geometry>
 #include <array>

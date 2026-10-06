@@ -1,4 +1,4 @@
-#include "slam/PointCloudIO.hh"
+#include "mslam/slam/PointCloudIO.hh"
 
 #include <gtest/gtest.h>
 

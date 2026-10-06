@@ -1,13 +1,13 @@
-#include "config/JsonConfig.hh"
+#include "mslam/config/JsonConfig.hh"
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include "map/VoxelHashMap.hh"
 #include "msensor/config/config.hh"
 #include "msensor/lidar/mid360.hh"
+#include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/Slam.hh"
+#include "mslam/slam/SlamServer.hh"
 #include "sensors_remote_client.hh"
-#include "slam/Slam.hh"
-#include "slam/SlamServer.hh"
 #include <filesystem>
 #include <getopt.h>
 #include <iostream>

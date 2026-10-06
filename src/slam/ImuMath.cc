@@ -1,5 +1,5 @@
-#include "slam/ImuMath.hh"
-#include "slam/Transform.hh"
+#include "mslam/slam/ImuMath.hh"
+#include "mslam/slam/Transform.hh"
 #include <cmath>
 
 namespace mslam {

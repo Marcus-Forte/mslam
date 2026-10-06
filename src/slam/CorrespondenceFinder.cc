@@ -1,4 +1,4 @@
-#include "slam/CorrespondenceFinder.hh"
+#include "mslam/slam/CorrespondenceFinder.hh"
 #include <chrono>
 
 namespace mslam {

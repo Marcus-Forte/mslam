@@ -1,4 +1,4 @@
-#include "map/VoxelHashMap.hh"
+#include "mslam/map/VoxelHashMap.hh"
 #include <gtest/gtest.h>
 #include <random>
 

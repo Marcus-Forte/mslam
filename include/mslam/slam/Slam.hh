@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ISlam.hh"
-#include "config/IConfig.hh"
-#include "map/IMap.hh"
-#include "slam/ImuPreintegration.hh"
-#include "slam/registration/IRegistration.hh"
-#include "slam/registration/ImuRegistration.hh"
+#include "mslam/config/IConfig.hh"
+#include "mslam/map/IMap.hh"
+#include "mslam/slam/ISlam.hh"
+#include "mslam/slam/ImuPreintegration.hh"
+#include "mslam/slam/registration/IRegistration.hh"
+#include "mslam/slam/registration/ImuRegistration.hh"
 
 #include <Eigen/Dense>
 #include <atomic>

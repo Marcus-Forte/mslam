@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/Points.hh"
-#include "map/IMap.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/map/IMap.hh"
 #include <Eigen/Dense>
 #include <optional>
 #include <unordered_map>

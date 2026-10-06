@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/Points.hh"
-#include "map/IMap.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/map/IMap.hh"
 #include <chrono>
 #include <cstddef>
 #include <memory>

@@ -1,5 +1,5 @@
-#include "slam/Deskew.hh"
-#include "slam/Preprocessor.hh"
+#include "mslam/slam/Deskew.hh"
+#include "mslam/slam/Preprocessor.hh"
 
 #include <gtest/gtest.h>
 

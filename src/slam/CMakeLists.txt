@@ -14,6 +14,7 @@ SlamServer.cc
 ImuPreintegration.cc
 ImuMath.cc
 SensorInput.cc
+../utils/Timing.cc
 Slam.cc)
 target_link_libraries(slam
   PUBLIC spdlog::spdlog slam_grpc

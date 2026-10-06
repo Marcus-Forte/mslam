@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/Points.hh"
-#include "common/State.hh"
-#include "map/IMap.hh"
+#include "mslam/common/Points.hh"
+#include "mslam/common/State.hh"
+#include "mslam/map/IMap.hh"
 #include "slam.grpc.pb.h"
 #include <atomic>
 #include <condition_variable>

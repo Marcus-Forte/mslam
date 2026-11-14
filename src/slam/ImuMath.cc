@@ -9,17 +9,22 @@ constexpr double k_min_acceleration_norm_mps2 = 1e-3;
 } // namespace
 
 Eigen::Vector3d
-toGravityCompensatedWorldAcceleration(const Eigen::Vector3d &rotation,
-                                      const msensor::IMUData &imu_data,
-                                      double acceleration_scale) {
-  const auto orientation =
-      toAffine(0.0, 0.0, 0.0, rotation.x(), rotation.y(), rotation.z())
-          .linear();
+gravityCompensatedWorldAcceleration(const Eigen::Matrix3d &rotation,
+                                    const msensor::IMUData &imu_data,
+                                    double acceleration_scale) {
   Eigen::Vector3d world_acceleration =
-      orientation * (acceleration_scale *
-                     Eigen::Vector3d(imu_data.ax, imu_data.ay, imu_data.az));
+      rotation * (acceleration_scale *
+                  Eigen::Vector3d(imu_data.ax, imu_data.ay, imu_data.az));
   world_acceleration.z() -= k_gravity_mps2;
   return world_acceleration;
+}
+
+Eigen::Vector3d
+toGravityCompensatedWorldAcceleration(const Eigen::Vector3d &euler_rotation,
+                                      const msensor::IMUData &imu_data,
+                                      double acceleration_scale) {
+  return gravityCompensatedWorldAcceleration(eulerToRotation(euler_rotation),
+                                             imu_data, acceleration_scale);
 }
 
 std::optional<Eigen::Vector2d>

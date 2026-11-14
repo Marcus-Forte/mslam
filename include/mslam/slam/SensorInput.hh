@@ -34,11 +34,15 @@ public:
   /// Next available IMU sample, or std::nullopt if none is ready.
   std::optional<msensor::IMUData> nextImu();
 
+  /// Scans that were replaced in the queue before being taken, so far.
+  std::size_t droppedScans() const;
+
 private:
   struct Queues {
     std::mutex mutex;
     std::deque<std::shared_ptr<const Scan>> scans;
     std::deque<msensor::IMUData> imus;
+    std::size_t dropped_scans = 0;
   };
 
   // Sensors whose callbacks this object owns.

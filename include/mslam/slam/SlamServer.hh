@@ -2,7 +2,7 @@
 
 #include "mslam/common/Points.hh"
 #include "mslam/common/State.hh"
-#include "mslam/map/IMap.hh"
+#include "mslam/slam/SlamOutput.hh"
 #include "slam.grpc.pb.h"
 #include <atomic>
 #include <condition_variable>
@@ -14,9 +14,10 @@
 
 namespace mslam {
 
-class Slam;
-
-class SlamServer : public sensors::SlamService::Service {
+/// gRPC front end: streams the SLAM output (as the pipeline's ISlamOutput) to
+/// clients and forwards their start / stop / reset requests to an
+/// ISlamControl.
+class SlamServer : public sensors::SlamService::Service, public ISlamOutput {
 public:
   explicit SlamServer(std::shared_ptr<spdlog::logger> logger,
                       std::string address = {});
@@ -28,11 +29,17 @@ public:
   void start();
   void stop();
 
-  void setSlam(Slam *slam);
+  /// The control the Start / Stop / Reset RPCs act on (not owned; must outlive
+  /// the server or be cleared with nullptr before it is destroyed).
+  void setControl(ISlamControl *control);
 
-  void updatePose(const Pose3D &pose);
-  void updateMapIncrement(const PointCloud &increment);
-  void updateTransformedScan(const PointCloud &scan);
+  // ISlamOutput. Called from the SLAM thread.
+  void updatePose(const Pose3D &pose) override;
+  void updateMapIncrement(PointCloud increment) override;
+  void updateTransformedScan(PointCloud scan) override;
+  /// Drops the accumulated map history and the latest increment.
+  void reset() override;
+
   void updateCorrespondences(const PointCloud &correspondences);
 
 private:
@@ -67,7 +74,7 @@ private:
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
   std::atomic<bool> stopping_{false};
-  Slam *slam_{nullptr};
+  std::atomic<ISlamControl *> control_{nullptr};
 
   mutable std::mutex map_increment_mutex_;
   mutable std::mutex transformed_scan_mutex_;
@@ -79,12 +86,14 @@ private:
   mutable std::condition_variable correspondences_cv_;
   mutable std::condition_variable pose_cv_;
   Pose3D pose_;
-  PointCloud map_increment_;
+  // The latest increment is the same object as the newest history entry: one
+  // allocation per scan, shared by the streaming RPC and GetMap.
+  std::shared_ptr<const PointCloud> map_increment_;
   // Full map history for GetMap. The SLAM registration map is bounded, so the
   // client-facing snapshot is accumulated here from the published increments
   // (pointers only, to keep the SLAM thread's cost O(1)).
   std::vector<std::shared_ptr<const PointCloud>> map_history_;
-  PointCloud transformed_scan_;
+  std::shared_ptr<const PointCloud> transformed_scan_;
   PointCloud correspondences_;
   uint64_t scan_version_ = 0;
   uint64_t map_increment_version_ = 0;

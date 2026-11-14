@@ -1,7 +1,6 @@
 #include "mslam/slam/registration/PointToPointRegistration.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostForwardEuler.hh"
-#include "mslam/OptimizerObserver.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
 #include "mslam/slam/registration/PointDistance.hh"
@@ -9,43 +8,43 @@
 
 namespace mslam {
 
+PointToPointRegistration::PointToPointRegistration(
+    int num_registration_iterations, int num_optimizer_iterations,
+    float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
+    std::shared_ptr<ICorrespondenceFinder> correspondence_finder)
+    : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
+                         max_correspondence_distance},
+           std::move(logger), std::move(correspondence_finder)) {}
+
 SlamState PointToPointRegistration::Align(const SlamState &state,
                                           const IMap &map,
                                           const PointCloud &scan) {
   static constexpr int k_maxSmallDeltaHits = 3;
+  const auto &parameters = icp_.parameters();
 
   int small_delta_hits = 0;
 
-  auto total_T =
-      toAffine(state.position.x(), state.position.y(), state.position.z(),
-               state.rotation.x(), state.rotation.y(), state.rotation.z());
-  source_buffer_ = scan;
-  transformCloud(total_T, source_buffer_);
-
-  inputs_buffer_.reserve(scan.size());
-  map_points_buffer_.reserve(scan.size());
+  auto total_T = toAffine(state);
+  icp_.begin(map, scan, total_T);
 
   moptim::LevenbergMarquardt<double> lm(6);
-  lm.setMaxIterations(num_optimizer_iterations_);
-  OptimizerObserver<double> observer(logger_);
-  lm.setObserver(&observer);
+  lm.setMaxIterations(parameters.optimizer_iterations);
+  icp_.attachObserver(lm);
 
   Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
 
-  for (int i = 0; i < num_registration_iterations_; ++i) {
-    correspondence_finder_->find(map, source_buffer_,
-                                 max_correspondence_distance_,
-                                 correspondences_buffer_);
+  for (int i = 0; i < parameters.registration_iterations; ++i) {
+    icp_.findCorrespondences(map);
 
     inputs_buffer_.clear();
     map_points_buffer_.clear();
-    for (const auto &[scan_point, map_point] : correspondences_buffer_) {
+    for (const auto &[scan_point, map_point] : icp_.correspondences()) {
       inputs_buffer_.emplace_back(scan_point.x, scan_point.y, scan_point.z);
       map_points_buffer_.emplace_back(map_point.x, map_point.y, map_point.z);
     }
 
     if (map_points_buffer_.empty()) {
-      logger_->warn(
+      icp_.logger().warn(
           "3D registration found no correspondences; returning prior pose.");
       break;
     }
@@ -59,11 +58,11 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     const auto result = lm.optimize(delta.data());
 
     const auto delta_T = se3Exp(delta);
-    transformCloud(delta_T, source_buffer_);
+    icp_.moveSource(delta_T);
     total_T = delta_T * total_T;
 
-    logger_->debug("Registration Iteration: {}/{}", i + 1,
-                   num_registration_iterations_);
+    icp_.logger().debug("Registration Iteration: {}/{}", i + 1,
+                        parameters.registration_iterations);
 
     if (result.status == moptim::Status::SMALL_DELTA) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {
@@ -72,14 +71,7 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     }
   }
 
-  const auto t = total_T.translation();
-  const auto &R = total_T.linear();
-  return SlamState{
-      .position = t,
-      .rotation = {std::atan2(-R(1, 2), R(2, 2)),
-                   std::asin(std::clamp(R(0, 2), -1.0, 1.0)),
-                   std::atan2(-R(0, 1), R(0, 0))},
-  };
+  return toSlamState(total_T);
 }
 
 } // namespace mslam

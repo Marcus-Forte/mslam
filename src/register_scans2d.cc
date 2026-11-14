@@ -46,10 +46,7 @@ int main(int argc, char **argv) {
   for (auto scan_idx = 1; scan_idx < num_scans; ++scan_idx) {
     state = registration.Align(state, *map, scans[scan_idx]);
     auto transformed_scan = scans[scan_idx];
-    transformCloud(toAffine(state.position.x(), state.position.y(),
-                            state.position.z(), state.rotation.x(),
-                            state.rotation.y(), state.rotation.z()),
-                   transformed_scan);
+    mslam::transformCloud(mslam::toAffine(state), transformed_scan);
     map->addScan(transformed_scan);
     logger->info("Pose {}: x={}, y={}, z={}, theta={}", scan_idx,
                  state.position.x(), state.position.y(), state.position.z(),

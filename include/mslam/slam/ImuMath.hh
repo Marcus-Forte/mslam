@@ -12,11 +12,18 @@ inline constexpr double k_gravity_mps2 = 9.80665;
  * @brief Rotate a body-frame accelerometer sample into the world frame and
  *        remove gravity.
  *
- * @param rotation Euler angles (rx, ry, rz) of the body in the world frame.
+ * @param rotation Rotation matrix of the body in the world frame.
  * @param acceleration_scale Scale applied to the raw accelerometer reading.
  */
 Eigen::Vector3d
-toGravityCompensatedWorldAcceleration(const Eigen::Vector3d &rotation,
+gravityCompensatedWorldAcceleration(const Eigen::Matrix3d &rotation,
+                                    const msensor::IMUData &imu_data,
+                                    double acceleration_scale);
+
+/// As gravityCompensatedWorldAcceleration(), with the body orientation given
+/// as Euler angles (rx, ry, rz).
+Eigen::Vector3d
+toGravityCompensatedWorldAcceleration(const Eigen::Vector3d &euler_rotation,
                                       const msensor::IMUData &imu_data,
                                       double acceleration_scale);
 

@@ -1,7 +1,8 @@
 #pragma once
 
+#include "mslam/common/State.hh"
 #include "mslam/slam/ImuPreintegration.hh"
-#include "mslam/slam/registration/IRegistration.hh"
+#include "mslam/slam/registration/IcpWorkspace.hh"
 
 #include <Eigen/Dense>
 
@@ -10,13 +11,26 @@ namespace mslam {
 /// Registration combining point-to-plane scan matching with an IMU
 /// preintegration factor in a joint optimization of the new state (pose,
 /// velocity, biases) and the previous state's velocity and biases.
-class ImuRegistration : public IRegistration {
+///
+/// It is deliberately not an IRegistration: it needs the previous state and
+/// the preintegrated IMU measurements, so it has no plain
+/// (state, map, scan) alignment.
+class ImuRegistration {
 public:
-  using IRegistration::IRegistration;
+  /// Size of the pose increment the first registration round of the last
+  /// Align() applied: the norms of the translation and rotation parts of the
+  /// optimizer's se(3) step. It measures how wrong the IMU-predicted prior
+  /// was. `valid` is false if that round found no correspondences.
+  struct FirstRoundIncrement {
+    bool valid = false;
+    double translation_m = 0.0;
+    double rotation_rad = 0.0;
+  };
 
-  /// Standard Align (no IMU - not supported, throws).
-  SlamState Align(const SlamState &state, const IMap &map,
-                  const PointCloud &scan) override;
+  ImuRegistration(int num_registration_iterations, int num_optimizer_iterations,
+                  float max_correspondence_distance,
+                  std::shared_ptr<spdlog::logger> logger,
+                  std::shared_ptr<ICorrespondenceFinder> correspondence_finder);
 
   /// Joint Align: optimizes pose, velocity, and biases of the new state, plus
   /// velocity and biases of the previous state (its pose stays fixed).
@@ -30,9 +44,11 @@ public:
                   const PointCloud &scan, const SlamState &prev_state,
                   const ImuPreintegrator &preintegrator);
 
+  const FirstRoundIncrement &lastFirstRound() const { return first_round_; }
+
 private:
-  std::vector<Eigen::Matrix<double, 6, 1>> inputs_buffer_;
-  VectorPoint3d map_points_buffer_;
+  IcpWorkspace icp_;
+  FirstRoundIncrement first_round_;
 };
 
 } // namespace mslam

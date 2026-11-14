@@ -1,7 +1,6 @@
 #include "mslam/slam/SlamServer.hh"
 
 #include "mslam/slam/Conversion.hh"
-#include "mslam/slam/Slam.hh"
 
 #include <chrono>
 #include <cstdlib>
@@ -12,13 +11,8 @@ namespace {
 constexpr char g_default_slam_server_address[] = "0.0.0.0:50052";
 constexpr int g_max_grpc_message_size = 64 * 1024 * 1024;
 
-struct ScanSnapshot {
-  mslam::PointCloud scan;
-  uint64_t version = 0;
-};
-
 struct TransformedScanSnapshot {
-  mslam::PointCloud scan;
+  std::shared_ptr<const mslam::PointCloud> scan;
   uint64_t version = 0;
 };
 
@@ -89,22 +83,35 @@ void SlamServer::updatePose(const Pose3D &pose) {
   pose_cv_.notify_all();
 }
 
-void SlamServer::updateMapIncrement(const PointCloud &increment) {
+void SlamServer::updateMapIncrement(PointCloud increment) {
+  auto shared_increment =
+      std::make_shared<const PointCloud>(std::move(increment));
   std::scoped_lock lock(map_increment_mutex_);
-  map_increment_ = increment;
+  map_increment_ = shared_increment;
   // Retain every increment so GetMap can serve the full accumulated map even
   // though the registration map is bounded. Storing a shared handle keeps the
   // per-scan cost independent of the map size.
-  map_history_.emplace_back(std::make_shared<const PointCloud>(increment));
+  map_history_.emplace_back(std::move(shared_increment));
   ++map_increment_version_;
   map_increment_cv_.notify_all();
 }
 
-void SlamServer::updateTransformedScan(const PointCloud &scan) {
+void SlamServer::updateTransformedScan(PointCloud scan) {
+  auto shared_scan = std::make_shared<const PointCloud>(std::move(scan));
   std::scoped_lock lock(transformed_scan_mutex_);
-  transformed_scan_ = scan;
+  transformed_scan_ = std::move(shared_scan);
   ++transformed_scan_version_;
   transformed_scan_cv_.notify_all();
+}
+
+void SlamServer::reset() {
+  {
+    std::scoped_lock lock(map_increment_mutex_);
+    map_increment_.reset();
+    map_history_.clear();
+  }
+  // Pose version bumps come from updatePose(); the transformed scan and
+  // correspondences are replaced by the next scan.
 }
 
 void SlamServer::updateCorrespondences(const PointCloud &correspondences) {
@@ -143,7 +150,7 @@ SlamServer::GetMapIncrements(grpc::ServerContext *context,
                              grpc::ServerWriter<sensors::PointCloud3> *writer) {
   uint64_t last_version = 0;
   while (!context->IsCancelled() && !stopping_.load()) {
-    PointCloud snapshot;
+    std::shared_ptr<const PointCloud> snapshot;
     {
       std::unique_lock lock(map_increment_mutex_);
       map_increment_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
@@ -159,8 +166,11 @@ SlamServer::GetMapIncrements(grpc::ServerContext *context,
       snapshot = map_increment_;
       last_version = map_increment_version_;
     }
+    if (!snapshot) {
+      continue;
+    }
 
-    auto response = toGRPC(snapshot);
+    auto response = toGRPC(*snapshot);
     if (!writer->Write(response)) {
       break;
     }
@@ -194,7 +204,7 @@ grpc::Status SlamServer::GetTransformedScan(
     }
 
     last_version = snapshot.version;
-    auto response = toGRPC(snapshot.scan);
+    auto response = toGRPC(*snapshot.scan);
     if (!writer->Write(response)) {
       break;
     }
@@ -267,37 +277,32 @@ grpc::Status SlamServer::GetPose(grpc::ServerContext *context,
   return grpc::Status::OK;
 }
 
-void SlamServer::setSlam(Slam *slam) { slam_ = slam; }
+void SlamServer::setControl(ISlamControl *control) { control_.store(control); }
 
 grpc::Status SlamServer::Stop(grpc::ServerContext *, const sensors::Empty *,
                               sensors::Empty *) {
-  if (slam_) {
-    slam_->stopProcessing();
+  if (auto *control = control_.load()) {
+    control->stopProcessing();
   }
   return grpc::Status::OK;
 }
 
 grpc::Status SlamServer::Start(grpc::ServerContext *, const sensors::Empty *,
                                sensors::Empty *) {
-  if (slam_) {
-    slam_->startProcessing();
+  if (auto *control = control_.load()) {
+    control->startProcessing();
   }
   return grpc::Status::OK;
 }
 
+// The reset itself, including the map history this server keeps, is carried
+// out by the SLAM thread between two scans (it ends in reset() above), so it
+// cannot race with a scan being processed.
 grpc::Status SlamServer::Reset(grpc::ServerContext *, const sensors::Empty *,
                                sensors::Empty *) {
-  if (slam_) {
-    slam_->reset();
-    updatePose(slam_->getPose());
+  if (auto *control = control_.load()) {
+    control->requestReset();
   }
-
-  {
-    std::scoped_lock lock(map_increment_mutex_);
-    map_increment_.clear();
-    map_history_.clear();
-  }
-
   return grpc::Status::OK;
 }
 

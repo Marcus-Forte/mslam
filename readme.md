@@ -104,12 +104,12 @@ The viewer supports:
 
 ## Registration metrics
 
-3D registration supports both point-to-point and point-to-plane metrics. The
-caller selects the metric through `Registration::Align3D(...)`. The current
-main SLAM path uses the point-to-plane metric.
-
-All currently implemented point metrics provide analytical Jacobians and are
-used with the analytical optimizer path.
+3D registration has a point-to-point and a point-to-plane implementation
+(`PointToPointRegistration`, `PointToPlaneRegistration`). The main SLAM path uses
+point-to-plane: both `PointToPlaneRegistration` and the IMU-aided
+`ImuRegistration` use `Point3PlaneDistance`, a scalar point-to-plane residual
+with an exact analytical se(3) jacobian, through `moptim::AnalyticalCost`.
+Point-to-point still uses numerical differentiation.
 
 ## Timing
 
@@ -163,3 +163,24 @@ The key functions to inspect:
 
 Replace the path after `CMakeFiles/slam.dir/` with any source file to inspect
 other translation units.
+
+## Benchmark
+
+`bench_slam` replays a recording offline and deterministically (no sensor
+threads, no pacing) through the same `SlamPipeline` the live loop uses, and
+prints the time per stage and the final pose:
+
+```bash
+cmake --build --preset build-gcc --target bench_slam
+build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5
+```
+
+Each line reports the number of scans, the total time and the time spent in
+preprocessing, registration, map insertion and IMU prediction (ms), then the
+final pose with 9 digits. Two more lines give the registration statistics
+(scans through the IMU path vs LiDAR-only, mean size of the first registration
+round's pose increment in mm / mrad, integrated IMU time) and the IMU/scan
+synchronisation counters. The pose is identical from run to run, so a change
+that must not alter the result can be checked by comparing it; the machine is
+noisy, so compare the minimum over several runs, alternating old and new
+binaries. It is not part of CTest.

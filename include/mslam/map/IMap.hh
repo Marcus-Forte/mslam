@@ -1,6 +1,8 @@
 #pragma once
 
 #include "mslam/common/Points.hh"
+#include <cstddef>
+#include <span>
 #include <vector>
 
 namespace mslam {
@@ -31,19 +33,38 @@ public:
   virtual Neighbor getClosestNeighbor(const Point &query) const = 0;
 
   /**
+   * @brief Find up to `out.size()` closest neighbors of the query point,
+   * without allocating.
+   *
+   * The neighbors are written to the front of `out`, ordered from nearest to
+   * farthest according to the same distance metric used by
+   * getClosestNeighbor(). The caller owns the storage, so the hot path
+   * (surface normal estimation) can reuse a small stack array.
+   *
+   * @param query Query point in map coordinates.
+   * @param out Output buffer; its size is the maximum number of neighbors.
+   * @return Number of neighbors written (0 when `out` is empty or no
+   * candidates are available). Entries past the returned count are untouched.
+   */
+  virtual std::size_t findClosestNeighbors(const Point &query,
+                                           std::span<Neighbor> out) const = 0;
+
+  /**
    * @brief Return up to the closest N neighbors to the query point.
    *
-   * Results should be ordered from nearest to farthest according to the same
-   * distance metric used by getClosestNeighbor(). Implementations should
-   * return an empty vector when N <= 0 or when no candidates are available.
+   * Convenience wrapper around findClosestNeighbors() that allocates the
+   * result. Returns an empty vector when N <= 0 or when no candidates are
+   * available.
    *
    * @param query Query point in map coordinates.
    * @param N Maximum number of neighbors to return.
-   * @return std::vector<Neighbor> Up to N nearest neighbors ordered by
-   * distance.
+   * @return Up to N nearest neighbors ordered by distance.
    */
-  virtual std::vector<Neighbor> getClosestNNeighbors(const Point &query,
-                                                     int N) const = 0;
+  std::vector<Neighbor> getClosestNNeighbors(const Point &query, int N) const {
+    std::vector<Neighbor> neighbors(N > 0 ? static_cast<std::size_t>(N) : 0);
+    neighbors.resize(findClosestNeighbors(query, neighbors));
+    return neighbors;
+  }
 
   /**
    * @brief Get a Point Cloud Representation. Copy might be made.

@@ -8,15 +8,44 @@
 #include "mslam/slam/registration/ImuRegistration.hh"
 
 #include <Eigen/Dense>
-#include <atomic>
 #include <memory>
 #include <optional>
 #include <spdlog/logger.h>
 
 namespace mslam {
 
-class SlamServer;
+/// Cheap counters over the registered scans (a few additions per scan).
+struct RegistrationStats {
+  std::size_t imu_scans = 0; ///< scans registered with the IMU factor
+  /// Scans registered against the map only (IMU disabled, or no IMU data
+  /// integrated since the previous scan).
+  std::size_t lidar_only_scans = 0;
+  /// IMU-path scans whose first registration round found correspondences, and
+  /// the sums of the pose increment that round applied (how far the
+  /// IMU-predicted prior was from the registered pose).
+  std::size_t first_round_scans = 0;
+  double first_round_translation_sum_m = 0.0;
+  double first_round_rotation_sum_rad = 0.0;
+  /// Sum over the IMU-path scans of the time the preintegrator integrated.
+  double preintegrated_seconds = 0.0;
 
+  double meanFirstRoundTranslationMm() const {
+    return first_round_scans == 0 ? 0.0
+                                  : 1e3 * first_round_translation_sum_m /
+                                        static_cast<double>(first_round_scans);
+  }
+  double meanFirstRoundRotationMrad() const {
+    return first_round_scans == 0 ? 0.0
+                                  : 1e3 * first_round_rotation_sum_rad /
+                                        static_cast<double>(first_round_scans);
+  }
+};
+
+/// The LiDAR-inertial state estimator: IMU dead reckoning (Predict) and scan
+/// to map registration (Update). It does no I/O; SlamPipeline drives it scan by
+/// scan and SlamRunner feeds the pipeline from live sensors.
+///
+/// Not thread-safe: use it from the SLAM thread only.
 class Slam : public ISlam {
 public:
   Slam(const std::shared_ptr<spdlog::logger> &logger,
@@ -27,37 +56,32 @@ public:
   Pose3D getPose() const;
   Eigen::Affine3d getTransform() const;
 
-  void run(std::shared_ptr<msensor::ILidar> lidar,
-           std::shared_ptr<msensor::IImu> imu, SlamServer &server);
+  /// The registration map.
+  const std::shared_ptr<IMap> &map() const { return map_; }
 
-  void startProcessing();
-  void stopProcessing();
-  void reset();
-  bool isRunning() const;
+  const RegistrationStats &registrationStats() const { return stats_; }
+
+  /// Drops the IMU measurements accumulated since the last scan and the
+  /// velocity estimate; the next prediction starts from the current pose.
+  void ResetImuPreintegration();
 
 private:
-  void ResetImuPreintegration();
   bool TryInitializeGravityAlignment(const msensor::IMUData &imuData);
-  /// Bound the registration map around the current pose.
-  void pruneMap();
 
-  static void signalHandler(int signal_number);
-  static std::atomic<bool> should_stop_;
-
+  // Members are listed in initialization order.
+  std::shared_ptr<spdlog::logger> logger_;
   SlamConfiguration config_;
-  std::shared_ptr<IMap> map_;
-  std::unique_ptr<IMap> dense_map_;
   std::unique_ptr<IRegistration> registration_;
   std::unique_ptr<ImuRegistration> imu_registration_;
+  std::shared_ptr<IMap> map_;
   SlamState state_;
   std::optional<uint64_t> last_imu_timestamp_ns_;
   bool imu_gravity_aligned_ = false;
-  std::shared_ptr<spdlog::logger> logger_;
-  std::atomic<bool> running_{true};
 
   // IMU preintegration state
   ImuPreintegrator preintegrator_{ImuNoiseParams{}};
   SlamState previous_state_;
   bool has_previous_state_ = false;
+  RegistrationStats stats_;
 };
 } // namespace mslam

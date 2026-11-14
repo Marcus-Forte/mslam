@@ -2,11 +2,17 @@
 
 C++20 LiDAR/IMU SLAM (Eigen, jsoncpp, gRPC). Entrypoint `src/main.cc`; libs in `src/{slam,map,config}`; proto in `grpc/slam.proto`; architecture notes in `docs/arch.md`.
 
+Layering: `Slam` (estimator, no I/O) <- `SlamPipeline` (per-scan sequence, publishes to an `ISlamOutput`) <- `SlamRunner` (live loop over `SensorInput`, `ISlamControl`). `SlamServer` is the gRPC `ISlamOutput`; `src/main.cc` wires them and owns the signal handlers.
+
 ## Build & test
 - Configure/build via presets: `cmake --preset gcc && cmake --build --preset build-gcc` (Ninja, toolchain `/opt/toolchain/gcc.cmake`, output `build/gcc/`). The readme's `build/default/` paths are stale; use `build/gcc/`.
 - The default build runs a `format-mslam` target (`clang-format -i` on all non-third_party `.cc/.hh`), so builds rewrite source files. Expect formatting diffs.
 - Tests are GTest in `test/` (`test_slam`, `test_preprocessor`, `test/map`): run `ctest --test-dir build/gcc`, or a single binary with `--gtest_filter=...`.
-- Integration tests replay recordings through the full pipeline from `test/integration/` (skipped if the untracked recording is absent). They now start a gRPC replay server and consume it through the remote client. They are opt-in: default `cmake`/`ctest` never build or run them. Enable with `cmake --preset gcc -DMSLAM_INTEGRATION_TESTS=ON`, then `ctest --test-dir build/gcc -L integration`. Or run directly with `cmake --build --preset build-gcc --target integration-test`.
+- Integration tests replay recordings through the full pipeline from `test/integration/` (skipped if the untracked recording is absent). The test replays in-process: a `msensor::RecordingSensorDriver` is handed directly to `SlamRunner::run` (no gRPC replay server or remote client), paced at 16x on a timer thread, so it is neither deterministic nor a benchmark. They are opt-in: default `cmake`/`ctest` never build or run them. Enable with `cmake --preset gcc -DMSLAM_INTEGRATION_TESTS=ON`, then `ctest --test-dir build/gcc -L integration`. Or run directly with `cmake --build --preset build-gcc --target integration-test`.
+- `bench_slam` (`test/bench_slam.cc`) is the deterministic replay benchmark: `cmake --build --preset build-gcc --target bench_slam`, then `build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/<recording>.pbscan [repeats]`. It reads the recording synchronously through `SlamPipeline` (the same code the live loop runs), prints the scan count, total and per-stage times and the final pose (9 digits), then the registration statistics (IMU-path vs LiDAR-only scans, mean first-round correction) and the IMU/scan synchronisation counters, and is not registered with CTest. It pairs IMU samples with scans by timestamp (`SlamPipeline::pushImu` / `processSyncedScan`), like the live loop; see "Time convention" in `docs/arch.md`. For a refactor that must not change results the pose must match to the last digit; compare timings as minima over interleaved runs (the host is noisy).
+- The toolchain only exists in the dev container (`mdnf1992/cpp-dev`: GCC 16, aarch64; it has `gdb` and `gprof` but no `perf`, `valgrind` or clang). When it is not open in an editor, check `docker ps` for one already running, otherwise start one from the repo root: `docker run -d --name mslam-claude -v "$PWD":/workspaces/mslam -v mslam-build-claude:/workspaces/mslam/build -w /workspaces/mslam mdnf1992/cpp-dev sleep infinity`, then run commands as `docker exec mslam-claude bash -lc 'cd /workspaces/mslam && ...'`. `build/` is a docker volume, so build outputs are not visible on the host.
+- Profiling: configure a second build directory with `-pg` (`cmake -S . -B build/prof -G Ninja -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/gcc.cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-pg -g -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS=-pg`), build only `--target bench_slam` (a single-target build does not run `format-mslam`), run it from a scratch directory and read `gmon.out` with `gprof -b -p`. In that profile the entry named `spdlog::logger::log_<double&, double&, double&>` is mis-symbolised: its callers are `moptim::ChunkedCost<Point3PlaneDistance>`, so it is the point-to-plane residual/Jacobian evaluation.
+- To try a change without touching the working tree, copy `CMakeLists.txt CMakePresets.json cmake config grpc include src test third_party` (without `third_party/*/build*`, with `test/data` symlinked) to a directory inside the container and build `bench_slam` there (about a minute).
 - `register_scans2d` is `EXCLUDE_FROM_ALL`; build it explicitly with `--target register_scans2d`.
 - The replay server lives in `third_party/msensor` (`playback_publisher`); build it with `--target replay-server` (or `playback_publisher`). It is placed next to `mslam` in `build/gcc/`. Install it with `-DMSLAM_INSTALL_REPLAY_SERVER=ON` (off by default, so deployment images omit it).
 - CPU target is set globally via `MSLAM_CPU` (default `native`; the `pi5` preset and `deployment/Dockerfile` use `cortex-a76`). It must be global for Eigen ABI consistency across TUs; don't remove or apply per-target. The `gcc` preset's toolchain adds `-march=armv8-a`, which overrides `-mcpu`'s ISA, so use `pi5` for Pi deployments.
@@ -14,11 +20,45 @@ C++20 LiDAR/IMU SLAM (Eigen, jsoncpp, gRPC). Entrypoint `src/main.cc`; libs in `
 ## Running
 - The sensor source is chosen by `remote_scanner` in the config: `"local"` uses the on-board Mid360, any other value is a `host:port` of a sensor server.
 - Replay a recording as a separate sensor server, then point `mslam` at it:
-  `build/gcc/playback_publisher -f <file>.pbscan [-s <speed>] [-p <port>] [--autoplay]` (`speed` 1.0 = real time, 0 = max; default port 50051), and in another terminal `build/gcc/mslam -c config/mslam.jsonc` with `remote_scanner` set to the server. Sample recordings are in the repo root (`living_room.pbscan`, `eratolaan.pbscan`).
+  `build/gcc/playback_publisher -f <file>.pbscan [-s <speed>] [-p <port>] [--autoplay]` (`speed` 1.0 = real time, 0 = max; default port 50051), and in another terminal `build/gcc/mslam -c config/mslam.jsonc` with `remote_scanner` set to the server. The recordings are in `test/data/` (see "Recordings and correctness gates").
 - Root `*.ply` / `*_out.pbscan` files are generated outputs.
-- The `regression` skill covers the SLAM regression check.
+- There is no `regression` skill in this repo or the workspace (checked 2026-11-14). The regression check is `bench_slam` on both recordings plus the integration test, as described below.
+
+## Recordings and correctness gates
+- Both recordings are Mid360 data: 9600 points per scan, scans 48 ms apart, IMU about every 5 ms. The accelerometer reports g, hence `imu_acceleration_scale: 9.80665`.
+- `test/data/living_room_garden.pbscan` (1129 scans, 10846 IMU samples, 54 s) is the correctness gate. The sensor is carried out and back to its start, so the final position must be within 0.1 m of the origin (integration test and `bench_slam`). Reference from 2026-11-14 in the dev container: pose `0.043557395 -0.000103929 0.001146933 -0.003307221 0.002205761 0.487481382`, 1119 IMU-path scans, 0 LiDAR-only, first-round correction 8.917 mm / 0.664 mrad, total about 2.2 s. An independent check: integrating the gyro alone over the recording gives a net yaw of 0.47 to 0.50 rad, which the estimate matches.
+- `test/data/rooms.pbscan` (831 scans, 7503 IMU samples) has no ground truth. Do not gate on its final pose. Measured on 2026-11-14:
+  - Its first 50 scans and first 50 IMU samples carry timestamps 57 to 59 s older than the rest (stale data, probably buffered and delivered when the recorder connected; the source was not traced). The map is seeded from those scans and scans 10 to 49 register LiDAR-only, so 781 IMU-path and 40 LiDAR-only scans are expected.
+  - The owner says only `living_room_garden` loops back. The data nevertheless shows the `rooms` sensor ending close to its starting pose: the last 20 raw scans match 94.7% of the occupied 10 cm voxels of the first live scans (96.3% for scans taken while static, 10.8% for mid-recording scans), and gyro-only integration gives a net rotation of 0.02 to 0.13 rad. The estimate ends 0.117 m from the origin with 0.03 rad net rotation (pose `-0.015196915 -0.116118631 -0.004362015 0.000604909 0.001008117 -0.031340839`). This is not settled with the owner; do not assume either way.
+  - Use it as a consistency probe: the final pose should not move when `reg_iterations` is 2, 3 or 4 (about 1 mm spread now; 0.5 m and 0.27 rad before IMU samples were paired with scans by timestamp).
+- When judging a change, compare the `bench_slam` poses and the first-round correction, not only the integration test. A large first-round correction means the IMU prediction and the scan disagree in time or frame.
+
+## Estimator conventions and pitfalls
+- Time: a scan is registered at its last point's time, IMU samples are paired with scans by timestamp and never by arrival, and the IMU clock in `Slam` is not reset on the IMU path of `Update` (see "Time convention" in `docs/arch.md`). Before these three held, the first-round correction on `living_room_garden` was 12.8 mm / 1.60 mrad.
+- Never bind `.linear()`, `.translation()` or any block of a temporary Eigen transform with `auto` (`auto R = toAffine(...).linear();`): the block dangles. Under GCC 16 one such line in `ImuMath.cc` made 7 unit tests fail. Copy into `Eigen::Matrix3d` / `Eigen::Vector3d`.
+- `Point3PlaneDistance` has a scalar residual `n·(q − T·p)` and an exact se(3) Jacobian, tested against central differences. The IMU preintegration factor is still differentiated numerically (`NumericalCostCentral`, 49 residual evaluations per linear system).
+- Registration always runs `reg_iterations` × `optimizer_iterations`: the `k_maxSmallDeltaHits` early exit needs four hits, so it cannot fire with three rounds.
+- `VoxelHashMap` searches one ring of voxels around the query, so the true nearest neighbour is only guaranteed within one `map.resolution` (0.1 m), while `max_correspondence_distance` is 0.3 in the test config. Lowering it to 0.1 breaks `living_room_garden` (measured before the timing fixes).
+- The first 10 scans only seed the map (`SlamPipeline::kInitScans`); they are range-filtered but neither downsampled, deskewed nor transformed by the pose.
+
+## Known open issues (found 2026-11-14, not fixed)
+Performance, as shares of a gprof run on `living_room_garden` taken before the timing fixes (the pipeline is single-threaded):
+- 5-nearest search plus eigen-solve for surface normals, about 35%: normals are recomputed every scan although map voxels saturate; they could be kept in the map and invalidated on insertion.
+- 1-nearest correspondence search, about 26%: per-point work on a read-only map, so it can run in parallel.
+- IMU factor numerical Jacobian, about 11%. `se3Log` (`SE3.hh`) also calls `Transform::rotation()`, which runs an SVD, where `.linear()` would do.
+- Deskew, about 10%: it rotates all 9600 points although about 11% survive the filters.
+
+Estimator:
+- Registration stops before converging: before the timing fixes the third round still moved the pose by 2 to 4 mm on average, and 8 rounds were needed to reach 0.4 mm. After the fixes, 2 rounds give the same final pose as 3 within about 1 mm on both recordings and are about 17% faster. One round, or one optimizer iteration per round, broke `living_room_garden` before the fixes; not re-measured since.
+- Tilted start (read from the code, untested; both recordings start level): init scans go into the map in the raw sensor frame while the state takes roll and pitch from a single accelerometer sample.
+- `SlamState` stores Euler angles (singular at ±90° pitch) and converts to and from a rotation matrix on every IMU sample.
+- A scan is inserted into the map even when registration found no correspondences. There is no robust loss and no planarity check on the normals.
+- LiDAR residuals have unit weight, the IMU factor is scaled by a hard-coded 0.01 (`kImuWeight`), and the IMU noise parameters are not in the config.
+- The pose is published per IMU sample although samples are processed in a burst per scan, and `SlamServer::map_history_` grows without bound.
+- Not verified anywhere: a live sensor run, the `pi5` preset, the streaming RPCs (`GetMapIncrements`, `GetTransformedScan`), and the 50 ms IMU wait with an absent IMU stream outside unit tests.
 
 ## Repo layout gotchas
+- mslam targets are compiled with `MSENSOR_NO_LEGACY_NAMES` (set in the top-level `CMakeLists.txt` after the msensor subdirectory), so use the namespaced `msensor::` names; the legacy global aliases are not available.
 - `third_party/` are submodules (`moptim` optimizer, `msensor` sensors/recorder, `robin-map`); `msensor` is maintained in-house (its recording/playback and gRPC code is fair game), `moptim`/`robin-map` are external. Submodules show as modified in git status.
 - `client/` is a Python viewer (uv, `proto_gen/` generated from `grpc/slam.proto`); `viewer/` is a TypeScript browser PLY viewer (`npm run dev`).
 - Docker builds: `deployment/Dockerfile` (SLAM), `deployment/DockerfileViewer`.

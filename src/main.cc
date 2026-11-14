@@ -6,8 +6,12 @@
 #include "msensor/lidar/mid360.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Slam.hh"
+#include "mslam/slam/SlamPipeline.hh"
+#include "mslam/slam/SlamRunner.hh"
 #include "mslam/slam/SlamServer.hh"
 #include "sensors_remote_client.hh"
+#include <atomic>
+#include <csignal>
 #include <filesystem>
 #include <getopt.h>
 #include <iostream>
@@ -15,6 +19,15 @@
 #include <stdexcept>
 
 namespace {
+
+// Set from the signal handler, polled by the SLAM loop.
+std::atomic<bool> g_stop_requested{false};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "the stop flag is written from a signal handler");
+
+void onTerminationSignal(int /*signal_number*/) {
+  g_stop_requested.store(true);
+}
 
 void printUsage(const char *program_name) {
   std::cout << "Usage: " << program_name << " [-c config.json] [-h]\n"
@@ -112,7 +125,8 @@ int main(int argc, char **argv) {
                  mid360_config_path.string());
 
   } else {
-    auto remote = std::make_shared<SensorsRemoteClient>(config.remote_scanner);
+    auto remote =
+        std::make_shared<msensor::SensorsRemoteClient>(config.remote_scanner);
     remote->init();
     remote->start();
     lidar_sensor = remote;
@@ -122,9 +136,16 @@ int main(int argc, char **argv) {
   }
 
   mslam::Slam slam(logger, config, map);
-  slam_server.setSlam(&slam);
+  mslam::SlamPipeline pipeline(slam, config, logger, slam_server);
+  mslam::SlamRunner runner(pipeline, lidar_sensor, imu_sensor, config, logger);
+  slam_server.setControl(&runner);
 
-  slam.run(lidar_sensor, imu_sensor, slam_server);
+  std::signal(SIGINT, onTerminationSignal);
+  std::signal(SIGTERM, onTerminationSignal);
 
+  runner.run(g_stop_requested);
+
+  // The runner is about to be destroyed: detach it from the server.
+  slam_server.setControl(nullptr);
   return 0;
 }

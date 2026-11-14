@@ -28,6 +28,11 @@ add_subdirectory(third_party/robin-map)
 add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
 set(MSENSOR_INSTALL_PLAYBACK_PUBLISHER ${MSLAM_INSTALL_REPLAY_SERVER})
 add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
+
+# mslam uses only the namespaced msensor:: names. Dropping the legacy global
+# aliases makes the compiler prove it. Defined after the msensor subdirectory,
+# so msensor's own sources are not affected.
+add_compile_definitions(MSENSOR_NO_LEGACY_NAMES)
 add_subdirectory(grpc)
 link_libraries(msensor::msensor)
 

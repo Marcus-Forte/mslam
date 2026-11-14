@@ -2,14 +2,16 @@
 #include "mslam/config/JsonConfig.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Slam.hh"
+#include "mslam/slam/SlamPipeline.hh"
+#include "mslam/slam/SlamRunner.hh"
 #include "mslam/slam/SlamServer.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
-#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -46,14 +48,14 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
       config.map_parameters.max_points_per_voxel);
   map->setNumAdjacentVoxelSearch(1);
 
-  // The SLAM output server is only used by the run loop as a pose/map sink; it
-  // is not started, so no port is bound.
+  // The SLAM output server is only used as the pipeline's pose/map sink; it is
+  // not started, so no port is bound.
   mslam::SlamServer slam_server(logger);
 
   // Replay the recording directly in-process: RecordingSensorDriver
   // implements both ILidar and IImu, so it can be fed straight to Slam
   // without going through the gRPC sensor server/client.
-  // Raw max speed (0) replays the file faster than Slam::run can drain
+  // Raw max speed (0) replays the file faster than SlamRunner::run can drain
   // scans, so samples would be dropped and the run would diverge. 16x keeps
   // every sample on this host (verified up to 32x; 64x drops) while staying
   // well ahead of real time. Override with MSLAM_REPLAY_SPEED for local
@@ -67,25 +69,27 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
   driver->init();
 
   // Start the replay only after the SLAM callbacks are registered (done
-  // inside slam.run()), otherwise the first samples would be dropped. The
+  // inside runner.run()), otherwise the first samples would be dropped. The
   // production SLAM loop intentionally stays alive when the sensor stream
   // goes idle; stop this integration run explicitly after the recording is
   // consumed.
-  std::thread replay_thread([&driver]() {
+  std::atomic<bool> stop_requested{false};
+  std::thread replay_thread([&driver, &stop_requested]() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     driver->startSampling();
     while (!driver->isFinished()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    std::raise(SIGINT);
+    stop_requested.store(true);
   });
 
   auto lidar = std::static_pointer_cast<msensor::ILidar>(driver);
   auto imu = std::static_pointer_cast<msensor::IImu>(driver);
   mslam::Slam slam(logger, config, map);
-  slam_server.setSlam(&slam);
-  slam.run(lidar, imu, slam_server);
+  mslam::SlamPipeline pipeline(slam, config, logger, slam_server);
+  mslam::SlamRunner runner(pipeline, lidar, imu, config, logger);
+  runner.run(stop_requested);
 
   replay_thread.join();
 
@@ -108,6 +112,17 @@ TEST(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
             << pose[5] << "]\n"
             << "Final error: position=" << position_error_m
             << " m, rotation=" << rotation_error_rad << " rad\n";
+
+  // How the live loop paired IMU and LiDAR (informational: timing dependent).
+  const auto &registration = slam.registrationStats();
+  std::cout << "Registration: imu_path=" << registration.imu_scans
+            << " lidar_only=" << registration.lidar_only_scans
+            << " first_round=" << registration.meanFirstRoundTranslationMm()
+            << " mm / " << registration.meanFirstRoundRotationMrad()
+            << " mrad, imu_wait_timeouts=" << runner.imuWaitTimeouts() << "\n";
+  RecordProperty("lidar_only_scans",
+                 std::to_string(registration.lidar_only_scans));
+  RecordProperty("imu_wait_timeouts", std::to_string(runner.imuWaitTimeouts()));
 
   driver->stopSampling();
 

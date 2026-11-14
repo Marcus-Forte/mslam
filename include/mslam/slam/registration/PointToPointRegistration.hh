@@ -1,18 +1,25 @@
 #pragma once
 
 #include "mslam/slam/registration/IRegistration.hh"
+#include "mslam/slam/registration/IcpWorkspace.hh"
 
 #include <Eigen/Dense>
+#include <vector>
 
 namespace mslam {
 
 class PointToPointRegistration : public IRegistration {
 public:
-  using IRegistration::IRegistration;
+  PointToPointRegistration(
+      int num_registration_iterations, int num_optimizer_iterations,
+      float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
+      std::shared_ptr<ICorrespondenceFinder> correspondence_finder);
+
   SlamState Align(const SlamState &state, const IMap &map,
                   const PointCloud &scan) override;
 
 private:
+  IcpWorkspace icp_;
   std::vector<Eigen::Vector3d> inputs_buffer_;
   VectorPoint3d map_points_buffer_;
 };

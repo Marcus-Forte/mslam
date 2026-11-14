@@ -1,20 +1,25 @@
 #pragma once
 
 #include "mslam/slam/registration/IRegistration.hh"
-
-#include <Eigen/Dense>
+#include "mslam/slam/registration/IcpWorkspace.hh"
 
 namespace mslam {
 
+/// Point-to-plane ICP: minimizes the distance of each scan point to the plane
+/// through its map correspondence (normal from a KNN neighbourhood), with an
+/// analytical se(3) jacobian.
 class PointToPlaneRegistration : public IRegistration {
 public:
-  using IRegistration::IRegistration;
+  PointToPlaneRegistration(
+      int num_registration_iterations, int num_optimizer_iterations,
+      float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
+      std::shared_ptr<ICorrespondenceFinder> correspondence_finder);
+
   SlamState Align(const SlamState &state, const IMap &map,
                   const PointCloud &scan) override;
 
 private:
-  std::vector<Eigen::Matrix<double, 6, 1>> inputs_buffer_;
-  VectorPoint3d map_points_buffer_;
+  IcpWorkspace icp_;
 };
 
 } // namespace mslam

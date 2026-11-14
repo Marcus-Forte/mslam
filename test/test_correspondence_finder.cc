@@ -26,9 +26,9 @@ public:
     return nearest;
   }
 
-  std::vector<Neighbor> getClosestNNeighbors(const Point &,
-                                             int) const override {
-    return {};
+  std::size_t findClosestNeighbors(const Point &,
+                                   std::span<Neighbor>) const override {
+    return 0;
   }
 
   const PointCloud &getPointCloudRepresentation() const override {

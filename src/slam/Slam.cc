@@ -1,47 +1,32 @@
 #include "mslam/slam/Slam.hh"
-#include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/CorrespondenceFinderLogger.hh"
 #include "mslam/slam/ImuMath.hh"
 #include "mslam/slam/ImuPreintegration.hh"
-#include "mslam/slam/Preprocessor.hh"
-#include "mslam/slam/SensorInput.hh"
-#include "mslam/slam/SlamServer.hh"
 #include "mslam/slam/Transform.hh"
 #include "mslam/slam/registration/ImuRegistration.hh"
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
 #include "mslam/utils/Timing.hh"
-// #include "mslam/slam/registration/PointToPointRegistration.hh"
 
-#include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <csignal>
-#include <thread>
-#include <vector>
 
 namespace {
 
-constexpr int g_init_scans = 10;
-constexpr double g_dense_map_voxel_size = 0.01;
-constexpr int g_dense_map_voxel_bucket_size = 10;
-
 void logState(const std::shared_ptr<spdlog::logger> &logger,
-              const mslam::SlamState &state) {
-  logger->info("State: pos=[{:.3f},{:.3f},{:.3f}] rot=[{:.3f},{:.3f},{:.3f}] "
-               "vel=[{:.3f},{:.3f},{:.3f}] bg=[{:.4f},{:.4f},{:.4f}] "
-               "ba=[{:.4f},{:.4f},{:.4f}]",
-               state.position.x(), state.position.y(), state.position.z(),
-               state.rotation.x(), state.rotation.y(), state.rotation.z(),
-               state.velocity.x(), state.velocity.y(), state.velocity.z(),
-               state.gyro_bias.x(), state.gyro_bias.y(), state.gyro_bias.z(),
-               state.accel_bias.x(), state.accel_bias.y(),
-               state.accel_bias.z());
+              const mslam::SlamState &state,
+              spdlog::level::level_enum level = spdlog::level::info) {
+  logger->log(level,
+              "State: pos=[{:.3f},{:.3f},{:.3f}] rot=[{:.3f},{:.3f},{:.3f}] "
+              "vel=[{:.3f},{:.3f},{:.3f}] bg=[{:.4f},{:.4f},{:.4f}] "
+              "ba=[{:.4f},{:.4f},{:.4f}]",
+              state.position.x(), state.position.y(), state.position.z(),
+              state.rotation.x(), state.rotation.y(), state.rotation.z(),
+              state.velocity.x(), state.velocity.y(), state.velocity.z(),
+              state.gyro_bias.x(), state.gyro_bias.y(), state.gyro_bias.z(),
+              state.accel_bias.x(), state.accel_bias.y(), state.accel_bias.z());
 }
 
 } // namespace
 namespace mslam {
-
-std::atomic<bool> Slam::should_stop_{false};
 
 Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
            const SlamConfiguration &config, const std::shared_ptr<IMap> &map)
@@ -55,10 +40,6 @@ Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
           config.parameters.max_correspondence_distance, logger,
           createLoggingCorrespondenceFinder(logger))),
       map_(map) {
-  if (config_.map_parameters.dense_map) {
-    dense_map_ = std::make_unique<VoxelHashMap>(g_dense_map_voxel_size,
-                                                g_dense_map_voxel_bucket_size);
-  }
   ResetPose();
 }
 
@@ -99,7 +80,9 @@ bool Slam::TryInitializeGravityAlignment(const msensor::IMUData &imuData) {
 }
 
 void Slam::Predict(const msensor::IMUData &imuData) {
-  const ScopedElapsedLogger elapsed_logger(logger_, "Slam::Predict");
+  // Called at the IMU rate: timed and logged at debug level only.
+  const ScopedElapsedLogger elapsed_logger(logger_, "Slam::Predict",
+                                           spdlog::level::debug);
 
   const bool just_initialized_gravity = TryInitializeGravityAlignment(imuData);
 
@@ -150,16 +133,14 @@ void Slam::Predict(const msensor::IMUData &imuData) {
                               config_.imu_acceleration_scale * imuData.az);
   preintegrator_.integrate(gyro, accel, delta_between_imu_samples);
 
-  const Eigen::Matrix3d R = toAffine(0.0, 0.0, 0.0, state_.rotation.x(),
-                                     state_.rotation.y(), state_.rotation.z())
-                                .linear();
+  const Eigen::Matrix3d R = eulerToRotation(state_.rotation);
 
   // Remove the estimated accelerometer bias in the body frame before the
   // helper rotates the specific force into the world frame and removes
   // gravity.
   Eigen::Vector3d world_acceleration =
-      toGravityCompensatedWorldAcceleration(state_.rotation, imuData,
-                                            config_.imu_acceleration_scale) -
+      gravityCompensatedWorldAcceleration(R, imuData,
+                                          config_.imu_acceleration_scale) -
       R * state_.accel_bias;
 
   state_.position += delta_between_imu_samples * state_.velocity +
@@ -174,9 +155,7 @@ void Slam::Predict(const msensor::IMUData &imuData) {
     const Eigen::Matrix3d dR =
         Eigen::AngleAxisd(angle, unbiased_gyro.normalized()).toRotationMatrix();
     const Eigen::Matrix3d new_R = R * dR;
-    state_.rotation.x() = std::atan2(-new_R(1, 2), new_R(2, 2));
-    state_.rotation.y() = std::asin(std::clamp(new_R(0, 2), -1.0, 1.0));
-    state_.rotation.z() = std::atan2(-new_R(0, 1), new_R(0, 0));
+    state_.rotation = rotationToEuler(new_R);
   }
 
   logger_->debug(
@@ -185,7 +164,9 @@ void Slam::Predict(const msensor::IMUData &imuData) {
       delta_between_imu_samples, world_acceleration.x(), world_acceleration.y(),
       world_acceleration.z(), state_.velocity.x(), state_.velocity.y(),
       state_.velocity.z());
-  logState(logger_, state_);
+  if (logger_->should_log(spdlog::level::debug)) {
+    logState(logger_, state_, spdlog::level::debug);
+  }
 }
 
 void Slam::Update(const Scan &lidarData) {
@@ -204,19 +185,33 @@ void Slam::Update(const Scan &lidarData) {
     current_state.gyro_bias = previous_state_.gyro_bias;
     current_state.accel_bias = previous_state_.accel_bias;
 
+    stats_.preintegrated_seconds += preintegrator_.deltaTime();
+
     // Joint 15-DOF optimization: pose + velocity + biases
     state_ = imu_registration_->Align(current_state, *map_, lidarData.points,
                                       previous_state_, preintegrator_);
     previous_state_ = state_;
 
+    ++stats_.imu_scans;
+    if (const auto &first = imu_registration_->lastFirstRound(); first.valid) {
+      ++stats_.first_round_scans;
+      stats_.first_round_translation_sum_m += first.translation_m;
+      stats_.first_round_rotation_sum_rad += first.rotation_rad;
+    }
+
+    // Only the preintegrator restarts at the scan. The IMU clock keeps
+    // running: the interval between the last sample before this scan and the
+    // first one after it belongs to the next scan and must be integrated.
+    // (The LiDAR-only path below does reset the clock: there the state was
+    // re-anchored on the map and the velocity dropped on purpose.)
     preintegrator_.reset(state_.gyro_bias, state_.accel_bias);
-    last_imu_timestamp_ns_.reset();
 
     logState(logger_, state_);
     return;
   }
 
   state_ = registration_->Align(state_, *map_, lidarData.points);
+  ++stats_.lidar_only_scans;
   ResetImuPreintegration();
   logger_->debug("Update");
   logState(logger_, state_);
@@ -228,167 +223,6 @@ mslam::Pose3D Slam::getPose() const {
                  state_.rotation.z()}};
 }
 
-Eigen::Affine3d Slam::getTransform() const {
-  return toAffine(state_.position.x(), state_.position.y(), state_.position.z(),
-                  state_.rotation.x(), state_.rotation.y(),
-                  state_.rotation.z());
-}
-
-void Slam::startProcessing() {
-  running_.store(true);
-  logger_->info("SLAM processing started");
-}
-
-void Slam::stopProcessing() {
-  running_.store(false);
-  logger_->info("SLAM processing stopped");
-}
-
-void Slam::reset() {
-  running_.store(false);
-  ResetPose();
-  map_->clear();
-  if (dense_map_) {
-    dense_map_->clear();
-  }
-  logger_->info("SLAM reset: pose and map cleared");
-}
-
-bool Slam::isRunning() const { return running_.load(); }
-
-void Slam::pruneMap() {
-  const auto &position = state_.position;
-  map_->prune(
-      Point{static_cast<float>(position.x()), static_cast<float>(position.y()),
-            static_cast<float>(position.z())},
-      config_.map_parameters.max_range, config_.map_parameters.max_voxels);
-}
-
-void Slam::signalHandler(int signal_number) {
-  if (signal_number == SIGINT || signal_number == SIGTERM) {
-    should_stop_.store(true);
-  }
-}
-
-void Slam::run(std::shared_ptr<msensor::ILidar> lidar,
-               std::shared_ptr<msensor::IImu> imu, SlamServer &server) {
-
-  std::signal(SIGINT, signalHandler);
-  std::signal(SIGTERM, signalHandler);
-  server.updatePose(getPose());
-  should_stop_.store(false);
-  startProcessing();
-
-  logger_->debug("Using downsample filter: {}",
-                 toString(config_.preprocessor.downsample_filter));
-
-  int init_scan_count = 0;
-
-  const bool with_imu = config_.with_imu;
-  const bool with_lidar = config_.with_lidar;
-
-  SensorInput sensors(lidar, imu, with_lidar, with_imu);
-  Preprocessor preprocessor(config_.preprocessor, logger_);
-
-  while (!should_stop_.load()) {
-
-    if (!running_.load()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      continue;
-    }
-
-    auto scan = sensors.nextScan();
-
-    if (!scan) {
-      if (should_stop_.load()) {
-        break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      continue;
-    }
-
-    if (scan->points.empty()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      continue;
-    }
-
-    std::vector<msensor::IMUData> scan_imu_samples;
-
-    if (with_imu) {
-      static uint64_t last_imu_time = 0;
-
-      while (true) {
-        if (should_stop_.load()) {
-          break;
-        }
-
-        const auto imudata = sensors.nextImu();
-        if (!imudata.has_value()) {
-          break;
-        }
-
-        logger_->debug("Processing IMU @ {}, delta {} ms, seq nr {}, "
-                       "raw_acc=[{}, {}, {}], raw_gyro=[{}, {}, {}]",
-                       imudata->header.timestamp,
-                       (imudata->header.timestamp - last_imu_time) * 1e-6,
-                       imudata->header.sequence_number, imudata->ax,
-                       imudata->ay, imudata->az, imudata->gx, imudata->gy,
-                       imudata->gz);
-
-        last_imu_time = imudata->header.timestamp;
-        scan_imu_samples.push_back(*imudata);
-
-        Predict(*imudata);
-        server.updatePose(getPose());
-      }
-    }
-
-    if (init_scan_count < g_init_scans) {
-      auto filtered_scan = preprocessor.filterNearCenter(*scan);
-
-      auto map_increment = map_->addScan(filtered_scan->points);
-      if (dense_map_) {
-        dense_map_->addScan(filtered_scan->points);
-      }
-      pruneMap();
-      init_scan_count++;
-
-      server.updateTransformedScan(filtered_scan->points);
-
-      server.updateMapIncrement(map_increment);
-
-      logger_->info("Init scan {}/{}. Map points: {}", init_scan_count,
-                    g_init_scans, map_->getPointCloudRepresentation().size());
-      ResetImuPreintegration();
-      continue;
-    }
-    if (with_lidar) {
-      logger_->debug("Processing Lidar scan with {} points @ {}, seq nr {}",
-                     scan->points.size(), scan->header.timestamp,
-                     scan->header.sequence_number);
-
-      auto filtered_scan = preprocessor.process(*scan, scan_imu_samples);
-      logger_->debug("Preprocess: {} -> {} pts", scan->points.size(),
-                     filtered_scan->points.size());
-
-      Update(*filtered_scan);
-
-      server.updatePose(getPose());
-
-      transformCloud(getTransform(), filtered_scan->points);
-
-      auto map_increment = map_->addScan(filtered_scan->points);
-
-      if (dense_map_) {
-        dense_map_->addScan(filtered_scan->points);
-      }
-      pruneMap();
-
-      server.updateTransformedScan(filtered_scan->points);
-
-      server.updateMapIncrement(map_increment);
-    }
-  }
-}
+Eigen::Affine3d Slam::getTransform() const { return toAffine(state_); }
 
 } // namespace mslam

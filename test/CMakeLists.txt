@@ -39,5 +39,58 @@ target_link_libraries(test_slam slam GTest::gtest_main)
 
 gtest_discover_tests(test_slam)
 
+add_executable(test_point_distance
+test_point_distance.cc)
+target_link_libraries(test_point_distance slam moptim GTest::gtest_main)
+
+gtest_discover_tests(test_point_distance)
+
+add_executable(test_normal_estimator
+test_normal_estimator.cc)
+target_link_libraries(test_normal_estimator slam maps GTest::gtest_main)
+
+gtest_discover_tests(test_normal_estimator)
+
+add_executable(test_registration
+test_registration.cc)
+target_link_libraries(test_registration slam maps GTest::gtest_main)
+
+gtest_discover_tests(test_registration)
+
+add_executable(test_transform
+test_transform.cc)
+target_link_libraries(test_transform slam GTest::gtest_main)
+
+gtest_discover_tests(test_transform)
+
+add_executable(test_imu_scan_sync
+test_imu_scan_sync.cc)
+target_link_libraries(test_imu_scan_sync slam GTest::gtest_main)
+
+gtest_discover_tests(test_imu_scan_sync)
+
+add_executable(test_slam_pipeline
+test_slam_pipeline.cc)
+target_link_libraries(test_slam_pipeline slam maps GTest::gtest_main)
+
+gtest_discover_tests(test_slam_pipeline)
+
+add_executable(test_slam_server
+test_slam_server.cc)
+target_link_libraries(test_slam_server slam GTest::gtest_main)
+
+gtest_discover_tests(test_slam_server)
+
+add_executable(test_timing
+test_timing.cc)
+target_link_libraries(test_timing slam GTest::gtest_main)
+
+gtest_discover_tests(test_timing)
+
 add_executable(mslam_draft draft.cc)
 target_link_libraries(mslam_draft moptim maps slam ILidar)
+
+# Offline replay benchmark (not registered with CTest, not built by default):
+#   cmake --build --preset build-gcc --target bench_slam
+add_executable(bench_slam EXCLUDE_FROM_ALL bench_slam.cc)
+target_link_libraries(bench_slam slam maps mslam::config scan_recorder)

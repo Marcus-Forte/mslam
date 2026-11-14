@@ -1,6 +1,12 @@
 #include "mslam/map/VoxelHashMap.hh"
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 #include <random>
+#include <set>
+#include <stdexcept>
 
 using namespace mslam;
 
@@ -231,4 +237,200 @@ TEST_F(TestVoxelHashMap, reuses_storage_after_pruning_voxels) {
   EXPECT_FLOAT_EQ(neighbor.first.x, 20.5F);
   EXPECT_FLOAT_EQ(neighbor.first.y, 20.5F);
   EXPECT_FLOAT_EQ(neighbor.first.z, 20.5F);
+}
+
+namespace {
+
+// Reference implementation: scan every stored point whose voxel lies within
+// `radius` voxels of the query voxel, in the same shift order as the map.
+struct ReferenceSearch {
+  const PointCloud &points;
+  float inverse_voxel_size;
+  int radius;
+
+  bool inNeighbourhood(const Point &point, const Voxel3 &query_voxel) const {
+    const Voxel3 voxel = PointToVoxel(point, inverse_voxel_size);
+    return (voxel - query_voxel).cwiseAbs().maxCoeff() <= radius;
+  }
+
+  std::vector<IMap::Neighbor> sortedCandidates(const Point &query) const {
+    const Voxel3 query_voxel = PointToVoxel(query, inverse_voxel_size);
+    std::vector<IMap::Neighbor> candidates;
+    for (const auto &point : points) {
+      if (!inNeighbourhood(point, query_voxel)) {
+        continue;
+      }
+      const float dx = point.x - query.x;
+      const float dy = point.y - query.y;
+      const float dz = point.z - query.z;
+      candidates.emplace_back(Point{point.x, point.y, point.z},
+                              dx * dx + dy * dy + dz * dz);
+    }
+    std::stable_sort(
+        candidates.begin(), candidates.end(),
+        [](const auto &a, const auto &b) { return a.second < b.second; });
+    return candidates;
+  }
+};
+
+PointCloud randomCloud(std::mt19937 &rng, int count, float extent,
+                       bool snap_to_grid) {
+  std::uniform_real_distribution<float> coordinate(-extent, extent);
+  PointCloud cloud;
+  for (int i = 0; i < count; ++i) {
+    Point point(coordinate(rng), coordinate(rng), coordinate(rng));
+    if (snap_to_grid) {
+      point.x = std::round(point.x * 20.0F) / 20.0F;
+      point.y = std::round(point.y * 20.0F) / 20.0F;
+      point.z = std::round(point.z * 20.0F) / 20.0F;
+    }
+    cloud.push_back(point);
+  }
+  return cloud;
+}
+
+} // namespace
+
+TEST(VoxelHashMapSearch, ClosestNeighborMatchesExhaustiveSearch) {
+  std::mt19937 rng(1234);
+  for (const int radius : {1, 2}) {
+    for (const bool snapped : {false, true}) {
+      VoxelHashMap map(0.1F, 5);
+      map.setNumAdjacentVoxelSearch(radius);
+      // Several scans, so buckets fill up and overflowing points are dropped.
+      for (int scan = 0; scan < 4; ++scan) {
+        map.addScan(randomCloud(rng, 4000, 1.0F, snapped));
+      }
+      const PointCloud stored = map.getPointCloudRepresentation();
+      const ReferenceSearch reference{stored, 10.0F, radius};
+
+      for (const auto &query : randomCloud(rng, 3000, 1.3F, false)) {
+        const auto candidates = reference.sortedCandidates(query);
+        const auto result = map.getClosestNeighbor(query);
+        if (candidates.empty()) {
+          EXPECT_EQ(result.second, std::numeric_limits<float>::max());
+          continue;
+        }
+        // Distances must be identical. Only an exact tie may pick a different
+        // point, and the lowest-shift rule is checked below by value.
+        ASSERT_EQ(result.second, candidates.front().second);
+      }
+    }
+  }
+}
+
+TEST(VoxelHashMapSearch, ClosestNNeighborsMatchExhaustiveSearch) {
+  std::mt19937 rng(99);
+  for (const bool snapped : {false, true}) {
+    VoxelHashMap map(0.1F, 5);
+    for (int scan = 0; scan < 4; ++scan) {
+      map.addScan(randomCloud(rng, 4000, 1.0F, snapped));
+    }
+    const PointCloud stored = map.getPointCloudRepresentation();
+    const ReferenceSearch reference{stored, 10.0F, 1};
+
+    for (const int count : {1, 3, 5, 12}) {
+      for (const auto &query : randomCloud(rng, 1500, 1.3F, false)) {
+        const auto candidates = reference.sortedCandidates(query);
+        const auto result = map.getClosestNNeighbors(query, count);
+        const auto expected_size =
+            std::min<size_t>(candidates.size(), static_cast<size_t>(count));
+        ASSERT_EQ(result.size(), expected_size);
+        for (size_t i = 0; i < expected_size; ++i) {
+          // The k-th distance is unique even when equidistant points could be
+          // returned in either order.
+          ASSERT_EQ(result[i].second, candidates[i].second) << "rank " << i;
+        }
+      }
+    }
+  }
+}
+
+TEST(VoxelHashMapSearch, FindClosestNeighborsFillsCallerBuffer) {
+  VoxelHashMap map(1.0F, 5);
+  PointCloud scan;
+  scan.emplace_back(0.1F, 0.1F, 0.0F);
+  scan.emplace_back(0.2F, 0.2F, 0.0F);
+  scan.emplace_back(0.8F, 0.8F, 0.0F);
+  map.addScan(scan);
+
+  std::array<IMap::Neighbor, 8> buffer;
+  const auto count =
+      map.findClosestNeighbors({0.0F, 0.0F, 0.0F}, std::span(buffer.data(), 2));
+  ASSERT_EQ(count, 2U);
+  EXPECT_FLOAT_EQ(buffer[0].first.x, 0.1F);
+  EXPECT_FLOAT_EQ(buffer[1].first.x, 0.2F);
+  // Entries past the requested size are untouched.
+  EXPECT_EQ(buffer[2].second, 0.0F);
+
+  EXPECT_EQ(
+      map.findClosestNeighbors({0.0F, 0.0F, 0.0F}, std::span<IMap::Neighbor>{}),
+      0U);
+  // 5 neighbors requested, only 3 exist.
+  EXPECT_EQ(
+      map.findClosestNeighbors({0.0F, 0.0F, 0.0F}, std::span(buffer.data(), 5)),
+      3U);
+}
+
+TEST(VoxelHashMapSearch, LargeCoordinatesAreNotSkippedByVoxelBounds) {
+  // Far from the origin float rounding of voxel boundaries is coarse; the
+  // voxel lower bound must stay conservative.
+  std::mt19937 rng(5);
+  VoxelHashMap map(0.1F, 5);
+  std::uniform_real_distribution<float> offset(-0.5F, 0.5F);
+  PointCloud cloud;
+  for (int i = 0; i < 5000; ++i) {
+    cloud.emplace_back(900.0F + offset(rng), -700.0F + offset(rng),
+                       300.0F + offset(rng));
+  }
+  map.addScan(cloud);
+  const PointCloud stored = map.getPointCloudRepresentation();
+  const ReferenceSearch reference{stored, 10.0F, 1};
+  for (int i = 0; i < 3000; ++i) {
+    const Point query(900.0F + offset(rng), -700.0F + offset(rng),
+                      300.0F + offset(rng));
+    const auto candidates = reference.sortedCandidates(query);
+    const auto result = map.getClosestNeighbor(query);
+    if (!candidates.empty()) {
+      ASSERT_EQ(result.second, candidates.front().second);
+    }
+  }
+}
+
+TEST(VoxelHashMapSearch, SearchRadiusIsValidated) {
+  VoxelHashMap map(0.1F, 5);
+  EXPECT_THROW(map.setNumAdjacentVoxelSearch(-1), std::invalid_argument);
+  EXPECT_THROW(
+      map.setNumAdjacentVoxelSearch(VoxelHashMap::kMaxAdjacentVoxels + 1),
+      std::invalid_argument);
+  EXPECT_NO_THROW(
+      map.setNumAdjacentVoxelSearch(VoxelHashMap::kMaxAdjacentVoxels));
+}
+
+TEST(VoxelHashMapSearch, VoxelHashSpreadsLowBits) {
+  // robin_map masks the low bits: a lattice of voxels must not collapse onto
+  // few buckets.
+  std::hash<Voxel3> hash;
+  std::set<std::size_t> buckets;
+  for (int x = 0; x < 32; ++x)
+    for (int y = 0; y < 32; ++y)
+      for (int z = 0; z < 8; ++z)
+        buckets.insert(hash(Voxel3(x, y, z)) & 0x3FFF);
+  // 8192 keys into 16384 buckets: a random hash occupies ~6.4k of them.
+  EXPECT_GT(buckets.size(), 5500U);
+}
+
+TEST(VoxelHashMapSearch, ClosestNeighborTieResolvesToLowestShift) {
+  // Equidistant points in the home voxel and in the dx = -1 voxel. An
+  // exhaustive scan in shift order returns the dx = -1 point even though the
+  // home voxel is visited first.
+  VoxelHashMap map(1.0F, 5);
+  PointCloud scan;
+  scan.emplace_back(0.75F, 0.5F, 0.5F);  // home voxel (0,0,0)
+  scan.emplace_back(-0.25F, 0.5F, 0.5F); // voxel (-1,0,0)
+  map.addScan(scan);
+
+  const auto neighbor = map.getClosestNeighbor({0.25F, 0.5F, 0.5F});
+  EXPECT_FLOAT_EQ(neighbor.second, 0.25F);
+  EXPECT_FLOAT_EQ(neighbor.first.x, -0.25F);
 }

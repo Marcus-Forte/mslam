@@ -3,39 +3,20 @@
 #include "mslam/common/Points.hh"
 #include "mslam/common/State.hh"
 #include "mslam/map/IMap.hh"
-#include "mslam/slam/ICorrespondenceFinder.hh"
-#include <memory>
-#include <spdlog/logger.h>
 
 namespace mslam {
 
+/// Scan-to-map registration: refines a pose estimate against a map.
 class IRegistration {
 public:
-  IRegistration(int num_registration_iterations, int num_optimizer_iterations,
-                float max_correspondence_distance,
-                const std::shared_ptr<spdlog::logger> &logger,
-                std::shared_ptr<ICorrespondenceFinder> correspondence_finder)
-      : num_registration_iterations_(num_registration_iterations),
-        num_optimizer_iterations_(num_optimizer_iterations),
-        max_correspondence_distance_(max_correspondence_distance),
-        logger_(logger),
-        correspondence_finder_(std::move(correspondence_finder)) {}
-
   virtual ~IRegistration() = default;
 
+  /// @param state Initial guess.
+  /// @param map   Reference map.
+  /// @param scan  Scan in the sensor (body) frame.
+  /// @return The refined state.
   virtual SlamState Align(const SlamState &state, const IMap &map,
                           const PointCloud &scan) = 0;
-
-protected:
-  int num_registration_iterations_;
-  int num_optimizer_iterations_;
-  float max_correspondence_distance_;
-  std::shared_ptr<spdlog::logger> logger_;
-  std::shared_ptr<ICorrespondenceFinder> correspondence_finder_;
-  // Pre-allocated buffers reused across Align() calls to avoid per-scan
-  // heap allocation. Capacity grows to the largest scan seen and stays there.
-  PointCloud source_buffer_;
-  Correspondences correspondences_buffer_;
 };
 
 } // namespace mslam

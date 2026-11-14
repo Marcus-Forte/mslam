@@ -3,6 +3,7 @@
 
 #include <Eigen/Geometry>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -29,6 +30,43 @@ Eigen::Matrix3d rotationIncrement(const Eigen::Vector3d &omega, double dt) {
   }
   return Eigen::AngleAxisd(angle, omega.normalized()).toRotationMatrix();
 }
+
+/// Memoizes rotationIncrement() for the current angular velocity. Between two
+/// IMU samples every point advances by the same time step (up to the
+/// quantization of nanosecond timestamps in a double, so only a few distinct
+/// steps occur), which makes the per-point axis-angle conversion redundant.
+/// Returns exactly what rotationIncrement() would, bit for bit.
+class RotationIncrementMemo {
+public:
+  const Eigen::Matrix3d &get(const Eigen::Vector3d &omega, double dt) {
+    for (std::size_t i = 0; i < count_; ++i) {
+      if (entries_[i].dt == dt) {
+        return entries_[i].rotation;
+      }
+    }
+    Entry &entry = entries_[next_];
+    entry.dt = dt;
+    entry.rotation = rotationIncrement(omega, dt);
+    next_ = (next_ + 1) % entries_.size();
+    count_ = std::min(count_ + 1, entries_.size());
+    return entry.rotation;
+  }
+
+  /// The angular velocity changed: forget everything.
+  void reset() {
+    count_ = 0;
+    next_ = 0;
+  }
+
+private:
+  struct Entry {
+    double dt = 0.0;
+    Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();
+  };
+  std::array<Entry, 4> entries_;
+  std::size_t count_ = 0;
+  std::size_t next_ = 0;
+};
 
 } // namespace
 
@@ -101,10 +139,10 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
   return result;
 }
 
-std::shared_ptr<Scan> deskew(const Scan &scan,
-                             const std::vector<msensor::IMUData> &imu_samples,
-                             double delta_t,
-                             std::shared_ptr<spdlog::logger> logger) {
+bool deskewInto(const Scan &scan,
+                const std::vector<msensor::IMUData> &imu_samples,
+                double delta_t, const std::shared_ptr<spdlog::logger> &logger,
+                PointCloud &out) {
   const auto start_time = std::chrono::steady_clock::now();
   const auto elapsed_ms = [&start_time] {
     return std::chrono::duration<double, std::milli>(
@@ -116,12 +154,10 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
     throw std::invalid_argument("deskew: delta_t must be finite and positive");
   }
 
-  auto result = std::make_shared<Scan>();
-  result->header = scan.header;
-
   const std::size_t num_points = scan.points.size();
   if (num_points == 0) {
-    return result;
+    out.clear();
+    return true;
   }
 
   const double start_time_ns = static_cast<double>(scan.header.timestamp);
@@ -158,20 +194,40 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
       logger->warn("Deskew: no IMU samples inside the lidar range, leaving the "
                    "scan undistorted");
     }
-    result->points = scan.points;
     log_summary();
-    return result;
+    return false;
   }
 
-  result->points.resize(num_points);
+  out.resize(num_points);
 
-  // Orientation of the sensor relative to the scan start, built up as we sweep
-  // the point times. The angular velocity is held (zero-order hold) until the
-  // next sample is reached.
-  Eigen::Matrix3d orientation = Eigen::Matrix3d::Identity();
+  // Rotation of the sensor over the whole scan, from the first to the last
+  // point (zero-order hold, one increment per IMU interval). Its inverse is
+  // the starting orientation below, so that the sweep ends on the identity:
+  // the points are expressed in the sensor frame at the LAST point's time.
+  Eigen::Matrix3d total_rotation = Eigen::Matrix3d::Identity();
+  {
+    double time_ns = start_time_ns;
+    Eigen::Vector3d omega = angularVelocityOf(samples.front());
+    for (std::size_t k = 1; k < samples.size(); ++k) {
+      const double boundary_ns =
+          static_cast<double>(samples[k].header.timestamp);
+      total_rotation *= rotationIncrement(omega, (boundary_ns - time_ns) /
+                                                     kNanosecondsPerSecond);
+      time_ns = boundary_ns;
+      omega = angularVelocityOf(samples[k]);
+    }
+    total_rotation *= rotationIncrement(omega, (end_time_ns - time_ns) /
+                                                   kNanosecondsPerSecond);
+  }
+
+  // Orientation of the sensor relative to the scan END, built up as we sweep
+  // the point times: R_end^T * R_i. The angular velocity is held (zero-order
+  // hold) until the next sample is reached.
+  Eigen::Matrix3d orientation = total_rotation.transpose();
   double previous_time_ns = start_time_ns;
   std::size_t sample_index = 0;
   Eigen::Vector3d angular_velocity = angularVelocityOf(samples.front());
+  RotationIncrementMemo increments;
 
   for (std::size_t i = 0; i < num_points; ++i) {
     const double point_time_ns =
@@ -183,29 +239,42 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
       const double boundary_ns =
           static_cast<double>(samples[sample_index + 1].header.timestamp);
       orientation *=
-          rotationIncrement(angular_velocity, (boundary_ns - previous_time_ns) /
-                                                  kNanosecondsPerSecond);
+          increments.get(angular_velocity, (boundary_ns - previous_time_ns) /
+                                               kNanosecondsPerSecond);
       previous_time_ns = boundary_ns;
       ++sample_index;
       angular_velocity = angularVelocityOf(samples[sample_index]);
+      increments.reset();
     }
 
     orientation *=
-        rotationIncrement(angular_velocity, (point_time_ns - previous_time_ns) /
-                                                kNanosecondsPerSecond);
+        increments.get(angular_velocity, (point_time_ns - previous_time_ns) /
+                                             kNanosecondsPerSecond);
     previous_time_ns = point_time_ns;
 
     const auto &point = scan.points[i];
     const Eigen::Vector3d corrected =
         orientation * Eigen::Vector3d(point.x, point.y, point.z);
 
-    result->points[i].x = static_cast<float>(corrected.x());
-    result->points[i].y = static_cast<float>(corrected.y());
-    result->points[i].z = static_cast<float>(corrected.z());
-    result->points[i].intensity = point.intensity;
+    out[i].x = static_cast<float>(corrected.x());
+    out[i].y = static_cast<float>(corrected.y());
+    out[i].z = static_cast<float>(corrected.z());
+    out[i].intensity = point.intensity;
   }
 
   log_summary();
+  return true;
+}
+
+std::shared_ptr<Scan> deskew(const Scan &scan,
+                             const std::vector<msensor::IMUData> &imu_samples,
+                             double delta_t,
+                             std::shared_ptr<spdlog::logger> logger) {
+  auto result = std::make_shared<Scan>();
+  result->header = scan.header;
+  if (!deskewInto(scan, imu_samples, delta_t, logger, result->points)) {
+    result->points = scan.points;
+  }
   return result;
 }
 

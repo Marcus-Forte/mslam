@@ -1,32 +1,36 @@
 #include "mslam/slam/NormalEstimator.hh"
 #include <Eigen/Eigenvalues>
+#include <algorithm>
+#include <bit>
 #include <limits>
 
 namespace mslam {
 
-NormalEstimator::NormalEstimator(const IMap &map, int num_neighbors)
-    : map_(map), num_neighbors_(num_neighbors) {}
+NormalEstimator::NormalEstimator(int num_neighbors)
+    : num_neighbors_(std::clamp(num_neighbors, 0, kMaxNeighbors)) {}
 
-std::size_t
-NormalEstimator::MapPointKeyHash::operator()(const MapPointKey &key) const {
-  const auto hash_x = std::hash<float>{}(key.x);
-  const auto hash_y = std::hash<float>{}(key.y);
-  const auto hash_z = std::hash<float>{}(key.z);
-  return hash_x ^ (hash_y << 1) ^ (hash_z << 2);
+void NormalEstimator::reset(const IMap &map) {
+  map_ = &map;
+  cache_.clear();
 }
 
 std::optional<Eigen::Vector3d> NormalEstimator::estimate(const Point &query) {
-  const MapPointKey key{query.x, query.y, query.z};
+  const MapPointKey key{std::bit_cast<std::uint32_t>(query.x),
+                        std::bit_cast<std::uint32_t>(query.y),
+                        std::bit_cast<std::uint32_t>(query.z)};
   auto [it, inserted] = cache_.try_emplace(key);
   if (inserted) {
-    it->second =
-        fromNeighbors(map_.getClosestNNeighbors(query, num_neighbors_));
+    std::array<IMap::Neighbor, kMaxNeighbors> neighbors;
+    const auto count = map_->findClosestNeighbors(
+        query,
+        std::span(neighbors.data(), static_cast<std::size_t>(num_neighbors_)));
+    it.value() = fromNeighbors(std::span(neighbors.data(), count));
   }
   return it->second;
 }
 
 std::optional<Eigen::Vector3d>
-NormalEstimator::fromNeighbors(const std::vector<IMap::Neighbor> &neighbors) {
+NormalEstimator::fromNeighbors(std::span<const IMap::Neighbor> neighbors) {
   if (neighbors.size() < 3) {
     return std::nullopt;
   }
@@ -44,8 +48,8 @@ NormalEstimator::fromNeighbors(const std::vector<IMap::Neighbor> &neighbors) {
     covariance.noalias() += centered * centered.transpose();
   }
 
-  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(
-      covariance, Eigen::ComputeEigenvectors);
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver;
+  solver.computeDirect(covariance, Eigen::ComputeEigenvectors);
   if (solver.info() != Eigen::Success) {
     return std::nullopt;
   }

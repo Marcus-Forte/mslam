@@ -84,7 +84,8 @@ se3Exp(const Eigen::MatrixBase<Derived> &xi) {
  * addition.
  */
 template <class T> struct SE3xEuclideanPlusOperator {
-  static void plus(const T *x, const T *delta, T *out, size_t dimensions) {
+  static void plus(const T *x, const T *delta, T *out,
+                   [[maybe_unused]] size_t dimensions) {
     assert(dimensions == 15);
 
     const Eigen::Map<const Eigen::Matrix<T, 6, 1>> x_se3(x);

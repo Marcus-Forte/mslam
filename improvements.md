@@ -181,3 +181,133 @@ processes on the box.
 2. Per-voxel normal cache (item 4) to remove the ~12 ms remainder.
 3. Consider `reg_iterations` reduction / early convergence and correspondence subsampling (item 7).
 4. If map extent matters more than lookup cost, tune `max_voxels` / `max_range`.
+
+---
+
+## Follow-up: deterministic benchmark and hot-path work (2026-11-14)
+
+Measured with `bench_slam` (offline, synchronous, deterministic replay through `SlamPipeline`, logging
+off, `test/integration/mslam.jsonc`), see the readme. Machine: the dev container (aarch64, GCC 16.2,
+Release `-O3`, `-mcpu=native`), noisy host. Numbers are the **minimum of 5 runs**, old and new binaries
+interleaved. "Baseline" is the code before this round, timed with the same stage boundaries.
+
+| Recording (scans) | Stage | Baseline (ms) | Final (ms) |
+|---|---|---|---|
+| living_room_garden (1129) | total | 4932 | 2263 (-54%) |
+| | preprocess | 595 | 313 |
+| | register (`Slam::Update`) | 4222 | 1855 |
+| | map insert | 21 | 17 |
+| | IMU predict (all samples) | 10.3 | 8.9 |
+| rooms (831) | total | 2401 | 1204 (-50%) |
+| | preprocess | 274 | 173 |
+| | register | 2058 | 967 |
+| | map insert | 12.7 | 11.4 |
+| | IMU predict | 7.0 | 6.2 |
+
+### What paid off (living_room_garden, `Slam::Update` split measured with temporary timers)
+
+Baseline: KNN 1.66 s, normal estimation + constraint assembly 1.9 s, LM optimize ~0.43 s (of 4.1 s).
+
+- **P2 + P3 (map layout, KNN, normals): the big win.** Pooled voxel storage, inline mixing hash,
+  home-voxel-first search with voxel lower bounds, allocation-free KNN into a stack array, reusable
+  `NormalEstimator` with a robin_map cache and closed-form 3x3 eigensolver: KNN 1.66 s -> 0.61 s,
+  normals 1.9 s -> 0.92 s. Of that, the closed-form `computeDirect` alone was ~0.12 s (~4.5% of the
+  total); an inline hash by itself changed nothing measurable.
+- **P4 (preprocessing):** one fused range/voxel/intensity pass over reusable tables, deskew rotation
+  increments memoized (bit-identical): preprocess 460 -> 320 ms, and first-seen point order gives the
+  registration better locality (register -60 ms).
+- **P1 (analytical Jacobian, scalar residual): correct, but no speedup.** The optimizer is only ~9% of
+  `Update`; `computeLinearSystem` went from ~445 ms (forward differences) to ~430 ms. Kept because it
+  is exact (verified against central differences in `test_point_distance`) and costs nothing, but it
+  is not why the numbers above improved.
+- **P8 (float `transformCloud`): skipped.** 10.8 M points transform in 10.6 ms (1 ns/point), ~0.4% of
+  the run; not worth changing numerics.
+- P5/P6/P7 (observer only at debug, per-IMU-sample logs at debug, shared increments) are not visible in
+  the offline benchmark (no sink, logging off); they reduce per-sample and per-scan overhead in the
+  live system.
+
+### Final poses (x y z roll pitch yaw)
+
+| | living_room_garden | rooms |
+|---|---|---|
+| baseline | 0.044816669 -0.001382728 0.001677983 -0.003383584 0.002161292 0.485544986 | 0.214577441 0.812122480 -0.100435408 -0.155879427 -0.003174955 0.494384323 |
+| final | 0.044355531 -0.000769243 0.001632269 -0.003418023 0.002223298 0.485509109 | 0.138621122 0.860490889 -0.193924006 -0.215396197 0.018934346 0.519457420 |
+
+living_room_garden moves by 0.8 mm (every intermediate build stays within ~1 mm). **rooms moves by
+~13 cm**, and that is sensitivity, not a regression: seven intermediate builds that differ only in
+floating-point rounding or point ordering (numerical vs analytical Jacobian of the same model, hash
+function, normal solver, downsample order) end between 0.17-0.30 m in x and 0.81-0.98 m in y. The
+rooms recording has no loop closure and an ill-conditioned drift, so any rounding-level change is
+amplified. Use living_room_garden (and `SlamIntegration`) as the correctness gate, and compare rooms
+only between builds that must be bit-identical.
+
+---
+
+## IMU / LiDAR time alignment (2026-11-14)
+
+Three defects in how the IMU and the scans were lined up in time, fixed and measured with
+`bench_slam` (offline, deterministic, `test/integration/mslam.jsonc`). Machine: the dev container
+(aarch64, GCC 16.2, Release, `-mcpu=native`), noisy host. Totals are the minimum of 6 interleaved runs of
+old and new binaries.
+
+### How it is measured
+
+`Slam::registrationStats()` (printed by `bench_slam`) counts the scans registered through the IMU path
+versus the LiDAR-only fallback, and averages the pose increment the **first** registration round applies
+(norm of the se(3) translation / rotation step of the first Levenberg-Marquardt solve): how wrong the
+IMU-predicted prior was. It costs a few additions per scan. Built on the code before any fix it reproduces
+the numbers measured beforehand with throw-away instrumentation: 1119 IMU scans, 12.754 mm / 1.597 mrad
+(living_room_garden); 709 IMU + 112 fallback, 14.970 mm / 3.128 mrad (rooms).
+
+### The fixes
+
+1. **One IMU interval per scan was discarded.** `Slam::Update` (IMU path) cleared the IMU clock, so the
+   first sample after every scan only re-seeded it. Now only the preintegrator restarts at the scan; the
+   clock is re-seeded where the reset is deliberate (start-up, a gap, `ResetImuPreintegration`, the
+   LiDAR-only path). Accurate as described: ~10% of the IMU time was lost (integrated time over
+   living_room_garden: 48.13 s before, 53.7 s after, for the same recording).
+2. **Deskew targeted the scan start.** `deskewInto` now expresses the points in the sensor frame at the
+   scan end, like the other overloads and like the state the scan is combined with. The end rotation is
+   computed per IMU interval first and its inverse is the starting orientation of the point sweep, so the
+   per-point cost is unchanged (living_room_garden preprocess 312.7 ms vs 314.5 ms). Accurate as described.
+3. **IMU samples were grouped with scans by arrival.** New `ImuScanSynchronizer` (used by
+   `SlamPipeline::pushImu` / `processSyncedScan`, so `SlamRunner` and `bench_slam` share it): a scan gets
+   the samples with `timestamp <= t_end`, the state lands exactly on `t_end` through a split sample, a scan
+   is held until the IMU reached `t_end` (live: at most `SlamRunner::kMaxImuWait` = 50 ms, then logged and
+   counted). Accurate as described, with one addition found on rooms: the 112 fallbacks were not all
+   arrival artefacts, 40 of them are scans inside a real 59.5 s hole of the IMU stream in the recording
+   (see below); those still, correctly, register LiDAR-only.
+
+### Results
+
+| | first-round correction | IMU-path / fallback scans | final pose (x y z roll pitch yaw) | total (ms) |
+|---|---|---|---|---|
+| **living_room_garden** before | 12.754 mm / 1.597 mrad | 1119 / 0 | 0.044355531 -0.000769243 0.001632269 -0.003418023 0.002223298 0.485509109 | 2267 |
+| after fixes 1+2 (arrival grouping) | 9.040 mm / 0.700 mrad | 1119 / 0 | 0.044366913 -0.000183768 0.001791816 -0.003345142 0.002097673 0.487693816 | - |
+| after 1+2+3 | 8.917 mm / 0.664 mrad | 1119 / 0 | 0.043557395 -0.000103929 0.001146933 -0.003307221 0.002205761 0.487481382 | 2179 |
+| **rooms** before | 14.970 mm / 3.128 mrad | 709 / 112 | 0.138621122 0.860490889 -0.193924006 -0.215396197 0.018934346 0.519457420 | 1204 |
+| after fixes 1+2 (arrival grouping) | 13.660 mm / 3.055 mrad | 736 / 85 | 0.526204200 1.107554875 -0.137309210 -0.168663286 0.008050113 0.751922227 | - |
+| after 1+2+3 | 6.717 mm / 0.478 mrad | 781 / 40 | -0.015196915 -0.116118631 -0.004362015 0.000604909 0.001008117 -0.031340839 | 1081 |
+
+- living_room_garden ends 0.0436 m from the origin (gate 0.1 m); the in-process 16x integration test
+  gives 0.043 m on 4 runs. Final heading is unchanged to within 2 mrad.
+- Totals: living_room_garden -3.9% (min 2267 -> 2179 ms), rooms -10% (1204 -> 1081 ms). The rooms gain is
+  registration (966 -> 833 ms; the cause was not isolated, a better prior is the likely one); its preprocess rose
+  174 -> 188 ms because deskew now runs on every scan instead of being skipped for the scans that arrived
+  with no IMU sample.
+- rooms has no ground truth: its pose is not a gate. It moved from a ~0.9 m / 0.5 rad offset to near the
+  origin without any tuning, which is consistent with the recording being a loop, but that is not proven.
+- The 40 rooms fallbacks: the recording's IMU stream steps from t = ...685.3 s to ...744.8 s (59.5 s,
+  `IMUGAP` seen while debugging) while scans keep arriving for ~2 s of it. Those scans have no IMU data.
+
+### Consistency probe: rooms final pose vs `reg_iterations`
+
+| `reg_iterations` | before (x y yaw) | after (x y yaw) |
+|---|---|---|
+| 2 | -0.128928890 0.798024612 0.328857488 | -0.015218629 -0.114957373 -0.031438001 |
+| 3 | 0.138621122 0.860490889 0.519457420 | -0.015196915 -0.116118631 -0.031340839 |
+| 4 | 0.351817603 1.041350424 0.597867470 | -0.015319555 -0.115090200 -0.031420421 |
+| spread (max - min) | 0.481 / 0.243 / 0.269 | 0.0001 / 0.0012 / 0.0001 |
+
+The spread across `reg_iterations` shrinks by two to three orders of magnitude. On living_room_garden
+the same sweep stays within 1 mm in x and y both before and after, so nothing is lost there.

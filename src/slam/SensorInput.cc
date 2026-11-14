@@ -26,6 +26,7 @@ SensorInput::SensorInput(std::shared_ptr<msensor::ILidar> lidar,
       queues->scans.push_back(std::move(queued_scan));
       if (queues->scans.size() > k_max_queued_scans) {
         queues->scans.pop_front();
+        ++queues->dropped_scans;
       }
     });
   }
@@ -60,6 +61,11 @@ std::shared_ptr<const Scan> SensorInput::nextScan() {
   auto scan = std::move(queues_->scans.front());
   queues_->scans.pop_front();
   return scan;
+}
+
+std::size_t SensorInput::droppedScans() const {
+  std::lock_guard lock(queues_->mutex);
+  return queues_->dropped_scans;
 }
 
 std::optional<msensor::IMUData> SensorInput::nextImu() {

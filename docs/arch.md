@@ -136,6 +136,7 @@ class SlamService_Service {
 	<<gRPC generated base>>
 	+GetMap(...)
 	+GetMapIncrements(...)
+	+StreamMap(...)
 	+GetTransformedScan(...)
 	+GetCorrespondences(...)
 	+GetPose(...)
@@ -149,6 +150,7 @@ class SlamServer {
 	+stop()
 	+setControl(control)
 	-map_history_ vector~shared_ptr~PointCloud~~
+	-map_epoch_ uint64
 	-control_ ISlamControl*
 	-server_ unique_ptr~grpc::Server~
 }
@@ -228,7 +230,11 @@ last point's time.
 - The server's stream and `GetMap` handlers only read data published through
   `ISlamOutput`, under the server's own mutexes. Published clouds are
   `shared_ptr<const PointCloud>`; the latest map increment and the newest
-  history entry are the same object.
+  history entry are the same object. `StreamMap` gives each client its own
+  cursor `(epoch, offset)` into `map_history_`: the handler thread copies chunk
+  pointers under the mutex (a bounded number at a time) and concatenates and
+  writes outside it, and `reset()` bumps the epoch in O(1) so open streams
+  announce it; see the readme.
 
 ## Offline benchmark
 

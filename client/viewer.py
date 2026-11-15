@@ -15,7 +15,10 @@ from geometry import (
     quaternion_multiply,
     quaternion_rotate_vector,
 )
-from points import intensity_to_colors, to_viser_colors, to_viser_points
+from map_renderer import MapRenderer
+from map_store import MapStore
+from map_stream import ServerTooOldError, StreamEnd, stream_map
+from points import to_viser_points
 
 PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
 if str(PROTO_GEN_DIR) not in sys.path:
@@ -28,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAIN_LOOP_INTERVAL_SEC = 0.1
 RECONNECT_DELAY_SEC = 5.0
+RESYNC_DELAY_SEC = 1.0
 MAP_POINT_SIZE_SCALE = 0.2
 SCAN_POINT_SIZE_SCALE = 0.2
 CORRESPONDENCE_POINT_SIZE_SCALE = 0.2
@@ -46,18 +50,16 @@ class SlamViewerClient:
 
         self._server_addr = server_addr
         self._shutdown_event = threading.Event()
-        self._map_lock = threading.Lock()
         self._viser: Any = viser
-        self._map_point_chunks: list[np.ndarray] = []
-        self._map_color_chunks: list[np.ndarray] = []
+        self._server_too_old_logged = False
         self._viser_server = viser.ViserServer(host="0.0.0.0", port=viser_port)
         self._viser_server.scene.set_background_image(np.zeros((1, 1, 3), dtype=np.uint8))
-        self._cloud = self._viser_server.scene.add_point_cloud(
-            name="/slam/map",
-            points=np.empty((0, 3), dtype=np.float32),
-            colors=np.empty((0, 3), dtype=np.uint8),
+        self._map_store = MapStore()
+        self._map_renderer = MapRenderer(
+            self._map_store,
+            self._viser_server.scene,
             point_size=point_size * MAP_POINT_SIZE_SCALE,
-            point_shape="rounded",
+            atomic=self._viser_server.atomic,
         )
         self._scan_cloud = self._viser_server.scene.add_point_cloud(
             name="/slam/scan",
@@ -116,17 +118,22 @@ class SlamViewerClient:
         def _on_reset(_: Any) -> None:
             try:
                 self._control_stub.Reset(slam_pb2.Empty())
-                self._clear_local_clouds()
+                # The map clears when the stream announces the new epoch (in every viewer, not only this one).
+                self._clear_scan_visuals()
                 logger.info("Sent Reset command")
             except grpc.RpcError as exc:
                 logger.error("Reset RPC failed: %s", exc)
 
     def run(self) -> None:
         map_increment_thread = threading.Thread(target=self._run_stream_map_increments, daemon=True)
+        map_flush_thread = threading.Thread(
+            target=self._map_renderer.run, args=(self._shutdown_event.is_set, self._shutdown_event.wait), daemon=True
+        )
         scan_thread = threading.Thread(target=self._run_stream_transformed_scan, daemon=True)
         correspondence_thread = threading.Thread(target=self._run_stream_correspondences, daemon=True)
         pose_thread = threading.Thread(target=self._run_stream_pose, daemon=True)
         map_increment_thread.start()
+        map_flush_thread.start()
         scan_thread.start()
         correspondence_thread.start()
         pose_thread.start()
@@ -139,6 +146,18 @@ class SlamViewerClient:
             self._shutdown_event.set()
 
     def _log_stream_exception(self, stream_name: str, exc: Exception) -> None:
+        if isinstance(exc, ServerTooOldError):
+            # One clear error; the retry loop keeps trying at the normal interval, quietly.
+            if not self._server_too_old_logged:
+                self._server_too_old_logged = True
+                logger.error(
+                    "The SLAM server at %s does not implement StreamMap: it is too old for this viewer."
+                    " Update the server; retrying every %.1f seconds.",
+                    self._server_addr,
+                    RECONNECT_DELAY_SEC,
+                )
+            return
+
         if isinstance(exc, grpc.RpcError):
             logger.error(
                 "SLAM %s stream error: %s - %s",
@@ -150,15 +169,9 @@ class SlamViewerClient:
 
         logger.exception("SLAM %s stream crashed", stream_name)
 
-    def _clear_local_clouds(self) -> None:
+    def _clear_scan_visuals(self) -> None:
         empty_points = np.empty((0, 3), dtype=np.float32)
         empty_colors = np.empty((0, 3), dtype=np.uint8)
-
-        with self._map_lock:
-            self._map_point_chunks.clear()
-            self._map_color_chunks.clear()
-        self._cloud.points = empty_points
-        self._cloud.colors = empty_colors
 
         self._scan_cloud.points = empty_points
         self._scan_cloud.colors = empty_colors
@@ -202,23 +215,18 @@ class SlamViewerClient:
         self._run_stream("pose", self._stream_pose)
 
     def _stream_map_increments(self) -> None:
-        request = slam_pb2.Empty()
-
         with grpc.insecure_channel(self._server_addr) as channel:
             stub = slam_pb2_grpc.SlamServiceStub(channel)
-
-            # Fetch full snapshot first — only clear local clouds once we know
-            # the server is back, so the visualization stays intact while disconnected.
-            logger.info("Fetching initial SLAM map snapshot from %s", self._server_addr)
-            map_snapshot = stub.GetMap(request)
-            self._clear_local_clouds()
-            self._set_map_cloud(map_snapshot)
-
-            logger.info("Streaming map increments from %s", self._server_addr)
-            for increment in stub.GetMapIncrements(request):
-                if self._shutdown_event.is_set():
-                    break
-                self._append_map_increment(increment)
+            # The local map stays on screen while disconnected; the request resumes from the stored position and
+            # the map only clears if the server announces another epoch.
+            end = stream_map(
+                stub,
+                self._map_store,
+                on_change=lambda change: self._map_renderer.notify() if change.changed else None,
+                should_stop=self._shutdown_event.is_set,
+            )
+        if end is StreamEnd.RESYNC:
+            self._shutdown_event.wait(timeout=RESYNC_DELAY_SEC)
 
     def _stream_transformed_scan(self) -> None:
         request = slam_pb2.Empty()
@@ -259,51 +267,17 @@ class SlamViewerClient:
                     break
                 self._update_pose(pose)
 
-    def _set_map_cloud(self, map_snapshot: lidar_pb2.PointCloud3) -> None:
-        points = to_viser_points(map_snapshot)
-        colors = intensity_to_colors(map_snapshot, len(points))
-        if colors is None:
-            colors = to_viser_colors(points)
-
-        with self._map_lock:
-            self._map_point_chunks = [points]
-            self._map_color_chunks = [colors]
-
-        self._cloud.points = points
-        self._cloud.colors = colors
-        logger.info("Rendered initial map snapshot with %d points", len(points))
-
-    def _append_map_increment(self, increment: lidar_pb2.PointCloud3) -> None:
-        points = to_viser_points(increment)
-        colors = intensity_to_colors(increment, len(points))
-        if colors is None:
-            colors = to_viser_colors(points)
-
-        with self._map_lock:
-            self._map_point_chunks.append(points)
-            self._map_color_chunks.append(colors)
-            map_points = np.concatenate(self._map_point_chunks, axis=0)
-            map_colors = np.concatenate(self._map_color_chunks, axis=0)
-
-        self._cloud.points = map_points
-        self._cloud.colors = map_colors
-        logger.info(
-            "Appended %d map increment points; map now has %d points",
-            len(points),
-            len(map_points),
-        )
-
     def _update_scan_cloud(self, scan_snapshot: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(scan_snapshot)
         self._scan_cloud.points = points
         self._scan_cloud.colors = np.tile(SCAN_COLOR, (len(points), 1))
-        logger.info("Rendered transformed scan with %d points", len(points))
+        logger.debug("Rendered transformed scan with %d points", len(points))
 
     def _update_correspondence_cloud(self, correspondences: lidar_pb2.PointCloud3) -> None:
         points = to_viser_points(correspondences)
         self._correspondence_cloud.points = points
         self._correspondence_cloud.colors = np.tile(CORRESPONDENCE_COLOR, (len(points), 1))
-        logger.info("Rendered correspondence snapshot with %d points", len(points))
+        logger.debug("Rendered correspondence snapshot with %d points", len(points))
 
     def _update_pose(self, pose: slam_pb2.Pose3D) -> None:
         position = np.array([pose.x, pose.y, pose.z], dtype=np.float32)

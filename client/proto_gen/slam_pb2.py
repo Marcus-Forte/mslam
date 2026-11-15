@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 import lidar_pb2 as lidar__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nslam.proto\x12\x07sensors\x1a\x0blidar.proto\"\x07\n\x05\x45mpty\"T\n\x06Pose3D\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\x12\x0b\n\x03phi\x18\x04 \x01(\x01\x12\r\n\x05omega\x18\x05 \x01(\x01\x12\r\n\x05theta\x18\x06 \x01(\x01\x32\x9d\x03\n\x0bSlamService\x12.\n\x06GetMap\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud3\x12:\n\x10GetMapIncrements\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetTransformedScan\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetCorrespondences\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12,\n\x07GetPose\x12\x0e.sensors.Empty\x1a\x0f.sensors.Pose3D0\x01\x12&\n\x04Stop\x12\x0e.sensors.Empty\x1a\x0e.sensors.Empty\x12\'\n\x05Start\x12\x0e.sensors.Empty\x1a\x0e.sensors.Empty\x12\'\n\x05Reset\x12\x0e.sensors.Empty\x1a\x0e.sensors.Emptyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nslam.proto\x12\x07sensors\x1a\x0blidar.proto\"\x07\n\x05\x45mpty\"T\n\x06Pose3D\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\x12\x0b\n\x03phi\x18\x04 \x01(\x01\x12\r\n\x05omega\x18\x05 \x01(\x01\x12\r\n\x05theta\x18\x06 \x01(\x01\"U\n\x10MapStreamRequest\x12\r\n\x05\x65poch\x18\x01 \x01(\x04\x12\x14\n\x0cstart_offset\x18\x02 \x01(\x04\x12\x1c\n\x14max_points_per_chunk\x18\x03 \x01(\r\"p\n\x0eMapStreamChunk\x12\r\n\x05\x65poch\x18\x01 \x01(\x04\x12\x14\n\x0c\x66irst_offset\x18\x02 \x01(\x04\x12\x13\n\x0bnext_offset\x18\x03 \x01(\x04\x12$\n\x06points\x18\x04 \x01(\x0b\x32\x14.sensors.PointCloud32\xe0\x03\n\x0bSlamService\x12.\n\x06GetMap\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud3\x12:\n\x10GetMapIncrements\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12\x41\n\tStreamMap\x12\x19.sensors.MapStreamRequest\x1a\x17.sensors.MapStreamChunk0\x01\x12<\n\x12GetTransformedScan\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12<\n\x12GetCorrespondences\x12\x0e.sensors.Empty\x1a\x14.sensors.PointCloud30\x01\x12,\n\x07GetPose\x12\x0e.sensors.Empty\x1a\x0f.sensors.Pose3D0\x01\x12&\n\x04Stop\x12\x0e.sensors.Empty\x1a\x0e.sensors.Empty\x12\'\n\x05Start\x12\x0e.sensors.Empty\x1a\x0e.sensors.Empty\x12\'\n\x05Reset\x12\x0e.sensors.Empty\x1a\x0e.sensors.Emptyb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,6 +36,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EMPTY']._serialized_end=43
   _globals['_POSE3D']._serialized_start=45
   _globals['_POSE3D']._serialized_end=129
-  _globals['_SLAMSERVICE']._serialized_start=132
-  _globals['_SLAMSERVICE']._serialized_end=545
+  _globals['_MAPSTREAMREQUEST']._serialized_start=131
+  _globals['_MAPSTREAMREQUEST']._serialized_end=216
+  _globals['_MAPSTREAMCHUNK']._serialized_start=218
+  _globals['_MAPSTREAMCHUNK']._serialized_end=330
+  _globals['_SLAMSERVICE']._serialized_start=333
+  _globals['_SLAMSERVICE']._serialized_end=813
 # @@protoc_insertion_point(module_scope)

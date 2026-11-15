@@ -2,8 +2,10 @@
 
 #include "mslam/slam/Conversion.hh"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <random>
 #include <stdexcept>
 
 namespace {
@@ -26,6 +28,23 @@ struct PoseSnapshot {
   uint64_t version = 0;
 };
 
+// StreamMap limits. The cap keeps a chunk (16 bytes per point) well under
+// gRPC's default 4 MiB client limit.
+constexpr uint32_t g_default_points_per_chunk = 65536;
+constexpr uint32_t g_max_points_per_chunk = 200000;
+// Chunk pointers a stream copies per lock acquisition, so the lock hold time
+// does not grow with the backlog.
+constexpr size_t g_max_pointers_per_lock = 1024;
+
+// Non-zero and different between processes.
+uint64_t initialEpoch() {
+  std::random_device device;
+  uint64_t epoch = (static_cast<uint64_t>(device()) << 32) ^ device();
+  epoch ^= static_cast<uint64_t>(
+      std::chrono::system_clock::now().time_since_epoch().count());
+  return epoch == 0 ? 1 : epoch;
+}
+
 } // namespace
 
 namespace mslam {
@@ -34,7 +53,7 @@ SlamServer::SlamServer(std::shared_ptr<spdlog::logger> logger,
                        std::string address)
     : logger_(std::move(logger)),
       address_(address.empty() ? g_default_slam_server_address : address),
-      pose_(Pose3D::Zero()) {}
+      map_epoch_(initialEpoch()), pose_(Pose3D::Zero()) {}
 
 SlamServer::~SlamServer() { stop(); }
 
@@ -109,7 +128,13 @@ void SlamServer::reset() {
     std::scoped_lock lock(map_increment_mutex_);
     map_increment_.reset();
     map_history_.clear();
+    // O(1): open StreamMap streams see the new epoch the next time they wake.
+    if (++map_epoch_ == 0) {
+      map_epoch_ = 1;
+    }
+    ++map_increment_version_;
   }
+  map_increment_cv_.notify_all();
   // Pose version bumps come from updatePose(); the transformed scan and
   // correspondences are replaced by the next scan.
 }
@@ -123,10 +148,29 @@ void SlamServer::updateCorrespondences(const PointCloud &correspondences) {
 
 grpc::Status SlamServer::GetMap(grpc::ServerContext *, const sensors::Empty *,
                                 sensors::PointCloud3 *response) {
+  // Copy the pointer list in bounded slices so the SLAM thread never waits
+  // long on the mutex; start over if a reset intervenes.
   std::vector<std::shared_ptr<const PointCloud>> history;
-  {
-    std::scoped_lock lock(map_increment_mutex_);
-    history = map_history_;
+  for (;;) {
+    history.clear();
+    uint64_t epoch = 0;
+    bool complete = false;
+    while (!complete) {
+      std::scoped_lock lock(map_increment_mutex_);
+      if (history.empty()) {
+        epoch = map_epoch_;
+      } else if (epoch != map_epoch_) {
+        break;
+      }
+      const auto end = std::min(map_history_.size(),
+                                history.size() + g_max_pointers_per_lock);
+      history.insert(history.end(), map_history_.begin() + history.size(),
+                     map_history_.begin() + end);
+      complete = end == map_history_.size();
+    }
+    if (complete) {
+      break;
+    }
   }
 
   size_t total_points = 0;
@@ -141,6 +185,117 @@ grpc::Status SlamServer::GetMap(grpc::ServerContext *, const sensors::Empty *,
   }
 
   *response = toGRPC(full_map);
+  return grpc::Status::OK;
+}
+
+grpc::Status
+SlamServer::StreamMap(grpc::ServerContext *context,
+                      const sensors::MapStreamRequest *request,
+                      grpc::ServerWriter<sensors::MapStreamChunk> *writer) {
+  size_t max_points = request->max_points_per_chunk();
+  if (max_points == 0) {
+    max_points = g_default_points_per_chunk;
+  }
+  max_points = std::min<size_t>(max_points, g_max_points_per_chunk);
+
+  // The stream's cursor: `offset` is the first increment not yet sent, and
+  // `pending` holds the increments [offset, offset + pending.size()) already
+  // copied out of the history (pointers only).
+  uint64_t epoch = 0;
+  uint64_t offset = 0;
+  std::vector<std::shared_ptr<const PointCloud>> pending;
+
+  auto write_empty = [&]() {
+    sensors::MapStreamChunk chunk;
+    chunk.set_epoch(epoch);
+    chunk.set_first_offset(offset);
+    chunk.set_next_offset(offset);
+    return writer->Write(chunk);
+  };
+
+  {
+    std::scoped_lock lock(map_increment_mutex_);
+    epoch = map_epoch_;
+    if (request->epoch() == epoch) {
+      offset = std::min<uint64_t>(request->start_offset(), map_history_.size());
+    }
+  }
+  if (!write_empty()) {
+    return grpc::Status::OK;
+  }
+
+  while (!context->IsCancelled() && !stopping_.load()) {
+    bool reset_seen = false;
+    {
+      std::unique_lock lock(map_increment_mutex_);
+      auto available = [&]() {
+        return offset + pending.size() < map_history_.size();
+      };
+      map_increment_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+        return stopping_.load() || map_epoch_ != epoch || !pending.empty() ||
+               available();
+      });
+      if (stopping_.load()) {
+        break;
+      }
+      if (map_epoch_ != epoch) {
+        epoch = map_epoch_;
+        offset = 0;
+        pending.clear();
+        reset_seen = true;
+      } else {
+        // Top up the local queue, at most g_max_pointers_per_lock pointers
+        // per acquisition.
+        const size_t next = offset + pending.size();
+        const size_t count =
+            std::min(map_history_.size() - std::min(next, map_history_.size()),
+                     g_max_pointers_per_lock -
+                         std::min(pending.size(), g_max_pointers_per_lock));
+        pending.insert(pending.end(), map_history_.begin() + next,
+                       map_history_.begin() + next + count);
+      }
+    }
+    if (reset_seen) {
+      // Announce the new epoch at once, before any of its data.
+      if (!write_empty()) {
+        break;
+      }
+      continue;
+    }
+    if (pending.empty()) {
+      continue;
+    }
+
+    // Concatenate whole increments up to the bound (an oversized one goes
+    // alone). Empty increments are absorbed into the range.
+    PointCloud points;
+    const uint64_t first_offset = offset;
+    size_t consumed = 0;
+    while (consumed < pending.size()) {
+      const auto &increment = *pending[consumed];
+      if (!points.empty() && points.size() + increment.size() > max_points) {
+        break;
+      }
+      points.insert(points.end(), increment.begin(), increment.end());
+      ++consumed;
+    }
+    pending.erase(pending.begin(),
+                  pending.begin() + static_cast<std::ptrdiff_t>(consumed));
+    offset += consumed;
+    if (points.empty()) {
+      continue; // only empty increments: the offset advanced, nothing to send
+    }
+
+    sensors::MapStreamChunk chunk;
+    chunk.set_epoch(epoch);
+    chunk.set_first_offset(first_offset);
+    chunk.set_next_offset(offset);
+    *chunk.mutable_points() = toGRPC(points);
+    if (!writer->Write(chunk)) {
+      break;
+    }
+  }
+
   return grpc::Status::OK;
 }
 

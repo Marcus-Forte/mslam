@@ -11,6 +11,7 @@
 #include <mutex>
 #include <spdlog/logger.h>
 #include <string>
+#include <vector>
 
 namespace mslam {
 
@@ -37,7 +38,8 @@ public:
   void updatePose(const Pose3D &pose) override;
   void updateMapIncrement(PointCloud increment) override;
   void updateTransformedScan(PointCloud scan) override;
-  /// Drops the accumulated map history and the latest increment.
+  /// Drops the accumulated map history and the latest increment, and starts a
+  /// new map epoch (open StreamMap streams announce it).
   void reset() override;
 
   void updateCorrespondences(const PointCloud &correspondences);
@@ -49,6 +51,11 @@ private:
   grpc::Status
   GetMapIncrements(grpc::ServerContext *context, const sensors::Empty *,
                    grpc::ServerWriter<sensors::PointCloud3> *writer) override;
+
+  grpc::Status
+  StreamMap(grpc::ServerContext *context,
+            const sensors::MapStreamRequest *request,
+            grpc::ServerWriter<sensors::MapStreamChunk> *writer) override;
 
   grpc::Status
   GetTransformedScan(grpc::ServerContext *context, const sensors::Empty *,
@@ -92,7 +99,12 @@ private:
   // Full map history for GetMap. The SLAM registration map is bounded, so the
   // client-facing snapshot is accumulated here from the published increments
   // (pointers only, to keep the SLAM thread's cost O(1)).
+  // The index in this vector is the increment's offset in StreamMap; offsets
+  // restart at 0 in each epoch.
   std::vector<std::shared_ptr<const PointCloud>> map_history_;
+  // Generation of map_history_ (guarded by map_increment_mutex_). Never 0,
+  // seeded randomly per process, incremented by reset().
+  uint64_t map_epoch_;
   std::shared_ptr<const PointCloud> transformed_scan_;
   PointCloud correspondences_;
   uint64_t scan_version_ = 0;

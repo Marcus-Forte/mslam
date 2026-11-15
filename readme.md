@@ -200,3 +200,39 @@ default run, without the option, is unchanged.
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 1 --save-map map.ply
 ```
 
+## Map stream (`StreamMap`)
+
+`SlamService.StreamMap` (`grpc/slam.proto`) streams the map as it grows, with a
+per-stream cursor like a Kafka offset. `GetMap` and `GetMapIncrements` still
+exist but are deprecated: `GetMap` sends the whole map in one message (over
+gRPC's default 4 MiB client limit at about 300,000 points) and
+`GetMapIncrements` skips increments that arrive while it is sending.
+
+- An **offset** is an index into the history of map increments (one per
+  processed scan), not a point count. Offsets start at 0 in each **epoch**.
+- A `MapStreamChunk` carries the increments `[first_offset, next_offset)`, in
+  order, and the `epoch` they belong to. Every stream sends each increment from
+  its cursor on, in order, with no gap and no duplicate, however slow the
+  client is; a slow client lags without losing data or affecting other streams
+  or the SLAM thread.
+- Consecutive increments are concatenated into one chunk of up to
+  `max_points_per_chunk` points (0: server default 65,536; values above 200,000
+  are lowered to 200,000). An increment larger than the bound is sent alone.
+  Increments without points are not sent on their own but still advance the
+  offsets, so a chunk's range may cover more increments than it carries points
+  for; trailing empty increments are reported by the next chunk.
+- The first message of every stream is sent at once: an empty chunk
+  (`first_offset == next_offset ==` the stream's start) with the current epoch.
+- **Resume**: send the `epoch` and the last `next_offset` you applied. If the
+  epoch is the server's current one the stream continues from that offset (an
+  offset past the end is clamped to the end); otherwise `start_offset` is
+  ignored and the stream starts at 0. Epochs are never 0, differ between server
+  processes and change on every SLAM reset.
+- **Reset**: every open stream announces it at once with an empty chunk carrying
+  the new epoch and offsets 0, then continues from 0. A client that sees a chunk
+  with an epoch other than the one it holds discards its local map.
+
+On the server each stream has its own handler thread that copies chunk pointers
+(at most 1024 per lock acquisition) out of `map_history_`, then concatenates,
+converts and writes without holding the lock. The SLAM thread's calls stay O(1)
+and never wait on a client.

@@ -45,6 +45,11 @@ class SlamServiceStub(object):
                 request_serializer=slam__pb2.Empty.SerializeToString,
                 response_deserializer=lidar__pb2.PointCloud3.FromString,
                 _registered_method=True)
+        self.StreamMap = channel.unary_stream(
+                '/sensors.SlamService/StreamMap',
+                request_serializer=slam__pb2.MapStreamRequest.SerializeToString,
+                response_deserializer=slam__pb2.MapStreamChunk.FromString,
+                _registered_method=True)
         self.GetTransformedScan = channel.unary_stream(
                 '/sensors.SlamService/GetTransformedScan',
                 request_serializer=slam__pb2.Empty.SerializeToString,
@@ -81,13 +86,23 @@ class SlamServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def GetMap(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Deprecated: use StreamMap. Joins the whole map into one message.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetMapIncrements(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Deprecated: use StreamMap. Streams only the latest increment, so it
+        skips increments that arrive while a message is being sent.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamMap(self, request, context):
+        """Cursor-based map stream: every increment from the cursor on, in order.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -140,6 +155,11 @@ def add_SlamServiceServicer_to_server(servicer, server):
                     servicer.GetMapIncrements,
                     request_deserializer=slam__pb2.Empty.FromString,
                     response_serializer=lidar__pb2.PointCloud3.SerializeToString,
+            ),
+            'StreamMap': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamMap,
+                    request_deserializer=slam__pb2.MapStreamRequest.FromString,
+                    response_serializer=slam__pb2.MapStreamChunk.SerializeToString,
             ),
             'GetTransformedScan': grpc.unary_stream_rpc_method_handler(
                     servicer.GetTransformedScan,
@@ -226,6 +246,33 @@ class SlamService(object):
             '/sensors.SlamService/GetMapIncrements',
             slam__pb2.Empty.SerializeToString,
             lidar__pb2.PointCloud3.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamMap(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/sensors.SlamService/StreamMap',
+            slam__pb2.MapStreamRequest.SerializeToString,
+            slam__pb2.MapStreamChunk.FromString,
             options,
             channel_credentials,
             insecure,

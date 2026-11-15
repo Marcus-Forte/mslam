@@ -56,11 +56,12 @@ Estimator:
 - `SlamState` stores Euler angles (singular at ±90° pitch) and converts to and from a rotation matrix on every IMU sample.
 - A scan is inserted into the map even when registration found no correspondences. There is no robust loss and no planarity check on the normals.
 - LiDAR residuals have unit weight, the IMU factor is scaled by a hard-coded 0.01 (`kImuWeight`), and the IMU noise parameters are not in the config.
-- The pose is published per IMU sample although samples are processed in a burst per scan, and `SlamServer::map_history_` grows without bound.
-- Not verified anywhere: a live sensor run, the `pi5` preset, the streaming RPCs (`GetMapIncrements`, `GetTransformedScan`), and the 50 ms IMU wait with an absent IMU stream outside unit tests.
+- The pose is published per IMU sample although samples are processed in a burst per scan, and `SlamServer::map_history_` grows without bound (`StreamMap` offsets are indexes into it, so any bounding or compaction must keep the epoch/offset contract: bump the epoch or keep offsets absolute).
+- Not verified anywhere: a live sensor run, the `pi5` preset, the streaming RPCs (`GetTransformedScan`; `StreamMap` and `GetMap` are covered by `test_slam_server` with a real stub, `GetMapIncrements` is not), and the 50 ms IMU wait with an absent IMU stream outside unit tests.
 
 ## Repo layout gotchas
 - mslam targets are compiled with `MSENSOR_NO_LEGACY_NAMES` (set in the top-level `CMakeLists.txt` after the msensor subdirectory), so use the namespaced `msensor::` names; the legacy global aliases are not available.
 - `third_party/` are submodules (`moptim` optimizer, `msensor` sensors/recorder, `robin-map`); `msensor` is maintained in-house (its recording/playback and gRPC code is fair game), `moptim`/`robin-map` are external. Submodules show as modified in git status.
+- `SlamServer` map RPCs: `StreamMap` is the cursor-based stream (contract in `grpc/slam.proto` and the readme: `(epoch, offset)`, first message an empty epoch chunk, reset announced at once). `GetMap` / `GetMapIncrements` are deprecated but unchanged. Each `StreamMap` handler copies at most 1024 chunk pointers out of `map_history_` per `map_increment_mutex_` acquisition and never holds it while concatenating or writing; keep the SLAM-thread calls (`updateMapIncrement`, `reset`, ...) O(1). `reset()` bumps `map_epoch_` (non-zero, randomly seeded per process). Its tests build a real server on a unix socket (`RunningServer` in `test_slam_server.cc`).
 - `client/` is a Python viewer (uv, `proto_gen/` generated from `grpc/slam.proto`); `viewer/` is a TypeScript browser PLY viewer (`npm run dev`).
 - Docker builds: `deployment/Dockerfile` (SLAM), `deployment/DockerfileViewer`.

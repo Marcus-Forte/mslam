@@ -16,9 +16,35 @@ message Pose3D {
 	double theta = 6;
 }
 
+message MapStreamRequest {
+	// Resume position from an earlier stream. Leave both at 0 to start from the
+	// beginning. If `epoch` is not the server's current epoch, `start_offset`
+	// is ignored and the stream starts at offset 0.
+	uint64 epoch = 1;
+	uint64 start_offset = 2;
+	// Upper bound on points per chunk. 0 selects the server default.
+	uint32 max_points_per_chunk = 3;
+}
+
+message MapStreamChunk {
+	// Identifies one generation of the map. It changes on every SLAM reset and
+	// differs between server processes. Never 0.
+	uint64 epoch = 1;
+	// The chunk holds the increments [first_offset, next_offset), in order.
+	uint64 first_offset = 2;
+	// Offset to resume from once this chunk has been applied.
+	uint64 next_offset = 3;
+	PointCloud3 points = 4;
+}
+
 service SlamService {
+	// Deprecated: use StreamMap. Joins the whole map into one message.
 	rpc GetMap(Empty) returns (PointCloud3);
+	// Deprecated: use StreamMap. Streams only the latest increment, so it
+	// skips increments that arrive while a message is being sent.
 	rpc GetMapIncrements(Empty) returns (stream PointCloud3);
+	// Cursor-based map stream: every increment from the cursor on, in order.
+	rpc StreamMap(MapStreamRequest) returns (stream MapStreamChunk);
 	rpc GetTransformedScan(Empty) returns (stream PointCloud3);
 	rpc GetCorrespondences(Empty) returns (stream PointCloud3);
 	rpc GetPose(Empty) returns (stream Pose3D);

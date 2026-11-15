@@ -12,6 +12,7 @@
 #include "sensors_remote_client.hh"
 #include <atomic>
 #include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <getopt.h>
 #include <iostream>
@@ -19,6 +20,13 @@
 #include <stdexcept>
 
 namespace {
+
+// Queue depths requested from a remote sensor server (msensor's
+// `max_queued_samples`). The IMU depth matches SensorInput's own IMU buffer, so
+// the server never drops what mslam would keep. SensorInput keeps only the
+// newest scan, so a deeper scan queue would be discarded on arrival.
+constexpr uint32_t k_remote_imu_queue = 1000;
+constexpr uint32_t k_remote_scan_queue = 1;
 
 // Set from the signal handler, polled by the SLAM loop.
 std::atomic<bool> g_stop_requested{false};
@@ -125,8 +133,10 @@ int main(int argc, char **argv) {
                  mid360_config_path.string());
 
   } else {
-    auto remote =
-        std::make_shared<msensor::SensorsRemoteClient>(config.remote_scanner);
+    auto remote = std::make_shared<msensor::SensorsRemoteClient>(
+        config.remote_scanner,
+        msensor::RemoteClientOptions{.scan_queue_size = k_remote_scan_queue,
+                                     .imu_queue_size = k_remote_imu_queue});
     remote->init();
     remote->start();
     lidar_sensor = remote;

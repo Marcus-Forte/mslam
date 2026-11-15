@@ -21,6 +21,7 @@ Layering: `Slam` (estimator, no I/O) <- `SlamPipeline` (per-scan sequence, publi
 - The sensor source is chosen by `remote_scanner` in the config: `"local"` uses the on-board Mid360, any other value is a `host:port` of a sensor server.
 - Replay a recording as a separate sensor server, then point `mslam` at it:
   `build/gcc/playback_publisher -f <file>.pbscan [-s <speed>] [-p <port>] [--autoplay]` (`speed` 1.0 = real time, 0 = max; default port 50051), and in another terminal `build/gcc/mslam -c config/mslam.jsonc` with `remote_scanner` set to the server. The recordings are in `test/data/` (see "Recordings and correctness gates").
+- In remote mode `src/main.cc` requests an IMU queue of 1000 (= `k_max_queued_imus` in `SensorInput.cc`) and a scan queue of 1 (= `k_max_queued_scans`) through `msensor::RemoteClientOptions`; keep them in step with `SensorInput`.
 - Root `*.ply` / `*_out.pbscan` files are generated outputs.
 - There is no `regression` skill in this repo or the workspace (checked 2026-11-14). The regression check is `bench_slam` on both recordings plus the integration test, as described below.
 

@@ -16,7 +16,10 @@ At a high level:
   sensors (`SensorInput`) and feeds the pipeline. It implements `ISlamControl`;
   start / stop / reset requests may come from any thread and are applied by the
   loop thread between two scans. Stopping is a flag passed to `run()`;
-  `src/main.cc` owns the signal handlers.
+  `src/main.cc` owns the signal handlers. In remote mode `src/main.cc` asks the
+  sensor server for an IMU queue of 1000 (the depth of `SensorInput`'s IMU
+  buffer; about 5 s at 200 Hz, so a link stall shorter than that costs no IMU
+  sample) and a scan queue of 1 (`SensorInput` keeps only the newest scan).
 - `SlamServer` implements `ISlamOutput` (the pipeline publishes pose, scan and
   map increment to it) and forwards the `Start` / `Stop` / `Reset` RPCs to an
   `ISlamControl`. Neither the pipeline nor the runner depend on the server.

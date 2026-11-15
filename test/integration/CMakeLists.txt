@@ -1,5 +1,5 @@
 # End-to-end integration tests: replay a recorded .pbscan through the full SLAM
-# pipeline. They are slow, so they are opt-in:
+# pipeline. They need the untracked recordings, so they are opt-in:
 #
 #   cmake --preset gcc -DMSLAM_INTEGRATION_TESTS=ON
 #   cmake --build --preset build-gcc
@@ -25,10 +25,11 @@ target_link_libraries(test_slam_integration
 target_compile_definitions(test_slam_integration
   PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
+# One CTest entry for the whole binary: its tests share the two replays of the
+# recording (SetUpTestSuite), which one process per test would repeat.
 if(MSLAM_INTEGRATION_TESTS)
-  gtest_discover_tests(test_slam_integration
-    PROPERTIES
-      LABELS integration)
+  add_test(NAME SlamIntegration COMMAND test_slam_integration)
+  set_tests_properties(SlamIntegration PROPERTIES LABELS integration)
 endif()
 
 # Build and run directly, without going through CTest.

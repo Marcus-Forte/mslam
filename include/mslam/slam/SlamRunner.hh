@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mslam/config/IConfig.hh"
+#include "mslam/slam/SensorInput.hh"
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
 
@@ -14,6 +15,18 @@
 #include <spdlog/logger.h>
 
 namespace mslam {
+
+/// How the loop takes its input. The defaults are the live behaviour.
+struct SlamRunnerOptions {
+  /// How long a scan waits for the IMU samples up to its end; see
+  /// SlamRunner::kMaxImuWait, the default.
+  std::chrono::milliseconds max_imu_wait{50};
+  /// Queue depths and overflow policy of the sensor input. With
+  /// SensorOverflow::Block and a long max_imu_wait the loop loses nothing and
+  /// takes no decision on the wall clock, so replaying a recording gives the
+  /// same result on every run (the integration test relies on it).
+  SensorInputOptions input;
+};
 
 /**
  * @brief The live SLAM loop: pulls scans and IMU samples from the sensors and
@@ -37,19 +50,19 @@ namespace mslam {
 class SlamRunner : public ISlamControl {
 public:
   /// How long a scan waits for the IMU samples up to its end before it is
-  /// processed with what has arrived. The data: scans are 100 ms apart (20000
-  /// points at 200 kpts/s), the IMU delivers every 5 ms, and the in-process
-  /// 16x replay of the integration test delivers a scan's last IMU sample
-  /// within a few milliseconds of wall time. Half a scan period is ten IMU
-  /// periods of slack, and keeps the loop ahead of the sensors (the scan queue
-  /// holds one scan), so a stalled or absent IMU stream delays each scan by
-  /// this much at worst, but never blocks it.
+  /// processed with what has arrived (the default of
+  /// SlamRunnerOptions::max_imu_wait). The data: scans are 100 ms apart (20000
+  /// points at 200 kpts/s) and the IMU delivers every 5 ms. Half a scan period
+  /// is ten IMU periods of slack, and keeps the loop ahead of the sensors (the
+  /// scan queue holds one scan), so a stalled or absent IMU stream delays each
+  /// scan by this much at worst, but never blocks it.
   static constexpr std::chrono::milliseconds kMaxImuWait{50};
 
   SlamRunner(SlamPipeline &pipeline, std::shared_ptr<msensor::ILidar> lidar,
              std::shared_ptr<msensor::IImu> imu,
              const SlamConfiguration &config,
-             std::shared_ptr<spdlog::logger> logger);
+             std::shared_ptr<spdlog::logger> logger,
+             SlamRunnerOptions options = {});
 
   /// Runs until @p stop_requested becomes true. May be called from a signal
   /// handler's flag: only an atomic load is done on it.
@@ -60,8 +73,11 @@ public:
   void requestReset() override;
   bool isRunning() const { return running_.load(); }
 
-  /// Scans released after kMaxImuWait without their IMU window complete.
+  /// Scans released after the IMU wait without their IMU window complete.
   std::size_t imuWaitTimeouts() const { return imu_wait_timeouts_.load(); }
+
+  /// Scans the sensor input replaced before the loop took them, so far.
+  std::size_t droppedScans() const { return dropped_scans_.load(); }
 
 private:
   /// Applies a pending reset request, returns whether there was one. Called by
@@ -74,9 +90,11 @@ private:
   bool with_imu_;
   bool with_lidar_;
   std::shared_ptr<spdlog::logger> logger_;
+  SlamRunnerOptions options_;
   std::atomic<bool> running_{true};
   std::atomic<bool> reset_requested_{false};
   std::atomic<std::size_t> imu_wait_timeouts_{0};
+  std::atomic<std::size_t> dropped_scans_{0};
 };
 
 } // namespace mslam

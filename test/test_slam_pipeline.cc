@@ -539,4 +539,110 @@ TEST(SensorInput, CountsScansReplacedInTheQueue) {
   EXPECT_EQ(input.nextScan(), nullptr);
 }
 
+// With SensorOverflow::Block a full queue holds the sensor's thread back
+// instead of replacing a scan: nothing is dropped and every scan comes out in
+// order.
+TEST(SensorInput, BlockingInputHoldsTheSourceBackAndDropsNothing) {
+  auto sensors = std::make_shared<FakeSensors>();
+  mslam::SensorInput input(sensors, sensors, true, true,
+                           {.overflow = mslam::SensorOverflow::Block});
+
+  constexpr std::uint32_t kScans = 50;
+  std::atomic<std::uint32_t> pushed{0};
+  std::thread source([&] {
+    for (std::uint32_t i = 0; i < kScans; ++i) {
+      sensors->pushScan(timedRoomScan(i));
+      pushed.store(i + 1);
+    }
+  });
+
+  // The queue holds one scan, so the source gets one scan in and then waits in
+  // its second push: it cannot run ahead of the consumer.
+  while (pushed.load() < 1) {
+    std::this_thread::sleep_for(1ms);
+  }
+  std::this_thread::sleep_for(20ms);
+  EXPECT_EQ(pushed.load(), 1U);
+
+  for (std::uint32_t expected = 0; expected < kScans;) {
+    if (const auto scan = input.nextScan()) {
+      ASSERT_EQ(scan->header.sequence_number, expected);
+      ++expected;
+    } else {
+      std::this_thread::yield();
+    }
+  }
+  source.join();
+  EXPECT_EQ(input.droppedScans(), 0U);
+  EXPECT_EQ(input.nextScan(), nullptr);
+}
+
+// The IMU queue blocks the same way at its own depth.
+TEST(SensorInput, BlockingInputHoldsImuSamplesToo) {
+  auto sensors = std::make_shared<FakeSensors>();
+  mslam::SensorInput input(
+      sensors, sensors, true, true,
+      {.max_queued_imus = 4, .overflow = mslam::SensorOverflow::Block});
+
+  constexpr std::uint64_t kSamples = 40;
+  std::thread source([&] {
+    for (std::uint64_t i = 0; i < kSamples; ++i) {
+      sensors->pushImu(stationaryImu(kScanBaseNs + i));
+    }
+  });
+
+  for (std::uint64_t expected = 0; expected < kSamples;) {
+    if (const auto imu = input.nextImu()) {
+      ASSERT_EQ(imu->header.timestamp, kScanBaseNs + expected);
+      ++expected;
+    } else {
+      std::this_thread::yield();
+    }
+  }
+  source.join();
+  EXPECT_FALSE(input.nextImu().has_value());
+}
+
+// Destroying the input releases a source that is waiting for room, so a
+// blocked recording never deadlocks shutdown.
+TEST(SensorInput, DestructionReleasesABlockedSource) {
+  auto sensors = std::make_shared<FakeSensors>();
+  auto input = std::make_unique<mslam::SensorInput>(
+      sensors, sensors, true, true,
+      mslam::SensorInputOptions{.overflow = mslam::SensorOverflow::Block});
+
+  std::atomic<int> returned{0};
+  // FakeSensors holds its mutex while it calls back, like msensor's
+  // CallbackSlot: the destructor's unregistration waits for the callback.
+  std::thread source([&] {
+    sensors->pushScan(timedRoomScan(0));
+    returned.store(1);
+    sensors->pushScan(timedRoomScan(1)); // waits: the queue is full
+    returned.store(2);
+  });
+  while (returned.load() < 1) {
+    std::this_thread::sleep_for(1ms);
+  }
+  std::this_thread::sleep_for(20ms);
+  ASSERT_EQ(returned.load(), 1);
+
+  input.reset(); // must not hang
+  source.join();
+  EXPECT_EQ(returned.load(), 2);
+  EXPECT_FALSE(sensors->hasScanCallback());
+}
+
+// A depth of 0 is raised to 1, and the default policy still replaces.
+TEST(SensorInput, DefaultPolicyStillReplacesTheOldestScan) {
+  auto sensors = std::make_shared<FakeSensors>();
+  mslam::SensorInput input(sensors, sensors, true, true,
+                           {.max_queued_scans = 0});
+  sensors->pushScan(timedRoomScan(0));
+  sensors->pushScan(timedRoomScan(1));
+  EXPECT_EQ(input.droppedScans(), 1U);
+  const auto scan = input.nextScan();
+  ASSERT_TRUE(scan);
+  EXPECT_EQ(scan->header.sequence_number, 1U);
+}
+
 } // namespace

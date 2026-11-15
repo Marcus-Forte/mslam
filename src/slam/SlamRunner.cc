@@ -12,10 +12,11 @@ SlamRunner::SlamRunner(SlamPipeline &pipeline,
                        std::shared_ptr<msensor::ILidar> lidar,
                        std::shared_ptr<msensor::IImu> imu,
                        const SlamConfiguration &config,
-                       std::shared_ptr<spdlog::logger> logger)
+                       std::shared_ptr<spdlog::logger> logger,
+                       SlamRunnerOptions options)
     : pipeline_(pipeline), lidar_(std::move(lidar)), imu_(std::move(imu)),
       with_imu_(config.with_imu), with_lidar_(config.with_lidar),
-      logger_(std::move(logger)) {}
+      logger_(std::move(logger)), options_(options) {}
 
 void SlamRunner::startProcessing() {
   running_.store(true);
@@ -50,7 +51,7 @@ void SlamRunner::run(const std::atomic<bool> &stop_requested) {
   running_.store(true);
   logger_->info("SLAM processing started");
 
-  SensorInput sensors(lidar_, imu_, with_lidar_, with_imu_);
+  SensorInput sensors(lidar_, imu_, with_lidar_, with_imu_, options_.input);
   // The scan being held until its IMU window is complete.
   std::shared_ptr<const Scan> held_scan;
   Clock::time_point held_since;
@@ -78,6 +79,7 @@ void SlamRunner::run(const std::atomic<bool> &stop_requested) {
                     "in total)",
                     drops - reported_drops, drops);
       reported_drops = drops;
+      dropped_scans_.store(drops);
     }
 
     if (!held_scan) {
@@ -91,14 +93,14 @@ void SlamRunner::run(const std::atomic<bool> &stop_requested) {
     }
 
     if (!pipeline_.imuCovers(*held_scan)) {
-      if (Clock::now() - held_since < kMaxImuWait) {
+      if (Clock::now() - held_since < options_.max_imu_wait) {
         std::this_thread::sleep_for(500us);
         continue;
       }
       ++imu_wait_timeouts_;
       logger_->warn("IMU data for the scan @ {} did not arrive within {} ms; "
                     "processing it with what is there",
-                    held_scan->header.timestamp, kMaxImuWait.count());
+                    held_scan->header.timestamp, options_.max_imu_wait.count());
     }
 
     pipeline_.processSyncedScan(*held_scan);

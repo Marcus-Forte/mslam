@@ -186,3 +186,17 @@ synchronisation counters. The pose is identical from run to run, so a change
 that must not alter the result can be checked by comparing it; the machine is
 noisy, so compare the minimum over several runs, alternating old and new
 binaries. It is not part of CTest.
+
+`--save-map <file.ply>` (before or after the positional arguments) writes the
+final accumulated map: every map increment the pipeline published,
+concatenated, which is what `SlamServer::GetMap` serves live (not the bounded
+registration map). The file is a binary little-endian PLY with
+`x y z intensity` floats that the TypeScript viewer in `viewer/` opens. With
+`repeats` greater than 1 the map of the last run is written. The file is
+opened before the first run, so an unwritable path fails immediately; the
+default run, without the option, is unchanged.
+
+```bash
+build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 1 --save-map map.ply
+```
+

@@ -7,9 +7,12 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <ostream>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -294,6 +297,56 @@ PointCloud readPlyPointCloud(const std::filesystem::path &path) {
     }
   }
   return cloud;
+}
+
+namespace {
+
+static_assert(std::endian::native == std::endian::little,
+              "the PLY writer dumps points as little-endian floats");
+static_assert(sizeof(Point) == 4 * sizeof(float) &&
+                  std::is_trivially_copyable_v<Point>,
+              "Point must be four packed floats to be written as a PLY row");
+
+std::string plyHeader(std::size_t num_points) {
+  return "ply\nformat binary_little_endian 1.0\nelement vertex " +
+         std::to_string(num_points) +
+         "\nproperty float x\nproperty float y\nproperty float z\n"
+         "property float intensity\nend_header\n";
+}
+
+} // namespace
+
+std::uintmax_t plyFileSize(std::size_t num_points) {
+  return plyHeader(num_points).size() +
+         static_cast<std::uintmax_t>(num_points) * sizeof(Point);
+}
+
+std::uintmax_t writePlyPointCloud(std::ostream &out,
+                                  std::span<const PointCloud> chunks) {
+  std::size_t num_points = 0;
+  for (const auto &chunk : chunks) {
+    num_points += chunk.size();
+  }
+  const std::string header = plyHeader(num_points);
+  out.write(header.data(), static_cast<std::streamsize>(header.size()));
+  for (const auto &chunk : chunks) {
+    out.write(reinterpret_cast<const char *>(chunk.data()),
+              static_cast<std::streamsize>(chunk.size() * sizeof(Point)));
+  }
+  out.flush();
+  if (!out) {
+    throw std::runtime_error("failed to write PLY point cloud");
+  }
+  return plyFileSize(num_points);
+}
+
+std::uintmax_t writePlyPointCloud(const std::filesystem::path &path,
+                                  const PointCloud &cloud) {
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    throw std::runtime_error("cannot open " + path.string() + " for writing");
+  }
+  return writePlyPointCloud(out, std::span<const PointCloud>(&cloud, 1));
 }
 
 } // namespace mslam

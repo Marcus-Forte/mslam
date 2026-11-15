@@ -13,10 +13,7 @@
 namespace mslam {
 namespace {
 
-constexpr int kStateDim = ImuPreintegrationFactor::kStateDim;
-constexpr int kExtraDim = ImuPreintegrationFactor::kExtraDim;
-constexpr int kParamDim = ImuPreintegrationFactor::kParamDim;
-constexpr int kResidualDim = ImuPreintegrationFactor::kResidualDim;
+using Factor = ImuPreintegrationFactor;
 
 } // namespace
 
@@ -26,7 +23,8 @@ ImuRegistration::ImuRegistration(
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder)
     : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
                          max_correspondence_distance},
-           std::move(logger), std::move(correspondence_finder)) {}
+           std::move(logger), std::move(correspondence_finder)),
+      manifold_(Factor::makeManifold()) {}
 
 SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
                                  const PointCloud &scan,
@@ -41,36 +39,34 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
   auto total_T = toAffine(current);
   icp_.begin(map, scan, total_T);
 
-  // Linearization point of state_j: [se3_pose(6), velocity(3), gyro_bias(3),
-  // accel_bias(3)]
-  Eigen::Matrix<double, kStateDim, 1> opt_state =
-      Eigen::Matrix<double, kStateDim, 1>::Zero();
-  opt_state.head<6>() = se3Log(total_T);
-  opt_state.segment<3>(6) = prev_state.velocity;
-  opt_state.segment<3>(9) = prev_state.gyro_bias;
-  opt_state.segment<3>(12) = prev_state.accel_bias;
+  // The optimizer variable is the state itself (see ImuPreintegrationFactor):
+  // [pose_j | v_j | bg_j | ba_j | v_i | bg_i | ba_i]. It lives across the
+  // registration rounds and is the result.
+  Eigen::Matrix<double, Factor::kAmbientDim, 1> state;
+  poseToStorage(total_T, state.data());
+  state.segment<3>(Factor::kExtrasJ) = prev_state.velocity;
+  state.segment<3>(Factor::kExtrasJ + 3) = prev_state.gyro_bias;
+  state.segment<3>(Factor::kExtrasJ + 6) = prev_state.accel_bias;
+  state.segment<3>(Factor::kExtrasI) = prev_state.velocity;
+  state.segment<3>(Factor::kExtrasI + 3) = prev_state.gyro_bias;
+  state.segment<3>(Factor::kExtrasI + 6) = prev_state.accel_bias;
 
-  // Previous state, same layout. Its pose is fixed; its velocity/biases are
-  // the prior mean for state_i's estimated velocity/biases.
-  Eigen::Matrix<double, kStateDim, 1> prev_state_vec;
-  prev_state_vec.head<6>() = se3Log(toAffine(prev_state));
-  prev_state_vec.segment<3>(6) = prev_state.velocity;
-  prev_state_vec.segment<3>(9) = prev_state.gyro_bias;
-  prev_state_vec.segment<3>(12) = prev_state.accel_bias;
-
-  // Linearization point of state_i's velocity and biases.
-  Eigen::Matrix<double, kExtraDim, 1> extras_i =
-      prev_state_vec.tail<kExtraDim>();
+  // Previous state: its pose is fixed; its velocity/biases are the prior mean
+  // for state_i's estimated velocity/biases.
+  Eigen::Matrix<double, Factor::kInputDim, 1> prev_state_vec;
+  poseToStorage(toAffine(prev_state), prev_state_vec.data());
+  prev_state_vec.segment<3>(Factor::kPoseStorageDim) = prev_state.velocity;
+  prev_state_vec.segment<3>(Factor::kPoseStorageDim + 3) = prev_state.gyro_bias;
+  prev_state_vec.segment<3>(Factor::kPoseStorageDim + 6) =
+      prev_state.accel_bias;
 
   // Observation placeholder (unused by ImuPreintegrationFactor)
-  const Eigen::Matrix<double, kResidualDim, 1> zeros =
-      Eigen::Matrix<double, kResidualDim, 1>::Zero();
+  const Eigen::Matrix<double, Factor::kResidualDim, 1> zeros =
+      Eigen::Matrix<double, Factor::kResidualDim, 1>::Zero();
 
   int small_delta_hits = 0;
 
-  Eigen::Matrix<double, kParamDim, 1> delta =
-      Eigen::Matrix<double, kParamDim, 1>::Zero();
-  moptim::LevenbergMarquardt<double> lm(kParamDim);
+  moptim::LevenbergMarquardt<double> lm(manifold_);
   lm.setMaxIterations(parameters.optimizer_iterations);
   icp_.attachObserver(lm);
 
@@ -82,39 +78,36 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
 
     lm.clearCosts();
 
-    // Scan-matching cost (point-to-plane, only uses pose DOFs 0-5)
+    // Scan-matching cost (point-to-plane, only the pose's 6 tangent
+    // dimensions). The source cloud is the scan moved by the pose at the start
+    // of the round.
+    const Eigen::Affine3d pose_before = total_T;
     lm.addCost(
         std::make_shared<moptim::AnalyticalCost<Point3PlaneDistance, double>>(
             icp_.planeInputs().front().data(), icp_.planeOffsets().data(),
-            icp_.planeOffsets().size(), 6, 1, kParamDim, Point3PlaneDistance{},
-            /*active_param_dim=*/6));
+            icp_.planeOffsets().size(), 6, 1, manifold_,
+            Point3PlaneDistance(pose_before),
+            /*active_param_dim=*/SE3Manifold::kTangentDim));
 
     // IMU preintegration factor between the fixed previous pose and the
     // estimated state_j, with state_i's velocity/biases estimated as well.
     lm.addCost(std::make_shared<
                moptim::NumericalCostCentral<ImuPreintegrationFactor, double>>(
-        prev_state_vec.data(), zeros.data(), 1, kStateDim, kResidualDim,
-        kParamDim,
-        ImuPreintegrationFactor(preintegrator, opt_state, extras_i,
-                                kImuWeight)));
+        prev_state_vec.data(), zeros.data(), 1, Factor::kInputDim,
+        Factor::kResidualDim, manifold_,
+        ImuPreintegrationFactor(preintegrator, kImuWeight)));
 
-    delta.setZero();
-    const auto result = lm.optimize(delta.data());
+    const auto result = lm.optimize(state.data());
+
+    total_T = poseFromStorage(state.data());
     if (i == 0) {
-      first_round_ = {true, delta.head<3>().norm(), delta.segment<3>(3).norm()};
+      const Eigen::Matrix<double, 6, 1> step =
+          se3Log(Eigen::Affine3d(total_T * pose_before.inverse()));
+      first_round_ = {true, step.head<3>().norm(), step.tail<3>().norm()};
     }
-
-    // The optimizer variable is an increment around the linearization point:
-    // a left-multiplied se3 increment for the pose, additive for the rest.
-    Eigen::Matrix<double, kStateDim, 1> new_state;
-    SE3xEuclideanPlusOperator<double>::plus(opt_state.data(), delta.data(),
-                                            new_state.data(), kStateDim);
-    opt_state = new_state;
-    extras_i += delta.tail<kExtraDim>();
 
     // Update source cloud with new pose for next correspondence search,
     // re-transforming from the original scan.
-    total_T = se3Exp(opt_state.head<6>());
     icp_.resetSource(total_T);
 
     if (result.status == moptim::Status::SMALL_DELTA) {
@@ -125,9 +118,9 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
 
   SlamState result;
   setPose(result, total_T);
-  result.velocity = opt_state.segment<3>(6);
-  result.gyro_bias = opt_state.segment<3>(9);
-  result.accel_bias = opt_state.segment<3>(12);
+  result.velocity = state.segment<3>(Factor::kExtrasJ);
+  result.gyro_bias = state.segment<3>(Factor::kExtrasJ + 3);
+  result.accel_bias = state.segment<3>(Factor::kExtrasJ + 6);
 
   return result;
 }

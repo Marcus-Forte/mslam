@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mslam/slam/SE3Manifold.hh"
 #include "mslam/slam/registration/IRegistration.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
@@ -7,7 +8,8 @@ namespace mslam {
 
 /// Point-to-plane ICP: minimizes the distance of each scan point to the plane
 /// through its map correspondence (normal from a KNN neighbourhood), with an
-/// analytical se(3) jacobian.
+/// analytical jacobian. The pose itself is the optimizer variable
+/// (SE3Manifold).
 class PointToPlaneRegistration : public IRegistration {
 public:
   PointToPlaneRegistration(
@@ -20,6 +22,9 @@ public:
 
 private:
   IcpWorkspace icp_;
+  /// Shared with the optimizer and its costs (they must use the same object).
+  std::shared_ptr<const SE3Manifold> manifold_ =
+      std::make_shared<SE3Manifold>();
 };
 
 } // namespace mslam

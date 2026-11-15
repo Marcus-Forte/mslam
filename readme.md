@@ -108,8 +108,10 @@ The viewer supports:
 (`PointToPointRegistration`, `PointToPlaneRegistration`). The main SLAM path uses
 point-to-plane: both `PointToPlaneRegistration` and the IMU-aided
 `ImuRegistration` use `Point3PlaneDistance`, a scalar point-to-plane residual
-with an exact analytical se(3) jacobian, through `moptim::AnalyticalCost`.
-Point-to-point still uses numerical differentiation.
+with the analytical jacobian with respect to a left se(3) increment, through
+`moptim::AnalyticalCost`. The optimizer variable is the pose itself, stepped by
+`SE3Manifold` (a moptim manifold). Point-to-point still uses numerical
+differentiation.
 
 ## Timing
 

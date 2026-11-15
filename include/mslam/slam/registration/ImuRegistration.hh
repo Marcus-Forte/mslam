@@ -4,7 +4,10 @@
 #include "mslam/slam/ImuPreintegration.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
+#include "moptim/Manifold.hh"
+
 #include <Eigen/Dense>
+#include <memory>
 
 namespace mslam {
 
@@ -17,10 +20,10 @@ namespace mslam {
 /// (state, map, scan) alignment.
 class ImuRegistration {
 public:
-  /// Size of the pose increment the first registration round of the last
-  /// Align() applied: the norms of the translation and rotation parts of the
-  /// optimizer's se(3) step. It measures how wrong the IMU-predicted prior
-  /// was. `valid` is false if that round found no correspondences.
+  /// Size of the pose change the first registration round of the last
+  /// Align() applied: the norms of the translation and rotation parts of
+  /// se3Log(T_after * T_before^-1). It measures how wrong the IMU-predicted
+  /// prior was. `valid` is false if that round found no correspondences.
   struct FirstRoundIncrement {
     bool valid = false;
     double translation_m = 0.0;
@@ -48,6 +51,8 @@ public:
 
 private:
   IcpWorkspace icp_;
+  /// SE3Manifold x Euclidean(18), shared with the optimizer and its costs.
+  std::shared_ptr<const moptim::IManifold<double>> manifold_;
   FirstRoundIncrement first_round_;
 };
 

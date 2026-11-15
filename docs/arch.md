@@ -31,9 +31,16 @@ At a high level:
   previous state and the preintegrated IMU data, so it is not an
   `IRegistration` and exposes only its own `Align`. Both own an `IcpWorkspace`
   (configuration, correspondence search, normals, constraint buffers).
-- `Point3PlaneDistance` is the point-to-plane model with an analytical se(3)
-  jacobian and a scalar residual; both registrations use it through
-  `moptim::AnalyticalCost`.
+- `SE3Manifold` (`SE3Manifold.hh`) is the pose manifold the registrations hand
+  to moptim: 12 doubles `[R | t]` (the 3x4 matrix, column-major), a 6-vector
+  tangent `[rho, omega]`, `plus(T, delta) = se3Exp(delta) * T`. The optimizer
+  variable is the pose itself (the full state for `ImuRegistration`, through a
+  product manifold with a Euclidean block for velocity and biases).
+- `Point3PlaneDistance` is the point-to-plane model with a scalar residual and
+  the jacobian with respect to the left increment at zero (`-n`, `-(q x n)`);
+  both registrations use it through `moptim::AnalyticalCost`. Its inputs are
+  source points already moved by the pose of the current round, which the
+  model is told as `source_pose`.
 
 ```mermaid
 classDiagram

@@ -27,11 +27,12 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
   auto total_T = toAffine(state);
   icp_.begin(map, scan, total_T);
 
-  moptim::LevenbergMarquardt<double> lm(6);
+  Eigen::Matrix<double, SE3Manifold::kAmbientDim, 1> pose;
+  poseToStorage(total_T, pose.data());
+
+  moptim::LevenbergMarquardt<double> lm(manifold_);
   lm.setMaxIterations(parameters.optimizer_iterations);
   icp_.attachObserver(lm);
-
-  Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
 
   for (int i = 0; i < parameters.registration_iterations; ++i) {
     icp_.findCorrespondences(map);
@@ -49,17 +50,16 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
       break;
     }
 
-    delta.setZero();
     lm.clearCosts();
+    // The source cloud is the scan moved by the pose of the start of the round.
     lm.addCost(std::make_shared<
                moptim::NumericalCostForwardEuler<Point3Distance, double>>(
         inputs_buffer_[0].data(), map_points_buffer_[0].data(),
-        map_points_buffer_.size(), 3, 3, 6));
-    const auto result = lm.optimize(delta.data());
+        map_points_buffer_.size(), 3, 3, manifold_, Point3Distance(total_T)));
+    const auto result = lm.optimize(pose.data());
 
-    const auto delta_T = se3Exp(delta);
-    icp_.moveSource(delta_T);
-    total_T = delta_T * total_T;
+    total_T = poseFromStorage(pose.data());
+    icp_.resetSource(total_T);
 
     icp_.logger().debug("Registration Iteration: {}/{}", i + 1,
                         parameters.registration_iterations);

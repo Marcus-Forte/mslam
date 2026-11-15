@@ -45,6 +45,18 @@ target_link_libraries(test_point_distance slam moptim GTest::gtest_main)
 
 gtest_discover_tests(test_point_distance)
 
+add_executable(test_se3_manifold
+test_se3_manifold.cc)
+target_link_libraries(test_se3_manifold slam moptim GTest::gtest_main)
+
+gtest_discover_tests(test_se3_manifold)
+
+add_executable(test_imu_preintegration_factor
+test_imu_preintegration_factor.cc)
+target_link_libraries(test_imu_preintegration_factor slam moptim GTest::gtest_main)
+
+gtest_discover_tests(test_imu_preintegration_factor)
+
 add_executable(test_normal_estimator
 test_normal_estimator.cc)
 target_link_libraries(test_normal_estimator slam maps GTest::gtest_main)

@@ -6,6 +6,7 @@
 #include "mslam/slam/registration/IRegistration.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
+#include "mslam/slam/registration/PointToPointRegistration.hh"
 
 #include <gtest/gtest.h>
 #include <random>
@@ -56,6 +57,42 @@ TEST_P(PointToPlaneRecovery, RecoversKnownPose) {
 
 INSTANTIATE_TEST_SUITE_P(
     SmallMotions, PointToPlaneRecovery,
+    ::testing::Values(std::make_tuple(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                      std::make_tuple(0.05, -0.03, 0.02, 0.0, 0.0, 0.0),
+                      std::make_tuple(0.0, 0.0, 0.0, 0.01, -0.02, 0.03),
+                      std::make_tuple(0.04, 0.03, -0.02, 0.01, 0.008, -0.02)));
+
+// Point-to-point converges slowly on planar surfaces (it cannot slide along
+// them), so it gets more rounds and a looser tolerance than point-to-plane.
+class PointToPointRecovery
+    : public ::testing::TestWithParam<
+          std::tuple<double, double, double, double, double, double>> {};
+
+TEST_P(PointToPointRecovery, RecoversKnownPose) {
+  const auto [x, y, z, roll, pitch, yaw] = GetParam();
+  const Eigen::Affine3d truth = mslam::toAffine(x, y, z, roll, pitch, yaw);
+
+  mslam::VoxelHashMap map(0.1F, 5);
+  map.addScan(test::sampleRoom(400.0F, 1));
+
+  mslam::PointCloud scan = test::sampleRoom(150.0F, 2, 2.5F);
+  mslam::transformCloud(truth.inverse(), scan);
+
+  mslam::PointToPointRegistration registration(
+      30, 5, 0.5F, silentLogger(),
+      std::make_shared<mslam::CorrespondenceFinder>());
+  const auto state = registration.Align(mslam::SlamState{}, map, scan);
+
+  EXPECT_NEAR(state.position.x(), x, 2e-2);
+  EXPECT_NEAR(state.position.y(), y, 2e-2);
+  EXPECT_NEAR(state.position.z(), z, 2e-2);
+  EXPECT_NEAR(state.rotation.x(), roll, 1e-2);
+  EXPECT_NEAR(state.rotation.y(), pitch, 1e-2);
+  EXPECT_NEAR(state.rotation.z(), yaw, 1e-2);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SmallMotions, PointToPointRecovery,
     ::testing::Values(std::make_tuple(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
                       std::make_tuple(0.05, -0.03, 0.02, 0.0, 0.0, 0.0),
                       std::make_tuple(0.0, 0.0, 0.0, 0.01, -0.02, 0.03),

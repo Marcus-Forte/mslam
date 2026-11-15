@@ -1,11 +1,11 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include <cassert>
 #include <cmath>
 
-// SE(3) exponential map helpers. These used to live in the optimizer library
-// (moptim); it no longer provides manifold primitives, so mslam owns them.
+// SE(3) geometry (hat, exponential and logarithm maps). The optimizer library
+// (moptim) only provides the manifold interface; the SE(3) conventions live
+// here, and SE3Manifold.hh builds the optimizer manifold on top of them.
 namespace mslam {
 
 template <class T>
@@ -75,29 +75,5 @@ se3Exp(const Eigen::MatrixBase<Derived> &xi) {
   T_ab.translation() = V * rho;
   return T_ab;
 }
-
-/**
- * @brief Plus operator for a 15-DOF state: SE(3) + R^9.
- *
- * State layout: [se3(6), velocity(3), gyro_bias(3), accel_bias(3)].
- * The first 6 components use SE(3) composition; the remaining 9 use plain
- * addition.
- */
-template <class T> struct SE3xEuclideanPlusOperator {
-  static void plus(const T *x, const T *delta, T *out,
-                   [[maybe_unused]] size_t dimensions) {
-    assert(dimensions == 15);
-
-    const Eigen::Map<const Eigen::Matrix<T, 6, 1>> x_se3(x);
-    const Eigen::Map<const Eigen::Matrix<T, 6, 1>> delta_se3(delta);
-    Eigen::Map<Eigen::Matrix<T, 6, 1>> out_se3(out);
-
-    out_se3 = se3Log(se3Exp(delta_se3) * se3Exp(x_se3));
-
-    for (size_t i = 6; i < 15; ++i) {
-      out[i] = x[i] + delta[i];
-    }
-  }
-};
 
 } // namespace mslam

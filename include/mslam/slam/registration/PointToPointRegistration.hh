@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mslam/slam/SE3Manifold.hh"
 #include "mslam/slam/registration/IRegistration.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
@@ -20,6 +21,9 @@ public:
 
 private:
   IcpWorkspace icp_;
+  /// Shared with the optimizer and its costs (they must use the same object).
+  std::shared_ptr<const SE3Manifold> manifold_ =
+      std::make_shared<SE3Manifold>();
   std::vector<Eigen::Vector3d> inputs_buffer_;
   VectorPoint3d map_points_buffer_;
 };

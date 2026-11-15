@@ -1,8 +1,12 @@
 #pragma once
 
 #include "mslam/slam/ImuPreintegration.hh"
-#include "mslam/slam/SE3.hh"
+#include "mslam/slam/SE3Manifold.hh"
+
+#include "moptim/Manifold.hh"
+
 #include <Eigen/Dense>
+#include <memory>
 
 namespace mslam {
 
@@ -17,7 +21,7 @@ struct ImuPriorSigma {
  * @brief NumericalModel for the two-state IMU preintegration residual.
  *
  * Both ends of the preintegration interval are estimated:
- *  - state_j (the new state): pose as se(3) + velocity + gyro/accel bias.
+ *  - state_j (the new state): pose + velocity + gyro/accel bias.
  *  - state_i (the previous state): velocity + gyro/accel bias. Its pose is
  *    held fixed (it is the gauge and is anchored by scan matching).
  *
@@ -26,32 +30,53 @@ struct ImuPriorSigma {
  * preintegrated deltas, instead of the bias merely being copied from the
  * previous state.
  *
- * The optimizer works on a DELTA vector (initialized to zero) with layout
- *   [delta_j(15) = se3(6), velocity(3), gyro_bias(3), accel_bias(3);
- *    delta_i(9)  = velocity(3), gyro_bias(3), accel_bias(3)]
- * composed with the linearization points given at construction.
+ * The optimizer variable x is the state itself (ambient dimension
+ * kAmbientDim = 30), read directly by the residual:
+ *   [pose_j(12) | v_j(3) | bg_j(3) | ba_j(3) | v_i(3) | bg_i(3) | ba_i(3)]
+ * with the pose as the SE3Manifold storage ([R | t], column-major). It moves
+ * on the manifold made by makeManifold(), whose step has kTangentDim = 24
+ * entries:
+ *   [rho, omega | dv_j, dbg_j, dba_j | dv_i, dbg_i, dba_i].
  *
- * Input (held constant): previous state, layout [se3(6), v(3), bg(3), ba(3)].
+ * Input (held constant, kInputDim = 21): the previous state as
+ *   [pose_i(12) | v(3) | bg(3) | ba(3)].
  * Its velocity/biases also act as the prior mean for state_i; the prior stands
  * in for the history before state_i, which is not modelled.
  * Observation: unused (zeros, kResidualDim entries).
  */
 class ImuPreintegrationFactor {
 public:
-  static constexpr int kStateDim = 15;
-  static constexpr int kExtraDim = 9;
-  static constexpr int kParamDim = kStateDim + kExtraDim;
-  static constexpr int kResidualDim = 15 + kExtraDim;
+  static constexpr int kPoseStorageDim = SE3Manifold::kAmbientDim; // 12
+  static constexpr int kExtrasDim = 9; // velocity, gyro bias, accel bias
+  /// Entries of the optimizer variable x.
+  static constexpr int kAmbientDim = kPoseStorageDim + 2 * kExtrasDim;
+  /// Entries of an optimizer step.
+  static constexpr int kTangentDim = SE3Manifold::kTangentDim + 2 * kExtrasDim;
+  /// Entries of the constant input (the previous state).
+  static constexpr int kInputDim = kPoseStorageDim + kExtrasDim;
+  static constexpr int kPreintegrationResidualDim = 15;
+  static constexpr int kResidualDim = kPreintegrationResidualDim + kExtrasDim;
 
-  /// @param current_state_j  Linearization point of state_j
-  /// @param current_extras_i Linearization point of state_i [v, bg, ba]
+  /// Offsets into x.
+  static constexpr int kExtrasJ = kPoseStorageDim; // v_j, bg_j, ba_j
+  static constexpr int kExtrasI =
+      kPoseStorageDim + kExtrasDim; // v_i, bg_i, ba_i
+
+  /// SE3Manifold x Euclidean(18): the manifold of x.
+  static std::shared_ptr<const moptim::IManifold<double>>
+  makeManifold(std::shared_ptr<const SE3Manifold> pose =
+                   std::make_shared<SE3Manifold>()) {
+    return std::make_shared<moptim::ProductManifold<double>>(
+        std::vector<std::shared_ptr<const moptim::IManifold<double>>>{
+            std::move(pose),
+            std::make_shared<moptim::EuclideanManifold<double>>(2 *
+                                                                kExtrasDim)});
+  }
+
   ImuPreintegrationFactor(const ImuPreintegrator &preintegrator,
-                          const Eigen::Matrix<double, 15, 1> &current_state_j,
-                          const Eigen::Matrix<double, 9, 1> &current_extras_i,
                           double weight = 1.0,
                           const ImuPriorSigma &sigma = ImuPriorSigma{})
-      : preintegrator_(preintegrator), current_state_j_(current_state_j),
-        current_extras_i_(current_extras_i),
+      : preintegrator_(preintegrator),
         sqrt_info_(weight * preintegrator.sqrtInformation()) {
     prior_sqrt_info_ << Eigen::Vector3d::Constant(1.0 / sigma.velocity),
         Eigen::Vector3d::Constant(1.0 / sigma.gyro_bias),
@@ -63,49 +88,39 @@ public:
 
   void residual(const double *x, const double *input,
                 const double * /*observation*/, double *res) const {
-    Eigen::Matrix<double, 15, 1> state_j_vec;
-    SE3xEuclideanPlusOperator<double>::plus(current_state_j_.data(), x,
-                                            state_j_vec.data(), kStateDim);
-
-    const Eigen::Map<const Eigen::Matrix<double, 9, 1>> delta_i(x + kStateDim);
-    const Eigen::Matrix<double, 9, 1> extras_i = current_extras_i_ + delta_i;
-
-    // state_i: fixed pose from `input`, estimated velocity and biases.
-    Eigen::Matrix<double, 15, 1> state_i_vec;
-    state_i_vec.head<6>() =
-        Eigen::Map<const Eigen::Matrix<double, 6, 1>>(input);
-    state_i_vec.tail<9>() = extras_i;
-
-    const ImuState state_i = stateFromLayout(state_i_vec.data());
-    const ImuState state_j = stateFromLayout(state_j_vec.data());
+    const ImuState state_i = stateFrom(input, x + kExtrasI);
+    const ImuState state_j = stateFrom(x, x + kExtrasJ);
 
     Eigen::Map<Eigen::Matrix<double, kResidualDim, 1>> res_map(res);
-    res_map.head<15>() = sqrt_info_ * preintegrator_.residual(state_i, state_j);
+    res_map.head<kPreintegrationResidualDim>() =
+        sqrt_info_ * preintegrator_.residual(state_i, state_j);
 
-    const Eigen::Map<const Eigen::Matrix<double, 9, 1>> prior_mean(input + 6);
-    res_map.tail<kExtraDim>() =
+    const Eigen::Map<const Eigen::Matrix<double, kExtrasDim, 1>> extras_i(
+        x + kExtrasI);
+    const Eigen::Map<const Eigen::Matrix<double, kExtrasDim, 1>> prior_mean(
+        input + kPoseStorageDim);
+    res_map.tail<kExtrasDim>() =
         prior_sqrt_info_.cwiseProduct(extras_i - prior_mean);
   }
 
 private:
-  static ImuState stateFromLayout(const double *x) {
-    Eigen::Map<const Eigen::Matrix<double, 6, 1>> xi(x);
-    const Eigen::Affine3d T = se3Exp(xi);
+  /// State with the pose stored at @p pose_storage (12 doubles) and
+  /// [v, bg, ba] at @p extras.
+  static ImuState stateFrom(const double *pose_storage, const double *extras) {
+    const Eigen::Map<const Eigen::Matrix<double, 3, 4>> pose(pose_storage);
 
     ImuState state;
-    state.position = T.translation();
-    state.rotation = T.linear();
-    state.velocity = Eigen::Map<const Eigen::Vector3d>(x + 6);
-    state.gyro_bias = Eigen::Map<const Eigen::Vector3d>(x + 9);
-    state.accel_bias = Eigen::Map<const Eigen::Vector3d>(x + 12);
+    state.rotation = pose.leftCols<3>();
+    state.position = pose.col(3);
+    state.velocity = Eigen::Map<const Eigen::Vector3d>(extras);
+    state.gyro_bias = Eigen::Map<const Eigen::Vector3d>(extras + 3);
+    state.accel_bias = Eigen::Map<const Eigen::Vector3d>(extras + 6);
     return state;
   }
 
   const ImuPreintegrator &preintegrator_;
-  Eigen::Matrix<double, 15, 1> current_state_j_;
-  Eigen::Matrix<double, 9, 1> current_extras_i_;
   Eigen::Matrix<double, 15, 15> sqrt_info_;
-  Eigen::Matrix<double, 9, 1> prior_sqrt_info_;
+  Eigen::Matrix<double, kExtrasDim, 1> prior_sqrt_info_;
 };
 
 } // namespace mslam

@@ -86,13 +86,18 @@ continues running. This lets playback resume after a reset or server restart.
 ## Browser viewer
 
 The `viewer/` folder contains a minimal TypeScript browser app for inspecting
-local `.ply` files.
+local `.ply` files (a static viewer sized for about 10 million points, not a
+live stream listener).
 
 ```bash
 cd viewer
-npm install
+npm ci
 npm run dev -- --host
+npm test
 ```
+
+Run the install, build and tests in the devcontainer: `node_modules/` is
+installed for its Linux platform, so do not run `npm ci` on the host over it.
 
 The viewer supports:
 
@@ -101,6 +106,13 @@ The viewer supports:
 - point-size adjustment
 - multiple ruler measurements with clear-all
 - `W`, `A`, `S`, `D` camera movement
+
+PLY files are parsed in a Web Worker. Binary little-endian files with a single
+`vertex` element of scalar properties (what `bench_slam --save-map` and
+`register_scans -o` write) take a fast typed-array path; any other PLY (ASCII,
+big-endian, faces) falls back to three's `PLYLoader`. The `intensity` colours
+are baked once into 8-bit RGB, and the scene is rendered on demand rather than
+every display refresh. See `viewer/README.md`.
 
 ## Registration metrics
 

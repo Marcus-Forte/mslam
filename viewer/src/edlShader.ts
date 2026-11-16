@@ -1,8 +1,9 @@
+// Full-screen quad: PlaneGeometry(2, 2) is already in clip space, so no matrices.
 export const edlVertexShader = /* glsl */ `
 varying vec2 vUv;
 void main() {
   vUv = uv;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_Position = vec4(position.xy, 0.0, 1.0);
 }
 `;
 
@@ -17,26 +18,42 @@ uniform float uFar;
 
 varying vec2 vUv;
 
+// Unit offsets of the 8 neighbours, every 45 degrees.
+const vec2 OFFSETS[8] = vec2[8](
+  vec2( 1.0,         0.0),
+  vec2( 0.70710678,  0.70710678),
+  vec2( 0.0,         1.0),
+  vec2(-0.70710678,  0.70710678),
+  vec2(-1.0,         0.0),
+  vec2(-0.70710678, -0.70710678),
+  vec2( 0.0,        -1.0),
+  vec2( 0.70710678, -0.70710678)
+);
+
 float linearizeDepth(float d) {
   return uNear * uFar / (uFar - d * (uFar - uNear));
 }
 
-float edlResponse(vec2 tc, float depth) {
-  float response = 0.0;
-  // 8 neighbours
-  for (int i = 0; i < 8; i++) {
-    float angle = float(i) * 0.785398; // 2π/8
-    vec2 offset = vec2(cos(angle), sin(angle)) * uRadius / uScreenSize;
-    float nd = linearizeDepth(texture2D(tDepth, tc + offset).r);
-    response += max(0.0, log2(depth) - log2(nd));
-  }
-  return response / 8.0;
-}
-
 void main() {
   vec4 color = texture2D(tColor, vUv);
-  float depth = linearizeDepth(texture2D(tDepth, vUv).r);
-  float response = edlResponse(vUv, depth);
+  float rawDepth = texture2D(tDepth, vUv).r;
+
+  // Nothing was drawn here (depth buffer still at the far plane): no shading.
+  if (rawDepth >= 1.0) {
+    gl_FragColor = color;
+    return;
+  }
+
+  float logDepth = log2(linearizeDepth(rawDepth));
+  vec2 step = uRadius / uScreenSize;
+
+  float response = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float nd = linearizeDepth(texture2D(tDepth, vUv + OFFSETS[i] * step).r);
+    response += max(0.0, logDepth - log2(nd));
+  }
+  response /= 8.0;
+
   float shade = exp(-response * 300.0 * uStrength);
   gl_FragColor = vec4(color.rgb * shade, color.a);
 }

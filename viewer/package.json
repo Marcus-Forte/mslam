@@ -6,14 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
     "@types/three": "^0.180.0",
     "typescript": "^5.9.3",
-    "vite": "^7.1.7"
+    "vite": "^7.1.7",
+    "vitest": "^5.1.0"
   }
 }

@@ -17,6 +17,8 @@ type Measurement = {
   midpoint: Vector3;
   label: HTMLDivElement;
   element: HTMLElement;
+  markers: Points;
+  line: Line;
 };
 
 const MARKER_SIZE = 0.08;
@@ -37,6 +39,12 @@ function createMarkerMaterial(): PointsMaterial {
 
 export class RulerTool {
   private readonly group = new Group();
+  // Shared by every measurement; never disposed per measurement.
+  private readonly markerMaterial = createMarkerMaterial();
+  private readonly lineMaterial = new LineBasicMaterial({ color: COLOR_DEFAULT, linewidth: 2 });
+  private readonly lineMaterialSelected = new LineBasicMaterial({ color: COLOR_SELECTED, linewidth: 2 });
+  private readonly projected = new Vector3();
+  private pendingMarker: Points | null = null;
   private readonly measurements: Measurement[] = [];
   private pendingPoint: Vector3 | null = null;
   private enabled = false;
@@ -51,6 +59,7 @@ export class RulerTool {
     private readonly listContainer: HTMLElement,
     private readonly toggleButton: HTMLButtonElement,
     private readonly clearButton: HTMLButtonElement,
+    private readonly requestRender: () => void,
   ) {
     this.toggleButton.addEventListener("click", () => this.setEnabled(!this.enabled));
     this.clearButton.addEventListener("click", () => this.clearAll());
@@ -68,32 +77,45 @@ export class RulerTool {
   addPoint(point: Vector3): void {
     if (!this.pendingPoint) {
       this.pendingPoint = point;
-      this.render();
+      this.pendingMarker = new Points(new BufferGeometry().setFromPoints([point]), this.markerMaterial);
+      this.group.add(this.pendingMarker);
+      this.requestRender();
       return;
     }
 
-    const distance = this.pendingPoint.distanceTo(point);
+    const start = this.pendingPoint;
+    this.clearPending();
+
+    const distance = start.distanceTo(point);
     const id = this.nextId++;
+    const markers = new Points(new BufferGeometry().setFromPoints([start, point]), this.markerMaterial);
+    const line = new Line(new BufferGeometry().setFromPoints([start, point]), this.lineMaterial);
+    this.group.add(markers, line);
+
     const measurement: Measurement = {
       id,
-      start: this.pendingPoint,
+      start,
       end: point,
       distance,
-      midpoint: this.pendingPoint.clone().add(point).multiplyScalar(0.5),
+      midpoint: start.clone().add(point).multiplyScalar(0.5),
       label: this.buildLabel(distance),
       element: this.buildListEntry(id, distance),
+      markers,
+      line,
     };
     this.measurements.push(measurement);
     this.listContainer.appendChild(measurement.element);
-    this.pendingPoint = null;
+    this.labelsContainer.appendChild(measurement.label);
+    this.listSection.hidden = false;
     this.selectedId = id;
-    this.render();
+    this.updateSelection();
+    this.requestRender();
   }
 
   select(id: number | null): void {
     this.selectedId = id;
     this.updateSelection();
-    this.render();
+    this.requestRender();
   }
 
   remove(id: number): void {
@@ -101,6 +123,7 @@ export class RulerTool {
     if (index === -1) return;
 
     const m = this.measurements[index];
+    this.removeScene(m);
     m.label.remove();
     m.element.remove();
     this.measurements.splice(index, 1);
@@ -110,26 +133,31 @@ export class RulerTool {
         ? this.measurements[this.measurements.length - 1].id
         : null;
     }
-    this.render();
+    this.listSection.hidden = this.measurements.length === 0;
+    this.updateSelection();
+    this.requestRender();
   }
 
   clearAll(): void {
     for (const m of this.measurements) {
+      this.removeScene(m);
       m.label.remove();
       m.element.remove();
     }
     this.measurements.length = 0;
-    this.pendingPoint = null;
+    this.clearPending();
     this.selectedId = null;
-    this.render();
+    this.listSection.hidden = true;
+    this.requestRender();
   }
 
+  /** Repositions the distance labels; call once per rendered frame. */
   updateLabels(): void {
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
 
     for (const m of this.measurements) {
-      const projected = m.midpoint.clone().project(this.camera);
+      const projected = this.projected.copy(m.midpoint).project(this.camera);
       const isVisible = projected.z >= -1 && projected.z <= 1;
 
       if (!isVisible) {
@@ -177,48 +205,26 @@ export class RulerTool {
 
   private updateSelection(): void {
     for (const m of this.measurements) {
-      m.element.classList.toggle("selected", m.id === this.selectedId);
-      m.label.classList.toggle("selected", m.id === this.selectedId);
+      const selected = m.id === this.selectedId;
+      m.element.classList.toggle("selected", selected);
+      m.label.classList.toggle("selected", selected);
+      m.line.material = selected ? this.lineMaterialSelected : this.lineMaterial;
     }
   }
 
-  private disposeGroup(): void {
-    for (const child of this.group.children) {
-      const geo = (child as { geometry?: BufferGeometry }).geometry;
-      const mat = (child as { material?: PointsMaterial | LineBasicMaterial }).material;
-      geo?.dispose();
-      if (Array.isArray(mat)) {
-        for (const m of mat) m.dispose();
-      } else {
-        mat?.dispose();
-      }
+  private clearPending(): void {
+    if (this.pendingMarker) {
+      this.group.remove(this.pendingMarker);
+      this.pendingMarker.geometry.dispose();
+      this.pendingMarker = null;
     }
-    this.group.clear();
+    this.pendingPoint = null;
   }
 
-  private render(): void {
-    this.disposeGroup();
-    this.labelsContainer.replaceChildren(...this.measurements.map((m) => m.label));
-    this.listSection.hidden = this.measurements.length === 0;
-
-    for (const m of this.measurements) {
-      const isSelected = m.id === this.selectedId;
-      const lineColor = isSelected ? COLOR_SELECTED : COLOR_DEFAULT;
-
-      const markerGeo = new BufferGeometry().setFromPoints([m.start, m.end]);
-      this.group.add(new Points(markerGeo, createMarkerMaterial()));
-
-      const lineGeo = new BufferGeometry().setFromPoints([m.start, m.end]);
-      const lineMat = new LineBasicMaterial({ color: lineColor, linewidth: 2 });
-      this.group.add(new Line(lineGeo, lineMat));
-    }
-
-    if (this.pendingPoint) {
-      const geo = new BufferGeometry().setFromPoints([this.pendingPoint]);
-      this.group.add(new Points(geo, createMarkerMaterial()));
-    }
-
-    this.updateSelection();
-    this.updateLabels();
+  /** Geometries are per measurement; the materials are shared and stay alive. */
+  private removeScene(m: Measurement): void {
+    this.group.remove(m.markers, m.line);
+    m.markers.geometry.dispose();
+    m.line.geometry.dispose();
   }
 }

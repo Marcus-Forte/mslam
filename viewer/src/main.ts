@@ -16,6 +16,8 @@ import { CloudManager } from "./CloudManager";
 import { RulerTool } from "./RulerTool";
 import { EdlPass } from "./EdlPass";
 
+const MAX_PIXEL_RATIO = 2;
+
 function requireElement<T extends Element>(selector: string, parent: ParentNode = document): T {
   const el = parent.querySelector<T>(selector);
   if (!el) throw new Error(`Required element not found: ${selector}`);
@@ -32,7 +34,13 @@ class ViewerApp {
   private readonly edl: EdlPass;
   private readonly canvas: HTMLCanvasElement;
   private readonly pressedKeys = new Set<string>();
-  private lastFrameTime = performance.now();
+  private frameHandle: number | null = null;
+  /** Timestamp of the previous frame while keys keep the loop running; null after idle. */
+  private lastNavTime: number | null = null;
+  private readonly navUp = new Vector3(0, 0, 1);
+  private readonly navForward = new Vector3();
+  private readonly navRight = new Vector3();
+  private readonly navMove = new Vector3();
   private pointerDownPos: { x: number; y: number } | null = null;
 
   constructor() {
@@ -47,13 +55,22 @@ class ViewerApp {
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(1.25, -1.25, 0.95);
 
-    this.renderer = new WebGLRenderer({ antialias: true, canvas: this.canvas });
+    // No MSAA: with EDL on (the default) the scene goes into a non-multisampled
+    // render target and only a full-screen quad reaches the canvas, so canvas MSAA
+    // would be paid for nothing; points are round discs cut by `discard`, which
+    // MSAA does not smooth either.
+    this.renderer = new WebGLRenderer({
+      antialias: false,
+      powerPreference: "high-performance",
+      canvas: this.canvas,
+    });
     this.renderer.outputColorSpace = SRGBColorSpace;
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
 
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = false;
     this.controls.target.set(0, 0, 0);
+    this.controls.addEventListener("change", this.requestRender);
 
     const grid = new GridHelper(10, 20, 0x9f8b6d, 0xd6c8b4);
     grid.rotation.x = Math.PI * 0.5;
@@ -68,6 +85,7 @@ class ViewerApp {
       requireElement("#cloud-empty"),
       requireElement("#cloud-count"),
       requireElement("#total-points"),
+      this.requestRender,
     );
     this.scene.add(this.cloudManager.sceneGroup);
 
@@ -79,6 +97,7 @@ class ViewerApp {
       requireElement("#ruler-list"),
       requireElement("#ruler-toggle"),
       requireElement("#ruler-clear"),
+      this.requestRender,
     );
     this.scene.add(this.ruler.sceneGroup);
 
@@ -90,13 +109,27 @@ class ViewerApp {
     this.bindPointerEvents();
     this.bindKeyboard();
 
-    window.addEventListener("resize", () => this.resize());
+    // Observe the frame rather than the window so layout changes (panel wrapping,
+    // devtools docking) are caught too. Fires once on observe().
+    const frame = this.canvas.parentElement;
+    if (frame) {
+      new ResizeObserver(() => {
+        this.resize();
+        this.requestRender();
+      }).observe(frame);
+    }
     this.resize();
   }
 
   start(): void {
-    this.render();
+    this.requestRender();
   }
+
+  /** Schedules at most one frame; safe to call from anywhere, any number of times. */
+  private readonly requestRender = (): void => {
+    if (this.frameHandle !== null) return;
+    this.frameHandle = window.requestAnimationFrame((now) => this.renderFrame(now));
+  };
 
   private bindEdlToggle(): void {
     const btn = requireElement<HTMLButtonElement>("#edl-toggle");
@@ -104,6 +137,7 @@ class ViewerApp {
       this.edl.enabled = !this.edl.enabled;
       btn.textContent = this.edl.enabled ? "EDL on" : "EDL off";
       btn.setAttribute("aria-pressed", String(this.edl.enabled));
+      this.requestRender();
     });
   }
 
@@ -160,12 +194,14 @@ class ViewerApp {
         this.camera.position.set(1.25, -1.25, 0.95);
         this.controls.target.set(0, 0, 0);
         this.controls.update();
+        this.requestRender();
         return;
       }
 
       if (["w", "a", "s", "d", "q", "e"].includes(key)) {
         this.pressedKeys.add(key);
         if (this.shouldHandleKeys()) e.preventDefault();
+        this.requestRender();
       }
     });
 
@@ -197,13 +233,13 @@ class ViewerApp {
     if (this.pressedKeys.has("e")) vert -= 1;
     if (fwd === 0 && lat === 0 && vert === 0) return;
 
-    const up = new Vector3(0, 0, 1);
-    const forward = this.controls.target.clone().sub(this.camera.position).setZ(0);
+    const up = this.navUp;
+    const forward = this.navForward.copy(this.controls.target).sub(this.camera.position).setZ(0);
     if (forward.lengthSq() < 1e-8) forward.set(1, 0, 0);
     else forward.normalize();
 
-    const right = forward.clone().cross(up).normalize();
-    const move = new Vector3();
+    const right = this.navRight.copy(forward).cross(up).normalize();
+    const move = this.navMove.set(0, 0, 0);
     move.addScaledVector(forward, fwd);
     move.addScaledVector(right, lat);
     move.addScaledVector(up, vert);
@@ -221,25 +257,33 @@ class ViewerApp {
     if (!frame) return;
 
     const { clientWidth, clientHeight } = frame;
+    // Re-read the ratio so moving the window to another display is picked up.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
     const dpr = this.renderer.getPixelRatio();
     this.camera.aspect = clientWidth / Math.max(clientHeight, 1);
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(clientWidth, clientHeight, false);
     this.edl.resize(Math.floor(clientWidth * dpr), Math.floor(clientHeight * dpr));
-    this.ruler.updateLabels();
   }
 
-  private render(): void {
-    const now = performance.now();
-    const dt = Math.min((now - this.lastFrameTime) / 1000, 0.1);
-    this.lastFrameTime = now;
+  private renderFrame(now: number): void {
+    this.frameHandle = null;
+
+    // dt only means something while keys keep the loop running; after idle the
+    // previous timestamp is stale, so the first frame assumes one 60 Hz step.
+    const dt = this.lastNavTime === null ? 1 / 60 : Math.min((now - this.lastNavTime) / 1000, 0.1);
+    this.lastNavTime = now;
 
     this.updateKeyboardNav(dt);
     this.controls.update();
     this.ruler.updateLabels();
     this.edl.render(this.renderer, this.scene);
 
-    window.requestAnimationFrame(() => this.render());
+    if (this.pressedKeys.size > 0 && this.shouldHandleKeys()) {
+      this.requestRender();
+    } else {
+      this.lastNavTime = null;
+    }
   }
 }
 

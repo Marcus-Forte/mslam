@@ -120,6 +120,12 @@ target_link_libraries(test_timing slam GTest::gtest_main)
 
 gtest_discover_tests(test_timing)
 
+add_executable(test_parallel
+test_parallel.cc)
+target_link_libraries(test_parallel slam GTest::gtest_main)
+
+gtest_discover_tests(test_parallel)
+
 add_executable(mslam_draft draft.cc)
 target_link_libraries(mslam_draft moptim maps slam ILidar)
 

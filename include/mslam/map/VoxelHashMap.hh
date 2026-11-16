@@ -42,6 +42,12 @@ public:
   /// \throws std::invalid_argument if outside [0, kMaxAdjacentVoxels].
   void setNumAdjacentVoxelSearch(int adjacent_voxels);
 
+  /// Edge length of a voxel, in metres.
+  float voxelSize() const { return voxel_size_; }
+  /// Current search radius around the query voxel, in voxels (see
+  /// setNumAdjacentVoxelSearch()).
+  int numAdjacentVoxelSearch() const { return adjacent_voxels_; }
+
   /// Number of occupied voxels (used for diagnostics / tests).
   size_t size() const { return map_.size(); }
 

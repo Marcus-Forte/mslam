@@ -26,6 +26,9 @@ struct RegistrationConfig {
   int reg_iterations = 30;
   int optimizer_iterations = 5;
   float max_correspondence_distance = 0.3F; ///< m.
+  /// Threads for the correspondence search and normal estimation (1:
+  /// sequential, 0: every hardware thread). Results do not depend on it.
+  unsigned num_threads = 1;
 };
 
 /// Reads a registration config (JSON with comments). Every key is optional.

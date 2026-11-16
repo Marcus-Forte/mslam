@@ -3,7 +3,9 @@
 //  - synchronously through SlamPipeline, the way bench_slam does it (the
 //    reference: no threads, no clock);
 //  - through the live loop (SlamRunner + SensorInput) fed by the playback
-//    driver on its own thread.
+//    driver on its own thread;
+//  - and, in a build with TBB, synchronously again with slam.num_threads = 4,
+//    which must give the same pose as the first replay to the last bit.
 //
 // The live run is deterministic: the sensor input blocks the playback thread
 // instead of dropping (SensorOverflow::Block), the playback is unpaced, the
@@ -22,6 +24,7 @@
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
+#include "mslam/utils/Parallel.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
@@ -290,16 +293,25 @@ protected:
 
     synchronous_ = replaySynchronously(config, logger, recording);
     live_ = replayThroughTheLiveLoop(config, logger, recording);
+    if (mslam::ParallelExecutor::available()) {
+      auto parallel_config = config;
+      parallel_config.parameters.num_threads = 4;
+      four_threads_ = replaySynchronously(parallel_config, logger, recording);
+    }
 
     std::cout << "Synchronous: " << *synchronous_ << "\n"
               << "Live loop:   " << live_->result
               << " dropped_scans=" << live_->dropped_scans
               << " imu_wait_timeouts=" << live_->imu_wait_timeouts << "\n";
+    if (four_threads_.has_value()) {
+      std::cout << "4 threads:   " << *four_threads_ << "\n";
+    }
   }
 
   static void TearDownTestSuite() {
     synchronous_.reset();
     live_.reset();
+    four_threads_.reset();
   }
 
   void SetUp() override {
@@ -311,10 +323,13 @@ protected:
 
   static std::optional<ReplayResult> synchronous_;
   static std::optional<LiveRun> live_;
+  /// The synchronous replay with slam.num_threads = 4 (absent without TBB).
+  static std::optional<ReplayResult> four_threads_;
 };
 
 std::optional<ReplayResult> SlamIntegration::synchronous_;
 std::optional<LiveRun> SlamIntegration::live_;
+std::optional<ReplayResult> SlamIntegration::four_threads_;
 
 TEST_F(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
   ASSERT_TRUE(live_->finished) << "The live run did not consume the recording";
@@ -364,6 +379,27 @@ TEST_F(SlamIntegration, LiveLoopMatchesTheSynchronousReplay) {
   for (int i = 0; i < 6; ++i) {
     EXPECT_EQ(live.pose[i], sync.pose[i])
         << "pose[" << i << "] differs by " << live.pose[i] - sync.pose[i];
+  }
+}
+
+// The parallel correspondence search and normal estimation write each result
+// into its own slot and keep every order-dependent step sequential, so the
+// thread count cannot change the result. A difference here is a bug in that
+// code, not floating-point noise.
+TEST_F(SlamIntegration, FourThreadsMatchTheSynchronousReplay) {
+  if (!four_threads_.has_value()) {
+    GTEST_SKIP() << "built without TBB";
+  }
+  const auto &parallel = *four_threads_;
+  const auto &sync = *synchronous_;
+
+  EXPECT_EQ(parallel.scans, sync.scans);
+  EXPECT_EQ(parallel.registration.imu_scans, sync.registration.imu_scans);
+  EXPECT_EQ(parallel.registration.lidar_only_scans,
+            sync.registration.lidar_only_scans);
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(parallel.pose[i], sync.pose[i])
+        << "pose[" << i << "] differs by " << parallel.pose[i] - sync.pose[i];
   }
 }
 

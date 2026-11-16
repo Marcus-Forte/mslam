@@ -26,6 +26,26 @@ the field to `"info"` to show informational messages and more severe messages:
 
 Restart `mslam` after changing the value for the new level to take effect.
 
+### Threads
+
+`slam.num_threads` (optional, default 1) sets how many threads run the
+correspondence search and the surface normal estimation during registration:
+1 runs sequentially, 0 uses every hardware thread, n uses at most n (the SLAM
+thread included). The pose does not depend on it: the result is the same bit for
+bit at any thread count. `register_scans` reads the same setting from
+`registration.num_threads` in its own config.
+
+The parallel code uses oneTBB (`libtbb-dev` to build, `libtbb12` at run time).
+CMake looks for it when `MSLAM_WITH_TBB` is ON (the default); if it is not
+found, or with `-DMSLAM_WITH_TBB=OFF`, mslam is built sequential and a
+`num_threads` other than 1 logs a warning and runs sequentially.
+
+```json
+{
+  "slam": { "num_threads": 4 }
+}
+```
+
 ## Docker
 
 Build and run from the repository root:
@@ -183,7 +203,8 @@ optional, unknown keys and invalid values are rejected):
     "registration": {
         "reg_iterations": 30,
         "optimizer_iterations": 5,
-        "max_correspondence_distance": 0.3
+        "max_correspondence_distance": 0.3,
+        "num_threads": 1             // 0 = all hardware threads; same poses at any value
     }
 }
 ```
@@ -278,6 +299,14 @@ default run, without the option, is unchanged.
 
 ```bash
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 1 --save-map map.ply
+```
+
+`--threads <n>` overrides `slam.num_threads` of the config (1 sequential, 0
+every hardware thread). The pose must be the same at every value, so it is
+also a check of the parallel code:
+
+```bash
+build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5 --threads 4
 ```
 
 ## Map stream (`StreamMap`)

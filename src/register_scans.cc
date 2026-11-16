@@ -179,6 +179,7 @@ int run(const Arguments &arguments) {
   parameters.max_points_per_voxel = config.max_points_per_voxel;
   parameters.icp = {config.reg_iterations, config.optimizer_iterations,
                     config.max_correspondence_distance};
+  parameters.num_threads = config.num_threads;
   mslam::ScanSequenceRegistration sequence(parameters, logger);
 
   // Full-resolution clouds are only kept when they are written out.

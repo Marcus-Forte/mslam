@@ -19,6 +19,9 @@ struct ScanSequenceParameters {
   float map_resolution = 0.1F; ///< Voxel size of the target map.
   std::size_t max_points_per_voxel = 8;
   IcpParameters icp{30, 5, 0.3F};
+  /// Threads for the correspondence search and normal estimation (1:
+  /// sequential, 0: every hardware thread). Results do not depend on it.
+  unsigned num_threads = 1;
 };
 
 /// What add() did with one cloud.
@@ -66,6 +69,8 @@ private:
   ScanSequenceParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
   VoxelHashMap map_;
+  /// Shared by registration_ and fit_ (declared first: built before them).
+  std::shared_ptr<const ParallelExecutor> executor_;
   PointToPlaneRegistration registration_;
   IcpWorkspace fit_; ///< Only measures the fit of a result.
   VoxelFilter filter_;

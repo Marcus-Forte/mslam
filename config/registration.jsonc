@@ -17,6 +17,11 @@
     "registration": {
         "reg_iterations": 30,              // correspondence rounds (upper bound)
         "optimizer_iterations": 5,         // Levenberg-Marquardt iterations per round
-        "max_correspondence_distance": 0.3 // m: how far off the initial pose may be, locally
+        "max_correspondence_distance": 0.3, // m: how far off the initial pose may be, locally
+        // Threads for the correspondence search and normal estimation:
+        // 1 = sequential, 0 = every hardware thread, n = at most n. The poses do
+        // not depend on it (bit for bit); needs a build with oneTBB, otherwise a
+        // value other than 1 logs a warning and runs sequentially.
+        "num_threads": 1
     }
 }

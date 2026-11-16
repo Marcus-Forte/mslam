@@ -9,7 +9,7 @@
 //
 //   bench_slam <config.jsonc> <recording.pbscan> [repeats] [--save-map out.ply]
 //              [--imu-fusion <preintegration_factor|dead_reckoning>]
-//              [--trajectory out.csv]
+//              [--trajectory out.csv] [--threads <n>]
 //
 // Prints one line per run: the scan count, the total and per-stage wall time
 // in milliseconds and the final pose. It is not registered with CTest.
@@ -29,6 +29,9 @@
 // pose (x y z roll pitch yaw), velocity, gyro bias and accel bias after the
 // scan, and the first registration round's correction in mm and mrad (empty
 // when that round found no correspondences). tools: test/plot_imu_fusion.py.
+//
+// --threads overrides slam.num_threads of the config (1 sequential, 0 every
+// hardware thread). The pose must not depend on it.
 #include "msensor/conversions/lidar_imu_conversions.hh"
 #include "msensor/recorder/scan_player.hh"
 #include "mslam/config/JsonConfig.hh"
@@ -41,6 +44,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -110,10 +114,12 @@ int usage(const char *program) {
                "usage: %s config.jsonc recording.pbscan [repeats] "
                "[--save-map out.ply] "
                "[--imu-fusion preintegration_factor|dead_reckoning] "
-               "[--trajectory out.csv]\n"
+               "[--trajectory out.csv] [--threads n]\n"
                "  --save-map writes the final map (all published increments) "
                "of the last run\n"
                "  --imu-fusion overrides slam.imu_fusion of the config\n"
+               "  --threads overrides slam.num_threads of the config "
+               "(1 sequential, 0 all hardware threads)\n"
                "  --trajectory writes one CSV row per registered scan "
                "(last run)\n",
                program);
@@ -129,6 +135,7 @@ int main(int argc, char **argv) {
   std::string trajectory_path;
   bool save_trajectory = false;
   std::optional<mslam::ImuFusion> imu_fusion;
+  std::optional<unsigned> num_threads;
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--save-map") {
@@ -156,6 +163,19 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: invalid --imu-fusion %s\n", argv[i]);
         return usage(argv[0]);
       }
+    } else if (arg == "--threads") {
+      if (i + 1 >= argc) {
+        return usage(argv[0]);
+      }
+      const std::string_view value = argv[++i];
+      unsigned parsed = 0;
+      const auto [end, error] =
+          std::from_chars(value.data(), value.data() + value.size(), parsed);
+      if (error != std::errc{} || end != value.data() + value.size()) {
+        std::fprintf(stderr, "error: invalid --threads %s\n", argv[i]);
+        return usage(argv[0]);
+      }
+      num_threads = parsed;
     } else if (arg.size() > 1 && arg[0] == '-' && arg != "-") {
       // Unknown option (a negative repeat count is not meaningful either).
       return usage(argv[0]);
@@ -195,6 +215,9 @@ int main(int argc, char **argv) {
   auto config = json_config.getConfig();
   if (imu_fusion.has_value()) {
     config.parameters.imu_fusion = *imu_fusion;
+  }
+  if (num_threads.has_value()) {
+    config.parameters.num_threads = *num_threads;
   }
 
   auto logger = spdlog::default_logger();

@@ -6,9 +6,11 @@ namespace mslam {
 
 IcpWorkspace::IcpWorkspace(
     const IcpParameters &parameters, std::shared_ptr<spdlog::logger> logger,
-    std::shared_ptr<ICorrespondenceFinder> correspondence_finder)
+    std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
+    std::shared_ptr<const ParallelExecutor> executor)
     : parameters_(parameters), logger_(std::move(logger)),
-      correspondence_finder_(std::move(correspondence_finder)) {}
+      correspondence_finder_(std::move(correspondence_finder)),
+      executor_(std::move(executor)) {}
 
 void IcpWorkspace::begin(const IMap &map, const PointCloud &scan,
                          const Eigen::Affine3d &initial_guess) {
@@ -38,8 +40,13 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   plane_offsets_.clear();
   plane_inputs_.reserve(correspondences_.size());
   plane_offsets_.reserve(correspondences_.size());
-  for (const auto &[scan_point, map_point] : correspondences_) {
-    const auto normal = normal_estimator_.estimate(map_point);
+  normal_estimator_.estimateAll(correspondences_, normal_slots_,
+                                executor_.get());
+  // Assembled sequentially in correspondence order, as before the normals
+  // could be estimated in parallel.
+  for (std::size_t i = 0; i < correspondences_.size(); ++i) {
+    const auto &[scan_point, map_point] = correspondences_[i];
+    const auto &normal = normal_estimator_.normal(normal_slots_[i]);
     if (!normal.has_value()) {
       continue;
     }

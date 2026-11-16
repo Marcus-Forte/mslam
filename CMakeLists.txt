@@ -36,6 +36,20 @@ add_compile_definitions(MSENSOR_NO_LEGACY_NAMES)
 add_subdirectory(grpc)
 link_libraries(msensor::msensor)
 
+# oneTBB runs the correspondence search and normal estimation in parallel when
+# slam.num_threads (registration.num_threads for register_scans) is not 1.
+# Without it the build is sequential and such a setting only logs a warning.
+option(MSLAM_WITH_TBB "Use oneTBB for the parallel registration search" ON)
+if(MSLAM_WITH_TBB)
+  find_package(TBB QUIET)
+  if(NOT TBB_FOUND)
+    message(WARNING "MSLAM_WITH_TBB is ON but oneTBB was not found "
+                    "(install libtbb-dev); building the sequential version")
+  else()
+    message(STATUS "MSLAM_WITH_TBB is ON and oneTBB was found; building the parallel version")
+  endif()
+endif()
+
 add_subdirectory(src/map)
 add_subdirectory(src/config)
 add_subdirectory(src/slam)

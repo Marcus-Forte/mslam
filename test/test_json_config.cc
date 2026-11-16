@@ -75,4 +75,21 @@ TEST_F(JsonConfigTest, ImuFusionRejectsAnInvalidValue) {
   EXPECT_THROW(load(R"(, "imu_fusion": 1)"), std::runtime_error);
 }
 
+TEST_F(JsonConfigTest, NumThreadsDefaultsToOneWhenAbsent) {
+  EXPECT_EQ(load("").parameters.num_threads, 1U);
+}
+
+TEST_F(JsonConfigTest, NumThreadsParsesCountsAndZero) {
+  EXPECT_EQ(load(R"(, "num_threads": 4)").parameters.num_threads, 4U);
+  EXPECT_EQ(load(R"(, "num_threads": 0)").parameters.num_threads, 0U);
+}
+
+TEST_F(JsonConfigTest, NumThreadsRejectsAnInvalidValue) {
+  EXPECT_THROW(load(R"(, "num_threads": "4")"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": -1)"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": 2.5)"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": true)"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": 257)"), std::runtime_error);
+}
+
 } // namespace

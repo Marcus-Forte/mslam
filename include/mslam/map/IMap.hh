@@ -6,6 +6,15 @@
 #include <vector>
 
 namespace mslam {
+/**
+ * @brief A map of points that scans are registered against.
+ *
+ * Threading contract: getClosestNeighbor() and findClosestNeighbors() (and so
+ * getClosestNNeighbors()) must be safe to call from several threads at once
+ * while no non-const method runs; the registrations rely on it to search in
+ * parallel during an alignment. getPointCloudRepresentation() is excluded: it
+ * may rebuild a cached copy, so it must not run concurrently with anything.
+ */
 class IMap {
 public:
   virtual ~IMap() = default;

@@ -24,11 +24,14 @@ ScanSequenceRegistration::ScanSequenceRegistration(
     std::shared_ptr<spdlog::logger> logger)
     : parameters_(parameters), logger_(logger),
       map_(parameters.map_resolution, parameters.max_points_per_voxel),
+      executor_(makeParallelExecutor(parameters.num_threads, *logger)),
       registration_(parameters.icp.registration_iterations,
                     parameters.icp.optimizer_iterations,
                     parameters.icp.max_correspondence_distance, logger,
-                    createLoggingCorrespondenceFinder(logger)),
-      fit_(parameters.icp, logger, createLoggingCorrespondenceFinder(logger)) {
+                    createLoggingCorrespondenceFinder(logger, executor_),
+                    executor_),
+      fit_(parameters.icp, logger,
+           createLoggingCorrespondenceFinder(logger, executor_), executor_) {
   // The tolerance keeps a float quotient such as 0.3F / 0.1F (3.00000004) from
   // costing an extra ring of voxels.
   const double wanted = std::ceil(

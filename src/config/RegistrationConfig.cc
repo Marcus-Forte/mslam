@@ -89,10 +89,10 @@ float readPositiveFloat(const Json::Value &object, std::string_view section,
   return as_float;
 }
 
-// An integer in [1, max].
-std::int64_t readCount(const Json::Value &object, std::string_view section,
-                       std::string_view key, std::int64_t fallback,
-                       std::int64_t max) {
+// An integer in [min, max].
+std::int64_t readInteger(const Json::Value &object, std::string_view section,
+                         std::string_view key, std::int64_t fallback,
+                         std::int64_t min, std::int64_t max) {
   const Json::Value *value = optionalMember(object, key);
   if (value == nullptr) {
     return fallback;
@@ -102,11 +102,18 @@ std::int64_t readCount(const Json::Value &object, std::string_view section,
          "' must be an integer");
   }
   const double number = value->asDouble();
-  if (number < 1.0 || number > static_cast<double>(max)) {
-    fail("registration config: '" + qualified(section, key) +
-         "' must be in [1, " + std::to_string(max) + "]");
+  if (number < static_cast<double>(min) || number > static_cast<double>(max)) {
+    fail("registration config: '" + qualified(section, key) + "' must be in [" +
+         std::to_string(min) + ", " + std::to_string(max) + "]");
   }
   return value->asInt64();
+}
+
+// An integer in [1, max].
+std::int64_t readCount(const Json::Value &object, std::string_view section,
+                       std::string_view key, std::int64_t fallback,
+                       std::int64_t max) {
+  return readInteger(object, section, key, fallback, 1, max);
 }
 
 const Json::Value *optionalSection(const Json::Value &root,
@@ -147,7 +154,7 @@ RegistrationConfig loadRegistrationConfig(const std::filesystem::path &path) {
   if (const auto *registration = optionalSection(root, "registration")) {
     rejectUnknownKeys(*registration, "registration",
                       {"reg_iterations", "optimizer_iterations",
-                       "max_correspondence_distance"});
+                       "max_correspondence_distance", "num_threads"});
     config.reg_iterations = static_cast<int>(
         readCount(*registration, "registration", "reg_iterations",
                   config.reg_iterations, 1'000'000));
@@ -157,6 +164,9 @@ RegistrationConfig loadRegistrationConfig(const std::filesystem::path &path) {
     config.max_correspondence_distance = readPositiveFloat(
         *registration, "registration", "max_correspondence_distance",
         config.max_correspondence_distance);
+    config.num_threads = static_cast<unsigned>(
+        readInteger(*registration, "registration", "num_threads",
+                    config.num_threads, 0, 256));
   }
   return config;
 }

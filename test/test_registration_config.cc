@@ -62,6 +62,7 @@ void expectDefaults(const mslam::RegistrationConfig &config) {
   EXPECT_EQ(config.reg_iterations, 30);
   EXPECT_EQ(config.optimizer_iterations, 5);
   EXPECT_FLOAT_EQ(config.max_correspondence_distance, 0.3F);
+  EXPECT_EQ(config.num_threads, 1U);
 }
 
 TEST_F(RegistrationConfigTest, DefaultsWithoutAFile) {
@@ -142,6 +143,21 @@ TEST_F(RegistrationConfigTest, RejectsInvalidValues) {
   expectConfigError(
       R"({"registration": {"max_correspondence_distance": null}})",
       "registration.max_correspondence_distance");
+  expectConfigError(R"({"registration": {"num_threads": -1}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"registration": {"num_threads": 2.5}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"registration": {"num_threads": "4"}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"registration": {"num_threads": 257}})",
+                    "registration.num_threads");
+}
+
+TEST_F(RegistrationConfigTest, ParsesNumThreadsIncludingZero) {
+  EXPECT_EQ(loadConfig(R"({"registration": {"num_threads": 4}})").num_threads,
+            4U);
+  EXPECT_EQ(loadConfig(R"({"registration": {"num_threads": 0}})").num_threads,
+            0U);
 }
 
 TEST_F(RegistrationConfigTest, RejectsAnUnreadableOrUnparsableFile) {

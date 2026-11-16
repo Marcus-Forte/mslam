@@ -5,10 +5,12 @@
 #include "mslam/map/IMap.hh"
 #include "mslam/slam/ICorrespondenceFinder.hh"
 #include "mslam/slam/NormalEstimator.hh"
+#include "mslam/utils/Parallel.hh"
 
 #include "moptim/LevenbergMarquardt.hh"
 
 #include <Eigen/Dense>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -45,9 +47,13 @@ struct FirstRoundIncrement {
  */
 class IcpWorkspace {
 public:
+  /// @param executor Runs the normal estimation of new map points (nullptr:
+  /// sequential). The correspondence search runs on whatever executor
+  /// @p correspondence_finder was given.
   IcpWorkspace(const IcpParameters &parameters,
                std::shared_ptr<spdlog::logger> logger,
-               std::shared_ptr<ICorrespondenceFinder> correspondence_finder);
+               std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
+               std::shared_ptr<const ParallelExecutor> executor = nullptr);
 
   const IcpParameters &parameters() const { return parameters_; }
   spdlog::logger &logger() const { return *logger_; }
@@ -94,7 +100,9 @@ private:
   IcpParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
   std::shared_ptr<ICorrespondenceFinder> correspondence_finder_;
+  std::shared_ptr<const ParallelExecutor> executor_;
   NormalEstimator normal_estimator_;
+  std::vector<std::uint32_t> normal_slots_; ///< One per correspondence.
   std::optional<OptimizerObserver<double>> observer_;
 
   const PointCloud *scan_ = nullptr;

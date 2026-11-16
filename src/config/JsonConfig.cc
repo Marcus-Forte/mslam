@@ -8,6 +8,9 @@
 namespace mslam {
 
 namespace {
+// Upper bound of slam.num_threads, only to reject nonsense.
+constexpr unsigned kMaxThreads = 256;
+
 mslam::DownsampleFilter parseDownsampleFilter(const std::string &filter) {
   if (filter == "voxel_grid") {
     return mslam::DownsampleFilter::VoxelGrid;
@@ -175,6 +178,17 @@ void JsonConfig::load() {
     }
     config_.parameters.imu_fusion =
         parseImuFusion(root["slam"]["imu_fusion"].asString());
+  }
+
+  if (!root["slam"]["num_threads"].empty()) {
+    const auto &num_threads = root["slam"]["num_threads"];
+    if (!num_threads.isIntegral() || num_threads.asDouble() < 0.0 ||
+        num_threads.asDouble() > kMaxThreads) {
+      throw std::runtime_error("Invalid slam num_threads: expected an integer "
+                               "in [0, " +
+                               std::to_string(kMaxThreads) + "]");
+    }
+    config_.parameters.num_threads = num_threads.asUInt();
   }
 
   if (config_.parameters.opt_iterations <= 0) {

@@ -26,7 +26,7 @@ namespace {
 // the server never drops what mslam would keep. SensorInput keeps only the
 // newest scan, so a deeper scan queue would be discarded on arrival.
 constexpr uint32_t k_remote_imu_queue = 1000;
-constexpr uint32_t k_remote_scan_queue = 1;
+constexpr uint32_t k_remote_scan_queue = 5;
 
 // Set from the signal handler, polled by the SLAM loop.
 std::atomic<bool> g_stop_requested{false};

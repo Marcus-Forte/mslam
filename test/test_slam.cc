@@ -1,5 +1,6 @@
 #include "mslam/slam/Slam.hh"
 
+#include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Transform.hh"
 
 #include <spdlog/sinks/ostream_sink.h>
@@ -396,6 +397,70 @@ TEST(Slam, UpdateLogsTimingAtInfoLevel) {
 
   slam.Update(msensor::Scan3DI{});
   EXPECT_NE(out.str().find("Slam::Update elapsed"), std::string::npos);
+}
+
+// Constructs a Slam on `map` and returns what it logged at warn level. The
+// constructor's other warnings (ResetPose) are filtered out by the caller.
+std::string
+constructAndCaptureWarnings(const mslam::SlamConfiguration &config,
+                            const std::shared_ptr<mslam::IMap> &map) {
+  std::ostringstream out;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(out);
+  auto logger = std::make_shared<spdlog::logger>("gate_reach_test", sink);
+  logger->set_level(spdlog::level::warn);
+  mslam::Slam slam(logger, config, map);
+  return out.str();
+}
+
+constexpr const char *k_reach_warning = "exceeds the voxel map search radius";
+
+// The map's search radius is the one the Slam is built on: the voxel size and
+// the radius come from the VoxelHashMap, here 0.1 m voxels with radius 1.
+std::shared_ptr<mslam::IMap> voxelMapWithRadius(float voxel_size, int radius) {
+  auto map = std::make_shared<mslam::VoxelHashMap>(voxel_size, 5);
+  map->setNumAdjacentVoxelSearch(radius);
+  return map;
+}
+
+TEST(Slam, WarnsWhenGateExceedsVoxelMapSearchReach) {
+  mslam::SlamConfiguration config;
+  config.parameters.max_correspondence_distance = 0.3F; // reach is 0.1 m
+
+  const auto warnings =
+      constructAndCaptureWarnings(config, voxelMapWithRadius(0.1F, 1));
+  EXPECT_NE(warnings.find(k_reach_warning), std::string::npos) << warnings;
+}
+
+TEST(Slam, DoesNotWarnWhenGateIsWithinVoxelMapSearchReach) {
+  mslam::SlamConfiguration config;
+  config.parameters.max_correspondence_distance = 0.1F; // equal to the reach
+
+  const auto warnings =
+      constructAndCaptureWarnings(config, voxelMapWithRadius(0.1F, 1));
+  EXPECT_EQ(warnings.find(k_reach_warning), std::string::npos) << warnings;
+
+  // Wider radius: 2 * 0.1 m = 0.2 m covers a 0.2 m gate.
+  config.parameters.max_correspondence_distance = 0.2F;
+  const auto wider =
+      constructAndCaptureWarnings(config, voxelMapWithRadius(0.1F, 2));
+  EXPECT_EQ(wider.find(k_reach_warning), std::string::npos) << wider;
+}
+
+TEST(Slam, WarnsForNonVoxelMapUsingResolutionAndOneVoxel) {
+  mslam::SlamConfiguration config;
+  config.parameters.max_correspondence_distance = 0.3F;
+  config.map_parameters.resolution = 0.1F;
+
+  const auto warnings =
+      constructAndCaptureWarnings(config, std::make_shared<StaticMap>());
+  EXPECT_NE(warnings.find(k_reach_warning), std::string::npos) << warnings;
+
+  // Default resolution 0.2 m covers the default 0.1 m gate: no warning.
+  mslam::SlamConfiguration default_config;
+  default_config.parameters.max_correspondence_distance = 0.1F;
+  const auto quiet = constructAndCaptureWarnings(default_config,
+                                                 std::make_shared<StaticMap>());
+  EXPECT_EQ(quiet.find(k_reach_warning), std::string::npos) << quiet;
 }
 
 } // namespace

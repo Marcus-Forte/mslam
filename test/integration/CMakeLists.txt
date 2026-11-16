@@ -25,7 +25,7 @@ target_link_libraries(test_slam_integration
 target_compile_definitions(test_slam_integration
   PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-# One CTest entry for the whole binary: its tests share the two replays of the
+# One CTest entry for the whole binary: its tests share the replays of the
 # recording (SetUpTestSuite), which one process per test would repeat.
 if(MSLAM_INTEGRATION_TESTS)
   add_test(NAME SlamIntegration COMMAND test_slam_integration)

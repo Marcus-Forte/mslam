@@ -16,6 +16,7 @@ FROM debian:sid-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     libfmt10 libjsoncpp26 libspdlog1.15 \
+    libtbb12 \
     && rm -rf /var/lib/apt/lists/*
 
 ARG PRESET=pi5

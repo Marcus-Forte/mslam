@@ -97,6 +97,9 @@ struct SlamParameters {
   unsigned int reg_iterations = 5;
   float max_correspondence_distance = 0.1;
   ImuFusion imu_fusion = ImuFusion::PreintegrationFactor; // only with_imu
+  // Threads for the correspondence search and normal estimation: 1 runs
+  // sequentially, 0 uses every hardware thread. Results do not depend on it.
+  unsigned int num_threads = 1;
 };
 
 /**
@@ -170,7 +173,8 @@ struct SlamConfiguration {
        << "\n"
        << "Max Corr. Distance: "
        << config.parameters.max_correspondence_distance << "\n"
-       << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n";
+       << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n"
+       << "Threads: " << config.parameters.num_threads << "\n";
     return os;
   }
 };

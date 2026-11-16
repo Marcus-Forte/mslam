@@ -1,4 +1,5 @@
 #include "mslam/slam/Slam.hh"
+#include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/CorrespondenceFinderLogger.hh"
 #include "mslam/slam/ImuMath.hh"
 #include "mslam/slam/ImuPreintegration.hh"
@@ -10,6 +11,28 @@
 #include <cmath>
 
 namespace {
+
+// The voxel map only guarantees to return every point within search_radius
+// voxels of the query (one ring of voxels for search_radius 1). Correspondences
+// farther than that can be missed silently, so say so once at construction.
+void warnIfGateExceedsMapReach(const std::shared_ptr<spdlog::logger> &logger,
+                               float max_correspondence_distance,
+                               float voxel_size, int search_radius) {
+  const float guaranteed_reach = static_cast<float>(search_radius) * voxel_size;
+  // Relative slack so that a gate equal to the reach (0.1F against 1 * 0.1F)
+  // does not warn because of float rounding.
+  if (max_correspondence_distance <= guaranteed_reach * (1.0F + 1e-6F)) {
+    return;
+  }
+  const float max_corner_reach =
+      std::sqrt(3.0F) * static_cast<float>(search_radius + 1) * voxel_size;
+  logger->warn(
+      "max_correspondence_distance {} m exceeds the voxel map search radius: "
+      "{} voxels of {} m, guaranteed reach {} m (max corner reach {} m); "
+      "correspondences beyond the guaranteed reach may be missed",
+      max_correspondence_distance, search_radius, voxel_size, guaranteed_reach,
+      max_corner_reach);
+}
 
 void logState(const std::shared_ptr<spdlog::logger> &logger,
               const mslam::SlamState &state,
@@ -31,15 +54,25 @@ namespace mslam {
 Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
            const SlamConfiguration &config, const std::shared_ptr<IMap> &map)
     : logger_(logger), config_(config),
+      executor_(makeParallelExecutor(config.parameters.num_threads, *logger)),
       registration_(std::make_unique<PointToPlaneRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          createLoggingCorrespondenceFinder(logger))),
+          createLoggingCorrespondenceFinder(logger, executor_), executor_)),
       imu_registration_(std::make_unique<ImuRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          createLoggingCorrespondenceFinder(logger))),
+          createLoggingCorrespondenceFinder(logger, executor_), executor_)),
       map_(map) {
+  if (const auto *voxel_map = dynamic_cast<const VoxelHashMap *>(map_.get())) {
+    warnIfGateExceedsMapReach(
+        logger_, config_.parameters.max_correspondence_distance,
+        voxel_map->voxelSize(), voxel_map->numAdjacentVoxelSearch());
+  } else {
+    warnIfGateExceedsMapReach(logger_,
+                              config_.parameters.max_correspondence_distance,
+                              config_.map_parameters.resolution, 1);
+  }
   ResetPose();
 }
 

@@ -10,6 +10,7 @@ Transform.cc
 Preprocessor.cc
 Deskew.cc
 PointCloudIO.cc
+ScanSequenceRegistration.cc
 Conversion.cc
 SlamServer.cc
 ImuPreintegration.cc

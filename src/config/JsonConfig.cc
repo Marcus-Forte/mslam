@@ -8,26 +8,6 @@
 namespace mslam {
 
 namespace {
-spdlog::level::level_enum parseLogLevel(const std::string &log_level) {
-  if (log_level == "trace") {
-    return spdlog::level::trace;
-  }
-  if (log_level == "debug") {
-    return spdlog::level::debug;
-  }
-  if (log_level == "info") {
-    return spdlog::level::info;
-  }
-  if (log_level == "warning") {
-    return spdlog::level::warn;
-  }
-  if (log_level == "error") {
-    return spdlog::level::err;
-  }
-
-  throw std::runtime_error("Invalid log_level field: " + log_level);
-}
-
 mslam::DownsampleFilter parseDownsampleFilter(const std::string &filter) {
   if (filter == "voxel_grid") {
     return mslam::DownsampleFilter::VoxelGrid;

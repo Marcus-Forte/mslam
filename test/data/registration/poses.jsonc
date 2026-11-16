@@ -1,0 +1,16 @@
+// Initial poses for the sample clouds in this folder, for register_scans --poses.
+// Pose of each cloud's own frame in the frame of a.ply:
+// [x, y, z, roll, pitch, yaw] (m, rad; R = Rx(roll) * Ry(pitch) * Rz(yaw)).
+//
+// The clouds are cut from one `bench_slam --save-map` map of living_room_garden
+// (163616 points) and moved by a known transform:
+//   a.ply  every 2nd point (offset 0), not moved
+//   b.ply  every 2nd point (offset 1), true pose [0.10, -0.06, 0.04, 0.01, -0.015, 0.03]
+//   c.ply  every 3rd point (offset 1), true pose [1.5, -0.8, 0.2, 0.0, 0.0, 0.5]
+//
+// b.ply is close enough to a.ply to register from the previous estimate, so it
+// is not listed. c.ply is 1.4 m away and needs a starting pose: the one below
+// is deliberately a few cm and 0.02 rad off its true pose.
+{
+    "c.ply": [1.45, -0.77, 0.22, 0.01, 0.0, 0.48]
+}

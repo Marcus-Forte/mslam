@@ -11,6 +11,17 @@ namespace mslam {
 
 PointCloud readPlyPointCloud(const std::filesystem::path &path);
 
+/// Reads a `.pbscan` recording as one cloud: the points of every LiDAR scan
+/// entry, appended in file order (IMU entries are skipped, nothing is deskewed
+/// or transformed). Meaningful for a static recording. Throws
+/// std::runtime_error if the file cannot be read.
+PointCloud readPbscanPointCloud(const std::filesystem::path &path);
+
+/// Reads @p path as `.ply` (readPlyPointCloud) or `.pbscan`
+/// (readPbscanPointCloud), chosen by the extension (case-sensitive).
+/// \throws std::runtime_error for any other extension.
+PointCloud readPointCloud(const std::filesystem::path &path);
+
 /// Size in bytes of the binary PLY `writePlyPointCloud` writes for
 /// `num_points` points.
 std::uintmax_t plyFileSize(std::size_t num_points);

@@ -17,9 +17,24 @@ gtest_discover_tests(test_deskew)
 
 add_executable(test_point_cloud_io
 test_point_cloud_io.cc)
-target_link_libraries(test_point_cloud_io slam GTest::gtest_main)
+target_link_libraries(test_point_cloud_io slam scan_recorder GTest::gtest_main)
 
 gtest_discover_tests(test_point_cloud_io)
+
+add_executable(test_scan_sequence_registration
+test_scan_sequence_registration.cc)
+target_link_libraries(test_scan_sequence_registration slam maps GTest::gtest_main)
+
+gtest_discover_tests(test_scan_sequence_registration)
+
+add_executable(test_registration_config
+test_registration_config.cc)
+target_link_libraries(test_registration_config mslam::config GTest::gtest_main)
+# The shipped example config is parsed by one test.
+target_compile_definitions(test_registration_config
+  PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+gtest_discover_tests(test_registration_config)
 
 add_executable(test_correspondence_finder
 test_correspondence_finder.cc)

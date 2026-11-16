@@ -1,0 +1,22 @@
+// Tuning for register_scans: point-to-plane registration of whole clouds.
+// Every key is optional (the values below are the defaults, also used when -c
+// is omitted); unknown keys and invalid values are rejected.
+{
+    "log_level": "info", // trace || debug || info || warning || error
+
+    // Every input cloud is thinned to one point (the centroid) per voxel of this
+    // size (m) before it is registered and before it joins the target.
+    "voxel_size": 0.05,
+
+    // Target map (VoxelHashMap) holding the clouds registered so far.
+    "map": {
+        "resolution": 0.1,         // m
+        "max_points_per_voxel": 8  // normals come from the 5 nearest map points
+    },
+
+    "registration": {
+        "reg_iterations": 30,              // correspondence rounds (upper bound)
+        "optimizer_iterations": 5,         // Levenberg-Marquardt iterations per round
+        "max_correspondence_distance": 0.3 // m: how far off the initial pose may be, locally
+    }
+}

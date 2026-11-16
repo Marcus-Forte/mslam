@@ -11,3 +11,5 @@ __pycache__/
 
 # PLY scans
 /*.ply
+
+.DS_Store

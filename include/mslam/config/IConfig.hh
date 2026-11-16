@@ -33,6 +33,28 @@ inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   throw std::runtime_error("Invalid log level");
 }
 
+/// Parses the `log_level` strings of the JSON configurations.
+/// \throws std::runtime_error for any other string.
+inline spdlog::level::level_enum parseLogLevel(const std::string &log_level) {
+  if (log_level == "trace") {
+    return spdlog::level::trace;
+  }
+  if (log_level == "debug") {
+    return spdlog::level::debug;
+  }
+  if (log_level == "info") {
+    return spdlog::level::info;
+  }
+  if (log_level == "warning") {
+    return spdlog::level::warn;
+  }
+  if (log_level == "error") {
+    return spdlog::level::err;
+  }
+
+  throw std::runtime_error("Invalid log_level field: " + log_level);
+}
+
 inline constexpr std::string_view toString(RegistrationMetric3D metric) {
   switch (metric) {
   case RegistrationMetric3D::PointToPoint:

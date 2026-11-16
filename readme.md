@@ -137,12 +137,80 @@ The runtime now logs timings for several parts of the SLAM pipeline, including:
 
 ## Registering individual scans
 
-`register_scans2d` is a small utility for loading individual `.ply` scans and
-running pairwise registration experiments.
+`register_scans` registers whole point clouds, in the order given on the command
+line, with the point-to-plane registration the SLAM uses. It is built with the
+default target and is not installed:
 
 ```bash
-./build/default/register_scans2d scan1.ply scan2.ply
+cmake --build --preset build-gcc --target register_scans
+./build/gcc/register_scans [-c registration.jsonc] [--poses poses.jsonc] \
+    [-o merged.ply] [--save-poses out.jsonc] a.ply b.ply c.pbscan
 ```
+
+- Inputs are `.ply` files or `.pbscan` recordings. A recording is read as one
+  cloud: the points of every LiDAR scan are concatenated as recorded (IMU
+  entries are skipped, nothing is deskewed), so it only makes sense for a
+  static recording.
+- The first cloud defines the common frame: it is placed at identity (or at its
+  pose from `--poses`) and is not registered. Every later cloud is registered
+  against a map holding all clouds registered so far, and its result is the
+  pose of its own frame in the common frame, printed as
+  `pose=[x y z roll pitch yaw]` (m, rad; `R = Rx(roll) * Ry(pitch) * Rz(yaw)`).
+- Each registration starts from the pose estimated for the previous cloud
+  (identity for the second cloud), or from the cloud's measured pose when
+  `--poses` lists it. A step converges when its starting pose is within about
+  `max_correspondence_distance` of the truth, so give measured poses for clouds
+  that are further apart than that.
+- One line per cloud goes to stdout: points read and used (after thinning),
+  `reference` or `prior=measured|estimated`, matched points and percentage,
+  point-to-plane RMS in m against the map before the cloud joined it, the
+  first-round correction in mm / mrad, and the pose. A step whose first round
+  found no correspondences is flagged on its line, keeps its prior pose and
+  makes the exit code 2. Logging goes to stderr.
+- `-o merged.ply` writes all clouds at full resolution in the common frame (a
+  binary PLY the `viewer/` reads). `--save-poses out.jsonc` writes the poses in
+  the `--poses` format, so a result can be passed back for a finer run. Both
+  files are opened before any cloud is loaded.
+
+`-c` selects the tuning file (`config/registration.jsonc`; every key is
+optional, unknown keys and invalid values are rejected):
+
+```jsonc
+{
+    "log_level": "info",
+    "voxel_size": 0.05,          // every cloud is thinned to voxel centroids (m)
+    "map": { "resolution": 0.1, "max_points_per_voxel": 8 },
+    "registration": {
+        "reg_iterations": 30,
+        "optimizer_iterations": 5,
+        "max_correspondence_distance": 0.3
+    }
+}
+```
+
+The map's neighbour search radius is derived from the gate:
+`ceil(max_correspondence_distance / map.resolution)` voxels (at most 8, with a
+warning when clamped).
+
+`--poses` is optional. It is a flat JSON object (comments allowed) from input
+file name to `[x, y, z, roll, pitch, yaw]`, the pose of that cloud's frame in
+the common frame:
+
+```jsonc
+{
+    "b.ply":    [2.10, 0.00, 0.0, 0, 0, 1.5708],
+    "c.pbscan": [2.10, 3.40, 0.0, 0, 0, 3.1416]
+    // clouds not listed start from the previous estimate
+}
+```
+
+A key matches an input if it equals the argument as typed or its file name. A
+key that matches no input or more than one, and a value that is not six finite
+numbers, is an error.
+
+`register_scans2d` (`--target register_scans2d`, not built by default) is a
+small 2D point-to-point utility for pairwise experiments on `.ply` scans:
+`./build/gcc/register_scans2d scan1.ply scan2.ply`.
 
 ## Inspecting generated SIMD instructions
 

@@ -1,5 +1,8 @@
 #include "mslam/slam/PointCloudIO.hh"
 
+#include "msensor/conversions/lidar_imu_conversions.hh"
+#include "msensor/recorder/scan_player.hh"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -297,6 +300,33 @@ PointCloud readPlyPointCloud(const std::filesystem::path &path) {
     }
   }
   return cloud;
+}
+
+PointCloud readPbscanPointCloud(const std::filesystem::path &path) {
+  msensor::ScanPlayer player{path};
+  PointCloud cloud;
+  while (player.next()) {
+    const auto &entry = player.getLastEntry();
+    if (entry.entry_case() != sensors::RecordingEntry::kScan) {
+      continue;
+    }
+    const auto scan = msensor::fromProtobuf(entry.scan());
+    cloud.insert(cloud.end(), scan.points.begin(), scan.points.end());
+  }
+  return cloud;
+}
+
+PointCloud readPointCloud(const std::filesystem::path &path) {
+  const auto extension = path.extension().string();
+  if (extension == ".ply") {
+    return readPlyPointCloud(path);
+  }
+  if (extension == ".pbscan") {
+    return readPbscanPointCloud(path);
+  }
+  throw std::runtime_error("Unsupported point cloud file (expected .ply or "
+                           ".pbscan): " +
+                           path.string());
 }
 
 namespace {

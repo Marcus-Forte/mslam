@@ -20,11 +20,16 @@ public:
   SlamState Align(const SlamState &state, const IMap &map,
                   const PointCloud &scan) override;
 
+  /// The pose change the first round of the last Align() applied (invalid if
+  /// that round found no correspondences).
+  const FirstRoundIncrement &lastFirstRound() const { return first_round_; }
+
 private:
   IcpWorkspace icp_;
   /// Shared with the optimizer and its costs (they must use the same object).
   std::shared_ptr<const SE3Manifold> manifold_ =
       std::make_shared<SE3Manifold>();
+  FirstRoundIncrement first_round_;
 };
 
 } // namespace mslam

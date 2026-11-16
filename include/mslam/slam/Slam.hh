@@ -4,8 +4,8 @@
 #include "mslam/map/IMap.hh"
 #include "mslam/slam/ISlam.hh"
 #include "mslam/slam/ImuPreintegration.hh"
-#include "mslam/slam/registration/IRegistration.hh"
 #include "mslam/slam/registration/ImuRegistration.hh"
+#include "mslam/slam/registration/PointToPlaneRegistration.hh"
 
 #include <Eigen/Dense>
 #include <memory>
@@ -20,13 +20,18 @@ struct RegistrationStats {
   /// Scans registered against the map only (IMU disabled, or no IMU data
   /// integrated since the previous scan).
   std::size_t lidar_only_scans = 0;
-  /// IMU-path scans whose first registration round found correspondences, and
+  /// Scans registered in ImuFusion::DeadReckoning mode: the dead-reckoned pose
+  /// seeded a pose-only registration. Counted instead of imu_scans.
+  std::size_t dead_reckoning_scans = 0;
+  /// IMU-path (either fusion mode) scans whose first registration round found
+  /// correspondences, and
   /// the sums of the pose increment that round applied (how far the
   /// IMU-predicted prior was from the registered pose).
   std::size_t first_round_scans = 0;
   double first_round_translation_sum_m = 0.0;
   double first_round_rotation_sum_rad = 0.0;
-  /// Sum over the IMU-path scans of the time the preintegrator integrated.
+  /// Sum over the IMU-path scans (either fusion mode) of the time the
+  /// preintegrator integrated.
   double preintegrated_seconds = 0.0;
 
   double meanFirstRoundTranslationMm() const {
@@ -61,6 +66,19 @@ public:
 
   const RegistrationStats &registrationStats() const { return stats_; }
 
+  /// The current state (pose, velocity, biases), as of the last Predict or
+  /// Update.
+  const SlamState &state() const { return state_; }
+
+  /// The pose change the first registration round of the last Update()
+  /// applied: how far the prior was from the registered pose. Recorded for
+  /// every registered scan, LiDAR-only ones included (the registrationStats()
+  /// sums only cover the IMU-path scans). Invalid before the first Update and
+  /// when that round found no correspondences.
+  const FirstRoundIncrement &lastFirstRound() const {
+    return last_first_round_;
+  }
+
   /// Drops the IMU measurements accumulated since the last scan and the
   /// velocity estimate; the next prediction starts from the current pose.
   void ResetImuPreintegration();
@@ -71,7 +89,7 @@ private:
   // Members are listed in initialization order.
   std::shared_ptr<spdlog::logger> logger_;
   SlamConfiguration config_;
-  std::unique_ptr<IRegistration> registration_;
+  std::unique_ptr<PointToPlaneRegistration> registration_;
   std::unique_ptr<ImuRegistration> imu_registration_;
   std::shared_ptr<IMap> map_;
   SlamState state_;
@@ -83,5 +101,6 @@ private:
   SlamState previous_state_;
   bool has_previous_state_ = false;
   RegistrationStats stats_;
+  FirstRoundIncrement last_first_round_;
 };
 } // namespace mslam

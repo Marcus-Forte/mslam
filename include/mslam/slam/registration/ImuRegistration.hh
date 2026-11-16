@@ -20,15 +20,7 @@ namespace mslam {
 /// (state, map, scan) alignment.
 class ImuRegistration {
 public:
-  /// Size of the pose change the first registration round of the last
-  /// Align() applied: the norms of the translation and rotation parts of
-  /// se3Log(T_after * T_before^-1). It measures how wrong the IMU-predicted
-  /// prior was. `valid` is false if that round found no correspondences.
-  struct FirstRoundIncrement {
-    bool valid = false;
-    double translation_m = 0.0;
-    double rotation_rad = 0.0;
-  };
+  using FirstRoundIncrement = mslam::FirstRoundIncrement;
 
   ImuRegistration(int num_registration_iterations, int num_optimizer_iterations,
                   float max_correspondence_distance,

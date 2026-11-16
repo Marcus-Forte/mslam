@@ -12,12 +12,12 @@
         "min_distance_to_center": 1.0,
         "min_intensity": 20,
         "downsample_filter": "voxel_hash", // voxel_hash
-        "deskew": true, // on/off: deskew scans using a constant-velocity twist
+        "deskew": false, // on/off: deskew scans using a constant-velocity twist
         "points_per_second": 200000 // 0 to disable time-aware deskew
     },
     "map": {
         "resolution": 0.05,
-        "max_points_per_voxel": 1,
+        "max_points_per_voxel": 5,
         // Bound the registration map so per-scan cost stays flat over long runs.
         "max_voxels": 0, // 0 disables the voxel budget
         "max_range": 0, // 0 disables radius pruning (m)
@@ -27,6 +27,10 @@
     "slam": {
         "optimizer_iterations": 3,
         "reg_iterations": 3,
-        "max_correspondence_distance": 0.5
+        "max_correspondence_distance": 0.5,
+        // How the IMU is used when "imu" is on (optional):
+        //   "preintegration_factor": IMU residual in the joint optimization (default)
+        //   "dead_reckoning": IMU only integrated forward, seeds pose-only scan matching
+        "imu_fusion": "preintegration_factor"
     }
 }

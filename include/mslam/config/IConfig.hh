@@ -10,6 +10,11 @@ namespace mslam {
 enum class MapType { Voxel };
 enum class RegistrationMetric3D { PointToPoint, PointToPlane };
 enum class DownsampleFilter { VoxelGrid, VoxelHash };
+/// How the IMU enters the estimate when `with_imu` is on.
+/// PreintegrationFactor: the IMU is a residual of the joint optimization
+/// (pose, velocity, biases). DeadReckoning: the IMU is only integrated forward
+/// and that pose seeds a pose-only scan registration.
+enum class ImuFusion { PreintegrationFactor, DeadReckoning };
 
 inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   switch (level) {
@@ -50,6 +55,17 @@ inline constexpr std::string_view toString(DownsampleFilter filter) {
   throw std::runtime_error("Invalid downsample filter");
 }
 
+inline constexpr std::string_view toString(ImuFusion fusion) {
+  switch (fusion) {
+  case ImuFusion::PreintegrationFactor:
+    return "preintegration_factor";
+  case ImuFusion::DeadReckoning:
+    return "dead_reckoning";
+  }
+
+  throw std::runtime_error("Invalid IMU fusion");
+}
+
 /**
  * @brief Algorithm Paramters.
  *
@@ -58,6 +74,7 @@ struct SlamParameters {
   unsigned int opt_iterations = 5;
   unsigned int reg_iterations = 5;
   float max_correspondence_distance = 0.1;
+  ImuFusion imu_fusion = ImuFusion::PreintegrationFactor; // only with_imu
 };
 
 /**
@@ -130,7 +147,8 @@ struct SlamConfiguration {
        << "Registration Iterations: " << config.parameters.reg_iterations
        << "\n"
        << "Max Corr. Distance: "
-       << config.parameters.max_correspondence_distance << "\n";
+       << config.parameters.max_correspondence_distance << "\n"
+       << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n";
     return os;
   }
 };

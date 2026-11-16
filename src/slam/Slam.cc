@@ -172,6 +172,46 @@ void Slam::Predict(const msensor::IMUData &imuData) {
 void Slam::Update(const Scan &lidarData) {
   const ScopedElapsedLogger elapsed_logger(logger_, "Slam::Update");
 
+  if (config_.with_imu && preintegrator_.deltaTime() > 0.0 &&
+      config_.parameters.imu_fusion == ImuFusion::DeadReckoning) {
+    // Dead reckoning: the IMU only moved state_ forward (Predict); that pose
+    // seeds a plain pose-only registration, with no IMU term in the cost.
+    const SlamState predicted = state_;
+    const double dt = preintegrator_.deltaTime();
+    stats_.preintegrated_seconds += dt;
+
+    state_ = registration_->Align(predicted, *map_, lidarData.points);
+    last_first_round_ = registration_->lastFirstRound();
+
+    // toSlamState returns zero velocity and biases. One pose does not observe
+    // velocity, so take it from consecutive registered poses; without a
+    // previous scan keep the dead-reckoned one. Nothing estimates the biases:
+    // they stay what they were.
+    state_.velocity =
+        has_previous_state_
+            ? Eigen::Vector3d((state_.position - previous_state_.position) / dt)
+            : predicted.velocity;
+    state_.gyro_bias = predicted.gyro_bias;
+    state_.accel_bias = predicted.accel_bias;
+    previous_state_ = state_;
+    has_previous_state_ = true;
+
+    ++stats_.dead_reckoning_scans;
+    if (last_first_round_.valid) {
+      ++stats_.first_round_scans;
+      stats_.first_round_translation_sum_m += last_first_round_.translation_m;
+      stats_.first_round_rotation_sum_rad += last_first_round_.rotation_rad;
+    }
+
+    // As on the preintegration path, only the preintegrator restarts: the IMU
+    // clock must keep running across the scan, and ResetImuPreintegration()
+    // would also zero the velocity.
+    preintegrator_.reset(state_.gyro_bias, state_.accel_bias);
+
+    logState(logger_, state_);
+    return;
+  }
+
   if (config_.with_imu && preintegrator_.deltaTime() > 0.0) {
     // Initialize previous state on first call
     if (!has_previous_state_) {
@@ -193,7 +233,8 @@ void Slam::Update(const Scan &lidarData) {
     previous_state_ = state_;
 
     ++stats_.imu_scans;
-    if (const auto &first = imu_registration_->lastFirstRound(); first.valid) {
+    last_first_round_ = imu_registration_->lastFirstRound();
+    if (const auto &first = last_first_round_; first.valid) {
       ++stats_.first_round_scans;
       stats_.first_round_translation_sum_m += first.translation_m;
       stats_.first_round_rotation_sum_rad += first.rotation_rad;
@@ -211,6 +252,7 @@ void Slam::Update(const Scan &lidarData) {
   }
 
   state_ = registration_->Align(state_, *map_, lidarData.points);
+  last_first_round_ = registration_->lastFirstRound();
   ++stats_.lidar_only_scans;
   ResetImuPreintegration();
   logger_->debug("Update");

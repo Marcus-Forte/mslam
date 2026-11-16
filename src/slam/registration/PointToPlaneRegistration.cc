@@ -22,6 +22,7 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
   static constexpr int k_maxSmallDeltaHits = 3;
   const auto &parameters = icp_.parameters();
 
+  first_round_ = {};
   auto total_T = toAffine(state);
   icp_.begin(map, scan, total_T);
 
@@ -48,9 +49,15 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
             icp_.planeInputs().front().data(), icp_.planeOffsets().data(),
             icp_.planeOffsets().size(), 6, 1, manifold_,
             Point3PlaneDistance(total_T), /*active_param_dim=*/6));
+    const Eigen::Affine3d pose_before = total_T;
     const auto result = lm.optimize(pose.data());
 
     total_T = poseFromStorage(pose.data());
+    if (i == 0) {
+      const Eigen::Matrix<double, 6, 1> step =
+          se3Log(Eigen::Affine3d(total_T * pose_before.inverse()));
+      first_round_ = {true, step.head<3>().norm(), step.tail<3>().norm()};
+    }
     icp_.resetSource(total_T);
 
     icp_.logger().debug("Registration Iteration: {}/{}", i + 1,

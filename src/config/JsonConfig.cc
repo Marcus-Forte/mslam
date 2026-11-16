@@ -38,6 +38,17 @@ mslam::DownsampleFilter parseDownsampleFilter(const std::string &filter) {
 
   throw std::runtime_error("Invalid preprocessor downsample_filter: " + filter);
 }
+
+mslam::ImuFusion parseImuFusion(const std::string &fusion) {
+  if (fusion == "preintegration_factor") {
+    return mslam::ImuFusion::PreintegrationFactor;
+  }
+  if (fusion == "dead_reckoning") {
+    return mslam::ImuFusion::DeadReckoning;
+  }
+
+  throw std::runtime_error("Invalid slam imu_fusion: " + fusion);
+}
 } // namespace
 
 JsonConfig::JsonConfig(const std::filesystem::path &config_file)
@@ -177,6 +188,14 @@ void JsonConfig::load() {
   config_.parameters.reg_iterations = root["slam"]["reg_iterations"].asUInt();
   config_.parameters.max_correspondence_distance =
       root["slam"]["max_correspondence_distance"].asFloat();
+
+  if (!root["slam"]["imu_fusion"].empty()) {
+    if (!root["slam"]["imu_fusion"].isString()) {
+      throw std::runtime_error("Invalid slam imu_fusion: expected a string");
+    }
+    config_.parameters.imu_fusion =
+        parseImuFusion(root["slam"]["imu_fusion"].asString());
+  }
 
   if (config_.parameters.opt_iterations <= 0) {
     throw std::runtime_error("Invalid optimizer iterations: " +

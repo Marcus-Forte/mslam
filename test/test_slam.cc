@@ -238,6 +238,103 @@ TEST(Slam, ImuUpdateKeepsTheImuClockAcrossTheScanBoundary) {
   EXPECT_NEAR(stats.preintegrated_seconds, 3.0, 1e-12);
 }
 
+mslam::SlamConfiguration deadReckoningConfig() {
+  mslam::SlamConfiguration config;
+  config.with_imu = true; // scale 1: the samples are in m/s^2
+  config.parameters.imu_fusion = mslam::ImuFusion::DeadReckoning;
+  return config;
+}
+
+// Dead-reckoning fusion keeps the IMU clock across the scan like the
+// preintegration path does: both restart only the preintegrator.
+TEST(Slam, DeadReckoningUpdateKeepsTheImuClockAcrossTheScanBoundary) {
+  auto logger = makeSilentLogger();
+  auto map = std::make_shared<StaticMap>();
+  mslam::Slam slam(logger, deadReckoningConfig(), map);
+
+  msensor::IMUData imu{};
+  imu.az = k_gravity_mps2;
+  imu.ax = 1.0F;
+  const auto feed = [&](std::uint64_t seconds) {
+    imu.header.timestamp = seconds * 1'000'000'000ULL;
+    slam.Predict(imu);
+  };
+
+  feed(1);
+  feed(2);
+  slam.Update(msensor::Scan3DI{});
+  EXPECT_NEAR(slam.registrationStats().preintegrated_seconds, 1.0, 1e-12);
+  feed(3);
+  feed(4);
+  slam.Update(msensor::Scan3DI{});
+
+  const auto &stats = slam.registrationStats();
+  EXPECT_EQ(stats.dead_reckoning_scans, 2U);
+  EXPECT_EQ(stats.imu_scans, 0U);
+  EXPECT_EQ(stats.lidar_only_scans, 0U);
+  EXPECT_NEAR(stats.preintegrated_seconds, 3.0, 1e-12);
+}
+
+// One registered pose does not observe velocity: it is re-derived from the
+// registered poses of two consecutive scans, and the biases stay at zero. The
+// StaticMap returns no neighbours, so registration returns the dead-reckoned
+// pose and the numbers below follow from the kinematics alone.
+TEST(Slam, DeadReckoningUpdateDerivesVelocityFromRegisteredPoses) {
+  auto logger = makeSilentLogger();
+  auto map = std::make_shared<StaticMap>();
+  mslam::Slam slam(logger, deadReckoningConfig(), map);
+
+  // The first sample fixes the gravity alignment: keep it level (ax = 0).
+  msensor::IMUData imu{};
+  imu.az = k_gravity_mps2;
+  const auto feed = [&](std::uint64_t seconds, float ax) {
+    imu.ax = ax;
+    imu.header.timestamp = seconds * 1'000'000'000ULL;
+    slam.Predict(imu);
+  };
+
+  // ax = 1 m/s^2 from 1 s on. At 2 s: x = 0.5, v = 1. At 4 s dead reckoning
+  // alone gives x = 4.5, v = 3.
+  feed(1, 0.0F);
+  feed(2, 1.0F);
+  slam.Update(msensor::Scan3DI{});
+  // First scan: no previous pose, the dead-reckoned velocity is kept.
+  EXPECT_NEAR(slam.state().position.x(), 0.5, 1e-9);
+  EXPECT_NEAR(slam.state().velocity.x(), 1.0, 1e-9);
+
+  feed(3, 1.0F);
+  feed(4, 1.0F);
+  slam.Update(msensor::Scan3DI{});
+
+  // Registered poses 0.5 m and 4.5 m, 2 s apart: 2 m/s, not the 3 m/s the
+  // integration reached.
+  const auto &state = slam.state();
+  EXPECT_NEAR(state.position.x(), 4.5, 1e-9);
+  EXPECT_NEAR(state.velocity.x(), 2.0, 1e-9);
+  // The sample's g is a float: gravity cancels to ~1e-7 m/s^2, not exactly.
+  EXPECT_NEAR(state.velocity.y(), 0.0, 1e-5);
+  EXPECT_NEAR(state.velocity.z(), 0.0, 1e-5);
+  EXPECT_DOUBLE_EQ(state.gyro_bias.norm(), 0.0);
+  EXPECT_DOUBLE_EQ(state.accel_bias.norm(), 0.0);
+}
+
+// Without integrated IMU time the dead-reckoning mode registers LiDAR-only too.
+TEST(Slam, DeadReckoningUpdateWithoutImuDataFallsBackToLidarOnly) {
+  auto logger = makeSilentLogger();
+  auto map = std::make_shared<StaticMap>();
+  mslam::Slam slam(logger, deadReckoningConfig(), map);
+
+  msensor::IMUData imu{};
+  imu.az = k_gravity_mps2;
+  imu.header.timestamp = 1'000'000'000ULL;
+  slam.Predict(imu); // only seeds the clock: nothing integrated
+  slam.Update(msensor::Scan3DI{});
+
+  EXPECT_EQ(slam.registrationStats().dead_reckoning_scans, 0U);
+  EXPECT_EQ(slam.registrationStats().imu_scans, 0U);
+  EXPECT_EQ(slam.registrationStats().lidar_only_scans, 1U);
+}
+
 // A scan without integrated IMU time registers LiDAR-only even with the IMU
 // enabled, and resets the IMU state.
 TEST(Slam, UpdateWithoutImuDataFallsBackToLidarOnly) {

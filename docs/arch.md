@@ -217,6 +217,35 @@ last point's time.
   versus LiDAR-only, and the mean size of the first registration round's pose
   increment (how wrong the IMU-predicted prior was); `bench_slam` prints it.
 
+## IMU fusion modes
+
+`slam.imu_fusion` (used when `imu` is on) selects how `Slam::Update` uses the
+IMU. `Slam::Predict` is the same in both: it integrates every sample forward
+into `state_` (dead reckoning) and feeds the `ImuPreintegrator`.
+
+- **`preintegration_factor` (default, A).** `ImuRegistration` solves one joint
+  problem over the new state (pose, velocity, gyro and accel bias) and the
+  previous state's velocity and biases. Costs: point-to-plane scan residuals
+  plus `ImuPreintegrationFactor` (weight 0.01) tying the two states to the
+  preintegrated measurements. Velocity and biases are estimated, so a wrong
+  bias is corrected by the scans.
+- **`dead_reckoning` (B).** The dead-reckoned `state_` is only the initial
+  guess of `PointToPlaneRegistration`, a pose-only (6-DOF) problem with the
+  scan term alone: no IMU term, nothing constrains the IMU error beyond the
+  prior. One pose does not observe velocity, so it is re-derived from the
+  registered poses, `v = (p_k - p_{k-1}) / dt` with `dt` the preintegrated time
+  (the dead-reckoned velocity on the first scan). The biases are carried over
+  unchanged (zero: nothing estimates them).
+
+Both restart only the preintegrator at a scan and keep the IMU clock running
+(see "Time convention"): the interval across the scan boundary belongs to the
+next scan. `ResetImuPreintegration()` is not used by B because it would zero
+the velocity and re-seed the clock. A scan with no integrated IMU time
+registers LiDAR-only in both modes. `bench_slam --imu-fusion` selects the mode
+per run and `--trajectory` plus `test/plot_imu_fusion.py` compare two runs;
+the first-round correction (how far the prior was from the registered pose) is
+recorded for both.
+
 ## Threads and control
 
 - The SLAM thread runs `SlamRunner::run`. It is the only thread that touches

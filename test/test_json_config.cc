@@ -1,0 +1,78 @@
+#include "mslam/config/JsonConfig.hh"
+
+#include <gtest/gtest.h>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+namespace {
+
+// A complete, valid configuration; `slam_extra` is spliced into the "slam"
+// object (e.g. `, "imu_fusion": "dead_reckoning"`).
+std::string configText(const std::string &slam_extra) {
+  return R"({
+    "imu": true,
+    "lidar": true,
+    "imu_acceleration_scale": 9.80665,
+    "log_level": "info",
+    "map_type": "voxel",
+    "remote_scanner": "localhost:50051",
+    "preprocessor": {
+        "voxel_size": 0.1,
+        "min_distance_to_center": 1.0,
+        "min_intensity": 50,
+        "downsample_filter": "voxel_hash",
+        "deskew": true,
+        "points_per_second": 200000
+    },
+    "map": { "resolution": 0.1, "max_points_per_voxel": 5 },
+    "slam": {
+        "optimizer_iterations": 3,
+        "reg_iterations": 3,
+        "max_correspondence_distance": 0.3)" +
+         slam_extra + R"(
+    }
+})";
+}
+
+class JsonConfigTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    const auto *info = ::testing::UnitTest::GetInstance()->current_test_info();
+    dir_ = std::filesystem::temp_directory_path() /
+           (std::string("mslam_json_config_") + info->name());
+    std::filesystem::create_directories(dir_);
+  }
+  void TearDown() override { std::filesystem::remove_all(dir_); }
+
+  mslam::SlamConfiguration load(const std::string &slam_extra) {
+    const auto path = dir_ / "config.jsonc";
+    std::ofstream(path) << configText(slam_extra);
+    mslam::JsonConfig config(path);
+    config.load();
+    return config.getConfig();
+  }
+
+  std::filesystem::path dir_;
+};
+
+TEST_F(JsonConfigTest, ImuFusionDefaultsToPreintegrationFactorWhenAbsent) {
+  EXPECT_EQ(load("").parameters.imu_fusion,
+            mslam::ImuFusion::PreintegrationFactor);
+}
+
+TEST_F(JsonConfigTest, ImuFusionParsesBothValues) {
+  EXPECT_EQ(
+      load(R"(, "imu_fusion": "preintegration_factor")").parameters.imu_fusion,
+      mslam::ImuFusion::PreintegrationFactor);
+  EXPECT_EQ(load(R"(, "imu_fusion": "dead_reckoning")").parameters.imu_fusion,
+            mslam::ImuFusion::DeadReckoning);
+}
+
+TEST_F(JsonConfigTest, ImuFusionRejectsAnInvalidValue) {
+  EXPECT_THROW(load(R"(, "imu_fusion": "kalman")"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "imu_fusion": 1)"), std::runtime_error);
+}
+
+} // namespace

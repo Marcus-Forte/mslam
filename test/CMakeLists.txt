@@ -39,6 +39,12 @@ target_link_libraries(test_slam slam GTest::gtest_main)
 
 gtest_discover_tests(test_slam)
 
+add_executable(test_json_config
+test_json_config.cc)
+target_link_libraries(test_json_config mslam::config GTest::gtest_main)
+
+gtest_discover_tests(test_json_config)
+
 add_executable(test_point_distance
 test_point_distance.cc)
 target_link_libraries(test_point_distance slam moptim GTest::gtest_main)

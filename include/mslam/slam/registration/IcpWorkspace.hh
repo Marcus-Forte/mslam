@@ -24,6 +24,16 @@ struct IcpParameters {
   float max_correspondence_distance = 0.1F;
 };
 
+/// Size of the pose change the first registration round of an Align() applied:
+/// the norms of the translation and rotation parts of
+/// se3Log(T_after * T_before^-1). It measures how wrong the prior was. `valid`
+/// is false if that round found no correspondences.
+struct FirstRoundIncrement {
+  bool valid = false;
+  double translation_m = 0.0;
+  double rotation_rad = 0.0;
+};
+
 /**
  * @brief State and helpers shared by the registrations: configuration, the
  * moving source cloud, the correspondence search and the point-to-plane

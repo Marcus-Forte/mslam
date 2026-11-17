@@ -10,7 +10,7 @@
     "preprocessor": {
         "voxel_size": 0.05,
         "min_distance_to_center": 1.0,
-        "min_intensity": 20,
+        "min_intensity": 5,
         "downsample_filter": "voxel_hash", // voxel_hash
         "deskew": true, // on/off: deskew scans using a constant-velocity twist
         "points_per_second": 200000 // 0 to disable time-aware deskew
@@ -41,6 +41,6 @@
         // default 1 = sequential; 0 = every hardware thread, n = at most n). The
         // pose does not depend on it (bit for bit). Needs a build with oneTBB,
         // otherwise a value other than 1 logs a warning and runs sequentially.
-        "num_threads": 4
+        "num_threads": 1
     }
 }

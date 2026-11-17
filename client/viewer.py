@@ -9,12 +9,9 @@ from typing import Any
 import grpc
 import numpy as np
 
-from geometry import (
-    euler_xyz_to_wxyz,
-    quaternion_conjugate,
-    quaternion_multiply,
-    quaternion_rotate_vector,
-)
+from connection import ConnectionMonitor, ConnectionState, led_html
+from follow import FOLLOW_MODES, IDENTITY, FollowMode, FollowView, Transform
+from geometry import euler_xyz_to_wxyz
 from map_renderer import MapRenderer
 from map_store import MapStore
 from map_stream import ServerTooOldError, StreamEnd, stream_map
@@ -30,6 +27,11 @@ from proto_gen import lidar_pb2, slam_pb2, slam_pb2_grpc  # noqa: E402
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAIN_LOOP_INTERVAL_SEC = 0.1
+POSE_RENDER_INTERVAL_SEC = 1.0 / 30.0
+"""The pose axes and the followed view are redrawn at this steady rate from the latest pose (poses arrive in
+bursts, one per IMU sample, processed per scan), like rviz drawing the latest TF every frame."""
+WORLD_NODE = "/world"
+"""Every visual is a child of this frame; following moves it (see follow.py)."""
 RECONNECT_DELAY_SEC = 5.0
 RESYNC_DELAY_SEC = 1.0
 MAP_POINT_SIZE_SCALE = 0.2
@@ -54,29 +56,31 @@ class SlamViewerClient:
         self._server_too_old_logged = False
         self._viser_server = viser.ViserServer(host="0.0.0.0", port=viser_port)
         self._viser_server.scene.set_background_image(np.zeros((1, 1, 3), dtype=np.uint8))
+        self._world_frame = self._viser_server.scene.add_frame(WORLD_NODE, show_axes=False)
         self._map_store = MapStore()
         self._map_renderer = MapRenderer(
             self._map_store,
             self._viser_server.scene,
             point_size=point_size * MAP_POINT_SIZE_SCALE,
             atomic=self._viser_server.atomic,
+            node_prefix=f"{WORLD_NODE}/slam/map",
         )
         self._scan_cloud = self._viser_server.scene.add_point_cloud(
-            name="/slam/scan",
+            name=f"{WORLD_NODE}/slam/scan",
             points=np.empty((0, 3), dtype=np.float32),
             colors=np.empty((0, 3), dtype=np.uint8),
             point_size=point_size * SCAN_POINT_SIZE_SCALE,
             point_shape="rounded",
         )
         self._correspondence_cloud = self._viser_server.scene.add_point_cloud(
-            name="/slam/correspondences",
+            name=f"{WORLD_NODE}/slam/correspondences",
             points=np.empty((0, 3), dtype=np.float32),
             colors=np.empty((0, 3), dtype=np.uint8),
             point_size=point_size * CORRESPONDENCE_POINT_SIZE_SCALE,
             point_shape="sparkle",
         )
         self._pose_frame = self._viser_server.scene.add_frame(
-            name="/slam/pose",
+            name=f"{WORLD_NODE}/slam/pose",
             axes_length=0.25,
             axes_radius=0.01,
             origin_radius=0.02,
@@ -87,12 +91,21 @@ class SlamViewerClient:
         self._grpc_channel = grpc.insecure_channel(self._server_addr)
         self._control_stub = slam_pb2_grpc.SlamServiceStub(self._grpc_channel)
 
-        self._follow_pose_toggle = self._viser_server.gui.add_checkbox(
-            "Follow Pose", initial_value=False
+        self._connection_led = self._viser_server.gui.add_html(led_html(ConnectionState.CONNECTING, server_addr))
+        self._connection_monitor = ConnectionMonitor(server_addr, self._show_connection)
+
+        self._follow_dropdown = self._viser_server.gui.add_dropdown(
+            "Follow",
+            FOLLOW_MODES,
+            initial_value=FollowMode.OFF.value,
+            hint="Keep the sensor still on screen and move the world around it, as rviz does with a target frame. "
+            "Position: rviz Orbit; Position + yaw: rviz ThirdPersonFollower; Full pose: also roll and pitch.",
         )
-        self._follow_pose_references: dict[
-            int, tuple[np.ndarray, np.ndarray]
-        ] = {}
+        self._follow_view = FollowView()
+        # Written by the pose stream thread, read by the pose render thread.
+        self._pose_lock = threading.Lock()
+        self._latest_pose: Transform = IDENTITY
+        self._pose_version = 0
 
         start_button = self._viser_server.gui.add_button("Start")
         stop_button = self._viser_server.gui.add_button("Stop")
@@ -125,6 +138,7 @@ class SlamViewerClient:
                 logger.error("Reset RPC failed: %s", exc)
 
     def run(self) -> None:
+        self._connection_monitor.start(self._shutdown_event.is_set, self._shutdown_event.wait)
         map_increment_thread = threading.Thread(target=self._run_stream_map_increments, daemon=True)
         map_flush_thread = threading.Thread(
             target=self._map_renderer.run, args=(self._shutdown_event.is_set, self._shutdown_event.wait), daemon=True
@@ -132,11 +146,13 @@ class SlamViewerClient:
         scan_thread = threading.Thread(target=self._run_stream_transformed_scan, daemon=True)
         correspondence_thread = threading.Thread(target=self._run_stream_correspondences, daemon=True)
         pose_thread = threading.Thread(target=self._run_stream_pose, daemon=True)
+        pose_render_thread = threading.Thread(target=self._run_pose_render, daemon=True)
         map_increment_thread.start()
         map_flush_thread.start()
         scan_thread.start()
         correspondence_thread.start()
         pose_thread.start()
+        pose_render_thread.start()
 
         try:
             while not self._shutdown_event.is_set():
@@ -144,6 +160,10 @@ class SlamViewerClient:
         except KeyboardInterrupt:
             logger.info("Shutting down...")
             self._shutdown_event.set()
+        self._connection_monitor.close()
+
+    def _show_connection(self, state: ConnectionState) -> None:
+        self._connection_led.content = led_html(state, self._server_addr)
 
     def _log_stream_exception(self, stream_name: str, exc: Exception) -> None:
         if isinstance(exc, ServerTooOldError):
@@ -179,8 +199,7 @@ class SlamViewerClient:
         self._correspondence_cloud.points = empty_points
         self._correspondence_cloud.colors = empty_colors
 
-        self._pose_frame.position = (0.0, 0.0, 0.0)
-        self._pose_frame.wxyz = (1.0, 0.0, 0.0, 0.0)
+        self._set_latest_pose(IDENTITY)
 
     def _run_stream(
         self,
@@ -280,59 +299,49 @@ class SlamViewerClient:
         logger.debug("Rendered correspondence snapshot with %d points", len(points))
 
     def _update_pose(self, pose: slam_pb2.Pose3D) -> None:
-        position = np.array([pose.x, pose.y, pose.z], dtype=np.float32)
-        rotation_wxyz = euler_xyz_to_wxyz(pose.phi, pose.omega, pose.theta)
+        rotation_wxyz = euler_xyz_to_wxyz(pose.phi, pose.omega, pose.theta).astype(np.float64)
+        rotation_wxyz /= np.linalg.norm(rotation_wxyz)
+        self._set_latest_pose((rotation_wxyz, np.array([pose.x, pose.y, pose.z], dtype=np.float64)))
 
-        self._pose_frame.position = position
-        self._pose_frame.wxyz = rotation_wxyz
+    def _set_latest_pose(self, pose: Transform) -> None:
+        with self._pose_lock:
+            self._latest_pose = pose
+            self._pose_version += 1
 
-        if self._follow_pose_toggle.value:
-            self._move_camera_to_pose(position, rotation_wxyz)
-        else:
-            self._follow_pose_references.clear()
-
-    def _move_camera_to_pose(
-        self, position: np.ndarray, rotation_wxyz: np.ndarray
-    ) -> None:
-        clients = list(self._viser_server.get_clients().values())
-        active_client_ids = {id(client) for client in clients}
-        self._follow_pose_references = {
-            client_id: reference
-            for client_id, reference in self._follow_pose_references.items()
-            if client_id in active_client_ids
-        }
-
-        for client in clients:
-            camera = client.camera
-            client_id = id(client)
+    def _run_pose_render(self) -> None:
+        """Draw the latest pose and the followed view at a steady rate (only this thread touches them)."""
+        rendered_version = -1
+        mode = FollowMode.OFF
+        while not self._shutdown_event.wait(timeout=POSE_RENDER_INTERVAL_SEC):
             try:
-                camera_position = camera.position.copy()
-                camera_rotation = camera.wxyz.copy()
+                with self._pose_lock:
+                    pose, version = self._latest_pose, self._pose_version
+                new_mode = FollowMode(self._follow_dropdown.value)
+                if new_mode is not mode:
+                    started = mode is FollowMode.OFF
+                    self._follow_view.set_mode(new_mode, pose)
+                    mode = new_mode
+                    logger.info("Follow: %s", mode.value)
+                    if started:
+                        self._orbit_around(self._follow_view.on_screen(pose[1]))
+                elif version == rendered_version:
+                    continue
+                rendered_version = version
+                root_wxyz, root_position = self._follow_view.update(pose)
+                # One unit per client: the root and the axes move in the same frame, so the axes never jitter
+                # against the world.
+                with self._viser_server.atomic():
+                    self._world_frame.wxyz = root_wxyz
+                    self._world_frame.position = root_position
+                    self._pose_frame.wxyz = pose[0]
+                    self._pose_frame.position = pose[1]
+            except Exception:
+                logger.exception("Pose rendering failed")
+
+    def _orbit_around(self, point: np.ndarray) -> None:
+        """Make every client's camera orbit around `point` (rviz moves its focal point to the target frame)."""
+        for client in self._viser_server.get_clients().values():
+            try:
+                client.camera.look_at = point
             except AssertionError:
-                logger.debug("Waiting for client camera state before following its pose")
-                continue
-
-            reference = self._follow_pose_references.get(client_id)
-            if reference is None:
-                self._follow_pose_references[client_id] = (
-                    position.copy(),
-                    rotation_wxyz.copy(),
-                )
-                continue
-
-            reference_position, reference_rotation = reference
-            inverse_reference_rotation = quaternion_conjugate(reference_rotation)
-            relative_position = quaternion_rotate_vector(
-                inverse_reference_rotation, camera_position - reference_position
-            )
-            relative_rotation = quaternion_multiply(
-                inverse_reference_rotation, camera_rotation
-            )
-            camera.position = position + quaternion_rotate_vector(
-                rotation_wxyz, relative_position
-            )
-            camera.wxyz = quaternion_multiply(rotation_wxyz, relative_rotation)
-            self._follow_pose_references[client_id] = (
-                position.copy(),
-                rotation_wxyz.copy(),
-            )
+                logger.debug("Client camera state not known yet; not moving its focal point")

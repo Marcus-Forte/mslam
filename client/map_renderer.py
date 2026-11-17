@@ -24,8 +24,7 @@ logger = logging.getLogger(__name__)
 FLUSH_INTERVAL_SEC = 0.5
 """At most two updates per second."""
 
-_NODE_PREFIX = "/slam/map"
-_OPEN_NODE = f"{_NODE_PREFIX}/open"
+DEFAULT_NODE_PREFIX = "/slam/map"
 
 
 def _no_atomic() -> contextlib.AbstractContextManager[None]:
@@ -40,8 +39,11 @@ class MapRenderer:
         point_size: float,
         point_shape: str = "rounded",
         atomic: Callable[[], contextlib.AbstractContextManager[None]] = _no_atomic,
+        node_prefix: str = DEFAULT_NODE_PREFIX,
     ) -> None:
-        """`atomic` returns a context in which scene updates reach a client as one unit (`ViserServer.atomic`)."""
+        """`atomic` returns a context in which scene updates reach a client as one unit (`ViserServer.atomic`).
+        Nodes are named `<node_prefix>/block_<i>` and `<node_prefix>/open`."""
+        self._node_prefix = node_prefix
         self._store = store
         self._scene = scene
         self._point_size = point_size
@@ -71,7 +73,9 @@ class MapRenderer:
             self._generation = snapshot.generation
 
         for block in snapshot.sealed[len(self._sealed_nodes) :]:
-            self._sealed_nodes.append(self._add_node(f"{_NODE_PREFIX}/block_{block.index}", block.points, block.colors))
+            self._sealed_nodes.append(
+                self._add_node(f"{self._node_prefix}/block_{block.index}", block.points, block.colors)
+            )
 
         self._update_open(snapshot.open_points, snapshot.open_colors)
         self.flush_count += 1
@@ -104,9 +108,9 @@ class MapRenderer:
     def _update_open(self, points: np.ndarray, colors: np.ndarray) -> None:
         if self._open_node is None:
             if len(points) > 0:
-                self._open_node = self._add_node(_OPEN_NODE, points, colors)
+                self._open_node = self._add_node(f"{self._node_prefix}/open", points, colors)
             return
-        # Points and colors are separate property updates in viser 1.0.16 (no single-message update), so group them
+        # Points and colors are separate property updates in viser (no single-message update, still so in 1.1.1), so group them
         # in one atomic window: a browser applies both or neither, never arrays of different lengths.
         with self._atomic():
             self._open_node.points = points

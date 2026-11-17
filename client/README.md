@@ -3,9 +3,27 @@
 This client subscribes to the mslam gRPC server and renders map snapshots,
 transformed scans, correspondences, and poses in viser.
 
-Enable **Follow Pose** in the viewer to move and rotate the camera with the SLAM
-pose while preserving the current camera offset. You can still orbit the camera;
-its position and rotation remain relative to the followed pose.
+The LED at the top of the panel shows the connection to the SLAM server (`connection.py`): green when connected,
+amber while connecting, red when unreachable (retried every 1 to 2 s, so it turns green within about 2 s of the
+server coming back). It watches the gRPC channel state (an HTTP/2 connection to the address is up). It does not
+check which RPCs the server implements, and it does not notice a server that stops answering without closing the
+connection, such as a pulled cable.
+
+The **Follow** dropdown keeps the sensor still on screen and moves the world around it, as rviz does with a target
+frame (`follow.py`):
+
+- **Off**: nothing moves (the view stays where following left it).
+- **Position** (rviz Orbit view): only the position is followed; the view keeps its orientation.
+- **Position + yaw** (rviz ThirdPersonFollower): position and heading; roll and pitch of a hand-held sensor do not
+  swing the view.
+- **Full pose**: position and full attitude (first person).
+
+Turning following on points the camera at the sensor, so orbiting pivots around it; after that the camera is never
+moved by the viewer, so orbit, pan and zoom work while following. Every visual sits under one `/world` frame, and
+following moves that frame. The pose axes and `/world` are redrawn together at 30 Hz from the latest pose, because
+poses arrive in bursts (one per IMU sample, about 10 per scan). The old Follow Pose moved the camera itself. That
+shook, because viser animates a camera position set by the server over 50 ms but applies its look-at at once. It
+also dragged behind the sensor, because the camera state the browser reports back lags behind what was set.
 
 Generate Python stubs when the SLAM or lidar proto files change:
 
@@ -34,7 +52,7 @@ viewer logs one error ("too old for this viewer") and keeps retrying at the norm
 - `map_renderer.py` shows a store in viser. Each sealed block is one point-cloud node, created once. The open block is
   one node, re-sent when it changed, at most twice per second (a flush thread; many chunks between two flushes cause one
   update), so the data sent per update is bounded by the block size however large the map is. Points and colours of
-  the open node are assigned inside `ViserServer.atomic()` (viser 1.0.16 has no single-message update).
+  the open node are assigned inside `ViserServer.atomic()` (viser, as of 1.1.1, has no single-message update).
 - Colours are per point and independent of how the stream was chunked: intensity over the fixed range 0 to 255
   (`points.INTENSITY_RANGE`), or, without intensity, height over a fixed range (`points.HEIGHT_RANGE_M`).
 

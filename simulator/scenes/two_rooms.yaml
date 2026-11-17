@@ -1,0 +1,24 @@
+# Two rooms (A: 8 x 6 m, B: 6 x 6 m) joined by a 1.2 m doorway in the shared
+# wall at x = 4, with a few boxes as obstacles and for SLAM structure.
+# Inner faces are 0.1 m inside the centre lines. Start: room A, near the west wall.
+name: two_rooms
+wall_height: 2.8
+wall_thickness: 0.2
+start: {position: [-2.5, 0.0, 1.0], yaw_deg: 0}
+walls:
+  - {from: [-4, -3], to: [4, -3]}            # A south
+  - {from: [-4, 3], to: [4, 3]}              # A north
+  - {from: [-4, -3], to: [-4, 3]}            # A west
+  - from: [4, -3]                            # shared wall with the doorway
+    to: [4, 3]
+    openings: [{at: 3.0, width: 1.2, height: 2.1}]
+  - {from: [4, -3], to: [10, -3]}            # B south
+  - {from: [4, 3], to: [10, 3]}              # B north
+  - {from: [10, -3], to: [10, 3]}            # B east
+boxes:
+  - {name: crate_a, center: [-1.0, 1.5], size: [0.8, 0.6, 0.9], yaw_deg: 20}
+  - {name: pillar_a, center: [1.5, -1.2], size: [0.5, 0.5, 2.8]}
+  - {name: shelf_a, center: [-3.6, -2.2], size: [0.4, 1.4, 1.8]}
+  - {name: table_b, center: [7.0, 0.5], size: [1.4, 0.8, 0.75], yaw_deg: -15}
+  - {name: crate_b, center: [8.8, -2.0], size: [0.7, 0.7, 1.2], yaw_deg: 45}
+  - {name: wedge_b, center: [6.0, 2.2], size: [1.0, 0.3, 1.5], yaw_deg: 10}

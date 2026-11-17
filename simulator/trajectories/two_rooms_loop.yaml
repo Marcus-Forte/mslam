@@ -1,0 +1,20 @@
+# Out through the doorway, round room B and back to the start pose.
+# Speeds are nominal: segment times are 1.5 * length / speed (quintic ease in/out).
+speed: 1.0
+lead_in: 1.0      # s stationary before moving (gives the IMU/SLAM a static start)
+lead_out: 1.0
+waypoints:
+  - {p: [-2.5, 0.0, 1.2], yaw_deg: 0}
+  - {p: [-0.5, 0.0, 1.2]}
+  - {p: [2.0, 0.0, 1.2]}
+  - {p: [4.0, 0.0, 1.2]}          # doorway (x = 4, y = 0, 1.2 m wide)
+  - {p: [5.5, -0.3, 1.2]}
+  - {p: [6.5, -1.3, 1.2]}
+  - {p: [8.0, -0.9, 1.2]}
+  - {p: [8.8, 0.8, 1.2]}
+  - {p: [7.8, 1.9, 1.2]}
+  - {p: [5.5, 1.1, 1.2]}
+  - {p: [4.0, 0.0, 1.2]}
+  - {p: [2.0, 0.2, 1.2]}
+  - {p: [-0.5, 0.4, 1.2]}
+  - {p: [-2.5, 0.0, 1.2], yaw_deg: 0}

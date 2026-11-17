@@ -1,0 +1,11 @@
+# Hand-checkable test scene: one 4 x 4 m room, centre lines on x,y = +-2 and
+# thickness 0.2, so the inner faces are at +-1.9 m. Floor z = 0, ceiling z = 2.8
+# (inner face). The sensor starts at the centre, 1 m up, looking along +x:
+#   +x wall 1.9 m, -x wall 1.9 m, +y/-y walls 1.9 m, floor 1.0 m, ceiling 1.8 m.
+name: single_room
+wall_height: 2.8
+wall_thickness: 0.2
+start: {position: [0.0, 0.0, 1.0], yaw_deg: 0}
+rooms:
+  - name: r
+    polygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]]

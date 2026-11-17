@@ -33,8 +33,11 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
                                  const SlamState &prev_state,
                                  const ImuPreintegrator &preintegrator) {
   static constexpr int k_maxSmallDeltaHits = 3;
-  // Low weight so scan matching dominates pose.
-  static constexpr double kImuWeight = 0.01;
+  // Low weight so scan matching dominates pose. The preintegration covariance
+  // models white noise only, which understates the real IMU error (sample
+  // timing, lever arm, bias drift): with 0.01 living_room_garden ended 0.98 m
+  // from its start, 0.003 to 0.0001 all pass (bench_slam, 2026-11-17).
+  static constexpr double kImuWeight = 0.003;
   const auto &parameters = icp_.parameters();
 
   first_round_ = {};

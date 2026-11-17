@@ -17,7 +17,7 @@
     },
     "map": {
         "resolution": 0.1,
-        "max_points_per_voxel": 5,
+        "max_points_per_voxel": 10,
         // Voxels searched around a query (optional, default 1 = 3x3x3, max 8).
         // Neighbours are only guaranteed within search_radius * resolution;
         // a larger slam.max_correspondence_distance may miss matches or find
@@ -30,9 +30,9 @@
     },
 
     "slam": {
-        "optimizer_iterations": 3,
-        "reg_iterations": 3,
-        "max_correspondence_distance": 0.05,
+        "optimizer_iterations": 5,
+        "reg_iterations": 5,
+        "max_correspondence_distance": 0.1,
         // How the IMU is used when "imu" is on (optional):
         //   "preintegration_factor": IMU residual in the joint optimization (default)
         //   "dead_reckoning": IMU only integrated forward, seeds pose-only scan matching

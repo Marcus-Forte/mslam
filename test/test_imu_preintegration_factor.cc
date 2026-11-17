@@ -51,6 +51,39 @@ mslam::ImuState stateOf(const double *pose, const double *extras) {
   return state;
 }
 
+// Static IMU with white accelerometer noise only (zero gyro, no bias): over
+// T = N*dt the velocity error has variance na^2*T and the position error
+// na^2*T^3/3, with correlation sqrt(3)/2 ~ 0.87 between them. The
+// preintegration covariance must reproduce these to within discretisation.
+TEST(ImuPreintegrator, CovarianceOfStaticAccelNoiseMatchesContinuousModel) {
+  const mslam::ImuNoiseParams noise;
+  mslam::ImuPreintegrator preintegrator{noise};
+  constexpr int kSamples = 10;
+  constexpr double kDt = 0.0048;
+  const Eigen::Vector3d gyro = Eigen::Vector3d::Zero();
+  const Eigen::Vector3d accel(0.0, 0.0, 9.80665);
+  for (int i = 0; i < kSamples; ++i) {
+    preintegrator.integrate(gyro, accel, kDt);
+  }
+
+  const double T = kSamples * kDt;
+  const double na2 = noise.accel_noise_density * noise.accel_noise_density;
+  const auto &cov = preintegrator.covariance();
+  const Eigen::Matrix3d cov_vv = cov.block<3, 3>(3, 3);
+  const Eigen::Matrix3d cov_pp = cov.block<3, 3>(6, 6);
+  const Eigen::Matrix3d cov_vp = cov.block<3, 3>(3, 6);
+
+  const double std_v = std::sqrt(cov_vv.diagonal().mean());
+  const double std_p = std::sqrt(cov_pp.diagonal().mean());
+  const double expected_std_v = std::sqrt(na2 * T);
+  const double expected_std_p = std::sqrt(na2 * T * T * T / 3.0);
+  EXPECT_NEAR(std_v / expected_std_v, 1.0, 0.02);
+  EXPECT_NEAR(std_p / expected_std_p, 1.0, 0.02);
+
+  const double corr = cov_vp.diagonal().mean() / (std_v * std_p);
+  EXPECT_NEAR(corr, std::sqrt(3.0) / 2.0, 0.02);
+}
+
 TEST(ImuPreintegrationFactor, Dimensions) {
   EXPECT_EQ(Factor::kAmbientDim, 30);
   EXPECT_EQ(Factor::kTangentDim, 24);

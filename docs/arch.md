@@ -226,7 +226,7 @@ into `state_` (dead reckoning) and feeds the `ImuPreintegrator`.
 - **`preintegration_factor` (default, A).** `ImuRegistration` solves one joint
   problem over the new state (pose, velocity, gyro and accel bias) and the
   previous state's velocity and biases. Costs: point-to-plane scan residuals
-  plus `ImuPreintegrationFactor` (weight 0.01) tying the two states to the
+  plus `ImuPreintegrationFactor` (weight 0.003) tying the two states to the
   preintegrated measurements. Velocity and biases are estimated, so a wrong
   bias is corrected by the scans.
 - **`dead_reckoning` (B).** The dead-reckoned `state_` is only the initial

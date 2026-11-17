@@ -138,9 +138,14 @@ void ImuPreintegrator::integrate(const Eigen::Vector3d &gyro,
   const double nba2 =
       noise_.accel_bias_random_walk * noise_.accel_bias_random_walk;
   Q.block<3, 3>(0, 0) = ng2 * dt * Eigen::Matrix3d::Identity();
+  // Accelerometer white noise (density na) integrated over one step: the
+  // velocity increment has variance na2*dt, and the position increment
+  // (0.5*a*dt^2 from the acceleration noise) has variance na2*dt^3/4, with
+  // cross-covariance with velocity na2*dt^2/2.
   Q.block<3, 3>(3, 3) = na2 * dt * Eigen::Matrix3d::Identity();
-  Q.block<3, 3>(6, 6) =
-      na2 * dt * Eigen::Matrix3d::Identity(); // position noise from accel
+  Q.block<3, 3>(6, 6) = 0.25 * na2 * dt * dt * dt * Eigen::Matrix3d::Identity();
+  Q.block<3, 3>(3, 6) = 0.5 * na2 * dt * dt * Eigen::Matrix3d::Identity();
+  Q.block<3, 3>(6, 3) = Q.block<3, 3>(3, 6);
   Q.block<3, 3>(9, 9) = nbg2 * dt * Eigen::Matrix3d::Identity();
   Q.block<3, 3>(12, 12) = nba2 * dt * Eigen::Matrix3d::Identity();
 

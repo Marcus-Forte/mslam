@@ -103,6 +103,21 @@ the SLAM config.
 If the gRPC connection drops, the remote client retries while the SLAM loop
 continues running. This lets playback resume after a reset or server restart.
 
+## Recording
+
+`remote_recorder` (from `msensor`) records the LiDAR and IMU streams of a
+sensor server into a `.pbscan` that `playback_publisher` and `bench_slam` can
+replay:
+
+```bash
+cmake --build --preset build-gcc --target remote-recorder
+./build/gcc/remote_recorder 192.168.178.129:50051 my_run.pbscan   # Ctrl-C stops and closes the file
+```
+
+Like the replay server, it is installed only with
+`-DMSLAM_INSTALL_REMOTE_RECORDER=ON` (on in the `gcc` preset, off by default
+and in the `pi5` preset).
+
 ## Browser viewer
 
 The `viewer/` folder contains a minimal TypeScript browser app for inspecting

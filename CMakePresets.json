@@ -17,6 +17,7 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_TYPE": "Release",
         "MSLAM_INSTALL_REPLAY_SERVER": "ON",
+        "MSLAM_INSTALL_REMOTE_RECORDER": "ON",
         "MSLAM_INTEGRATION_TESTS": "ON",
         "MSLAM_WITH_TBB": "ON"
       }

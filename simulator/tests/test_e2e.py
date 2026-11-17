@@ -150,3 +150,23 @@ def test_compare_zero_error_when_identical():
 def test_mslam_euler_convention():
     # R = Rx Ry Rz: pure yaw is a rotation about z
     assert np.allclose(mslam_euler_to_rot(0, 0, 0.3), rot_z(0.3))
+
+
+def test_serve_arguments_are_listed_with_defaults_marked():
+    import argparse
+
+    from msim.cli import _add_serve, format_arguments
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-v", "--verbose", action="store_true")
+    sub = ap.add_subparsers(dest="cmd")
+    _add_serve(sub)
+    a = ap.parse_args(["serve", "--scene", "s.yaml", "--port", "6000", "--pattern", "rosette"])
+    text = format_arguments(a, a._parser)
+    lines = {ln.split()[0]: ln for ln in text.splitlines()}
+    assert "verbose" not in lines and "cmd" not in lines and "_parser" not in lines
+    assert lines["scene"].split()[1] == "s.yaml" and "(default)" not in lines["scene"]
+    assert lines["port"].split()[1] == "6000" and "(default)" not in lines["port"]
+    assert "rosette" in lines["pattern"] and "(default)" not in lines["pattern"]
+    assert lines["host"].endswith("0.0.0.0 (default)")
+    assert lines["gt-log"].endswith("- (default)")

@@ -10,7 +10,7 @@ Python 3.13+, uv project. Everything runs on the host.
 
     cd simulator
     uv sync                 # mujoco, numpy, grpcio, protobuf, pyyaml (+ pytest, grpcio-tools in the dev group)
-    uv run pytest           # 72 tests, ~25 s, includes the end-to-end gRPC test
+    uv run pytest           # 87 tests, ~25 s, includes the end-to-end gRPC test
 
 The gRPC stubs are generated from `third_party/msensor/proto` on first use (`uv run msim gen-proto` to force); they are not checked in.
 
@@ -81,7 +81,22 @@ Noise (all off by default, seeded by `--seed`): `--range-noise`, `--intensity-no
 * IMU sequence numbers count from simulation start whether or not a client is connected (as the Mid360 IMU); a scan only gets a number if it was generated for a consumer.
 * Back-pressure: paced runs drop (real behaviour). `--unpaced` uses `block` (the simulator waits for the client), which the real server does not have; it makes runs lossless and reproducible.
 
-Scan pattern: the real Mid360 table is not available, so `RosettePattern` (6 lasers, 60 rev/s azimuth, 53.3 Hz elevation oscillation over -7..52 deg, never repeating, 92 % of 6x4 degree cells per scan) is an approximation. `--pattern table.npy` takes a real one ((M,3) directions or (M,2) az/el degrees; scan k uses rows k*9600...).
+Scan pattern: replayed from the real sensor. The Mid360 has 4 beams that spin fast in azimuth (1.30 deg per 4-point group, about 181 rev/s, 8.7 turns per 48 ms scan) while the elevation nods slowly between about -7 and 52 deg with a period of about 102 ms (2.1 scans, not locked to the scans). So a scan covers a band of elevation that changes from scan to scan: some see only -7..18 deg, others the whole range. `msim gen-pattern [recording.pbscan]` measures this from a recording: the sensor-frame direction of every return, with the misses (21 % in `living_room_garden`) interpolated per beam over time (median error 0.02 deg for gaps under 0.2 ms, 0.8 deg for 2 ms gaps; 86 % of the misses are in runs of 2 ms or less). It writes `out/mid360_pattern.npz` (git-ignored, 87 MB, 1129 scans), and simulated scan k uses recorded scan k, cycling every 54 s.
+`--pattern` takes one of:
+
+* `measured` (default): that measured table, built from `../test/data/living_room_garden.pbscan` on first use (2 s). Without the table or the recording (Git LFS not pulled) the simulator stops with an error; it does not fall back silently.
+* `rosette`: the synthetic approximation.
+* a file: a pattern written by `msim gen-pattern other.pbscan -o other.npz`, or a `.npy` table.
+
+The rosette (6 lasers, 60 rev/s, sinusoidal elevation) covers the whole field of view every scan and revisits the same directions, which the real sensor does not:
+
+| per scan, scans 300..399 | real (returns) | recorded pattern | rosette |
+|---|---|---|---|
+| elevation span p10 / median / p90 | 28 / 43 / 53 deg | 29 / 44 / 54 deg | 59 deg always |
+| 6x4 deg cells covered | 69 % | 70 % | 92 % |
+| 1x1 deg cells after 1 / 2 / 5 / 10 scans | 32 / 54 / 83 / 92 % | 37 / 61 / 90 / 97 % | 29 / 34 / 47 / 66 % |
+
+(The real column counts returns only, hence slightly lower.) `--pattern table.npy` still takes an (M,3) / (M,2) table; scan k uses rows k*9600...
 
 ## Files
 

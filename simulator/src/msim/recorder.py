@@ -40,6 +40,22 @@ class GroundTruthWriter:
         self._f.close()
 
 
+def iter_pbscan(path: str | Path):
+    """`RecordingEntry` messages of a msensor `.pbscan` ([uint64 LE size][bytes] repeated)."""
+    with open(path, "rb") as f:
+        while True:
+            head = f.read(8)
+            if len(head) < 8:
+                return
+            (size,) = struct.unpack("<Q", head)
+            data = f.read(size)
+            if len(data) < size:
+                raise ValueError(f"{path}: truncated entry")
+            e = recording_pb2.RecordingEntry()
+            e.ParseFromString(data)
+            yield e
+
+
 class PbscanWriter:
     """msensor `.pbscan`: repeated [uint64 LE size][RecordingEntry bytes] (see ScanRecorder::append)."""
 

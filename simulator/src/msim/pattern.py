@@ -1,19 +1,27 @@
 """Mid360 scan pattern: ray directions in firing order.
 
-The real Mid360 uses a proprietary non-repetitive pattern; no table is
-available, so `RosettePattern` is a documented approximation, and
-`FilePattern` loads a real table when one exists (`--pattern file.npy`).
+How the real Mid360 scans (measured on `test/data/living_room_garden.pbscan`, 2026-11-17):
 
-`RosettePattern`: `lasers` beams fired round-robin. Point g (global index, so
-successive scans differ) is at time t = g / points_per_second. Azimuth sweeps
-360 deg at `az_rev_per_s` revolutions per second; each laser's elevation
-oscillates between `el_min` and `el_max` at `el_hz`, the lasers offset in phase
-by 1/lasers of a period (defaults: 6 lasers, 60 rev/s, 53.3 Hz; they cover about 92 % of
-6 x 4 degree azimuth/elevation cells in one 9600-point scan, measured). With incommensurate frequencies the pattern does not
-repeat, and scan k+1 fills the gaps of scan k. Points are returned in firing
-order, which is what mslam's per-point timing (`i / points_per_second`) needs.
+* 4 beams fire in turn (point i belongs to beam i % 4); within a group of 4 points the beams sit about
+  0.8 deg apart in azimuth and 0.3 deg apart in elevation.
+* Azimuth spins fast: 1.30 deg per 4-point group, about 181 revolutions per second, 8.7 turns per scan.
+* Elevation nods slowly between about -7 and 52 deg with a period of about 102 ms (2.1 scans, alternating
+  100 / 105 ms between peaks), not locked to the 48 ms scans. So one scan sees a band of elevation, which
+  changes from scan to scan: a scan that falls on a bottom turn covers only -7 to 18 deg, the next one the
+  whole range. The time spent near the turns puts most points near -5..0 and 40..50 deg.
 
-Sensor frame: x forward, y left, z up; azimuth is measured from +x towards +y.
+`RecordedPattern` (the default when its table exists) replays the directions measured in a recording:
+`msim gen-pattern` reads a `.pbscan`, takes the direction of every return in the sensor frame (the
+recording's motion does not matter, the directions are the sensor's own), and fills the misses (zero
+points) by interpolating each beam over time: azimuth as the 1.30 deg/group spin plus an interpolated
+residual, elevation linearly. Scan k of the simulator uses scan k of the recording, cycling.
+
+`RosettePattern` is the old synthetic approximation (fast azimuth, sinusoidal elevation per laser): it covers
+the whole field of view in every scan and revisits the same directions, unlike the real sensor. It remains
+for tests and as the fallback when no table is available. `FilePattern` loads any (M,3) / (M,2) table.
+
+Points are returned in firing order, which is what mslam's per-point timing (`i / points_per_second`)
+needs. Sensor frame: x forward, y left, z up; azimuth is measured from +x towards +y.
 """
 
 from __future__ import annotations
@@ -22,6 +30,11 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]          # simulator/
+DEFAULT_PATTERN_FILE = PACKAGE_ROOT / "out" / "mid360_pattern.npz"
+DEFAULT_RECORDING = PACKAGE_ROOT.parent / "test" / "data" / "living_room_garden.pbscan"
+MID360_BEAMS = 4
 
 MID360_POINTS_PER_SCAN = 9600
 MID360_POINTS_PER_SECOND = 200_000
@@ -88,7 +101,134 @@ class FilePattern:
         return self.table[idx]
 
 
+def _wrap_deg(a):
+    return (np.asarray(a) + 180.0) % 360.0 - 180.0
+
+
+def directions_from_points(xyz: np.ndarray, beams: int = MID360_BEAMS, min_range: float = 0.1
+                           ) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Azimuth / elevation (deg, float64) of every point of a contiguous point stream, misses filled.
+
+    `xyz` is (N, 3) in firing order across consecutive scans (scans of a Mid360 recording are contiguous:
+    9600 points 5 us apart, 48 ms per scan). Points closer than `min_range` (the driver's (0,0,0) misses)
+    have no direction; each one is interpolated from the nearest returns of the same beam: the azimuth as a
+    constant spin rate plus a slowly varying residual (unwrapped), the elevation linearly.
+    """
+    xyz = np.asarray(xyz, np.float64)
+    n = len(xyz)
+    if n % beams:
+        raise ValueError(f"point count {n} is not a multiple of {beams} beams")
+    r = np.linalg.norm(xyz, axis=1)
+    valid = r > min_range
+    az = np.degrees(np.arctan2(xyz[:, 1], xyz[:, 0]))
+    el = np.degrees(np.arcsin(np.clip(xyz[:, 2] / np.maximum(r, 1e-12), -1.0, 1.0)))
+    out_az, out_el = np.empty(n), np.empty(n)
+    rates = []
+    for b in range(beams):
+        idx = np.arange(b, n, beams)
+        g = idx // beams                                    # group (firing) index
+        vb = valid[idx]
+        if vb.sum() < 2:
+            raise ValueError(f"beam {b} has fewer than 2 returns")
+        gv, a, e = g[vb], az[idx][vb], el[idx][vb]
+        step = np.diff(gv) == 1
+        if not step.any():
+            raise ValueError(f"beam {b}: no two consecutive returns to measure the spin rate")
+        rate = float(np.median(_wrap_deg(np.diff(a))[step]))
+        res = np.degrees(np.unwrap(np.radians(_wrap_deg(a - rate * gv))))
+        out_az[idx] = _wrap_deg(np.interp(g, gv, res) + rate * g)
+        out_el[idx] = np.interp(g, gv, e)
+        out_az[idx[vb]], out_el[idx[vb]] = a, e            # returns keep their measured direction exactly
+        rates.append(rate)
+    info = {"filled_fraction": float(1.0 - valid.mean()), "spin_deg_per_group": rates}
+    return out_az, out_el, info
+
+
+def read_recording_points(path: str | Path, max_scans: int | None = None,
+                          points_per_scan: int = MID360_POINTS_PER_SCAN) -> np.ndarray:
+    """All scan points of a msensor `.pbscan` recording, concatenated, (N, 3) float64."""
+    from .recorder import iter_pbscan
+
+    chunks = []
+    for entry in iter_pbscan(path):
+        if not entry.HasField("scan"):
+            continue
+        s = entry.scan
+        if len(s.x) != points_per_scan:
+            raise ValueError(f"{path}: a scan has {len(s.x)} points, expected {points_per_scan}")
+        chunks.append(np.stack([np.array(s.x), np.array(s.y), np.array(s.z)], axis=1))
+        if max_scans is not None and len(chunks) >= max_scans:
+            break
+    if not chunks:
+        raise ValueError(f"{path}: no scans")
+    return np.concatenate(chunks)
+
+
+def build_recorded_pattern(recording: str | Path, out: str | Path, max_scans: int | None = None,
+                           points_per_scan: int = MID360_POINTS_PER_SCAN) -> dict:
+    """`msim gen-pattern`: measure the scan pattern of a recording and save it as an .npz table."""
+    pts = read_recording_points(recording, max_scans, points_per_scan)
+    az, el, info = directions_from_points(pts)
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(out, az_deg=az.astype(np.float32), el_deg=el.astype(np.float32),
+             points_per_scan=np.int64(points_per_scan), source=str(Path(recording).name))
+    info.update(scans=len(pts) // points_per_scan, path=str(out))
+    return info
+
+
+class RecordedPattern:
+    """Directions measured in a real recording (`msim gen-pattern`); scan k replays recorded scan k, cycling."""
+
+    def __init__(self, path: str | Path) -> None:
+        with np.load(path) as d:
+            self.az = np.radians(d["az_deg"].astype(np.float64))
+            self.el = np.radians(d["el_deg"].astype(np.float64))
+            self.points_per_scan = int(d["points_per_scan"])
+            self.source = str(d["source"])
+        if self.az.shape != self.el.shape or len(self.az) % self.points_per_scan:
+            raise ValueError(f"{path}: malformed pattern table")
+        self.n_scans = len(self.az) // self.points_per_scan
+
+    def directions(self, scan_index: int, n: int) -> np.ndarray:
+        if n != self.points_per_scan:
+            raise ValueError(f"recorded pattern has {self.points_per_scan} points per scan, asked for {n}")
+        k = scan_index % self.n_scans
+        sl = slice(k * n, (k + 1) * n)
+        return dirs_from_az_el(self.az[sl], self.el[sl])
+
+
+PATTERN_CHOICES = ("measured", "rosette")
+
+
 def load_pattern(spec: str | None, points_per_second: int = MID360_POINTS_PER_SECOND) -> ScanPattern:
-    if spec is None or spec == "rosette":
+    """The `--pattern` option:
+
+    * `measured` (default, also None): the pattern measured on the real sensor, i.e. the table at
+      `out/mid360_pattern.npz`, built from `test/data/living_room_garden.pbscan` the first time (a few
+      seconds). Raises if neither exists (the recording is in Git LFS); there is no silent fallback.
+    * `rosette`: the synthetic approximation.
+    * a file path: an .npz written by `msim gen-pattern` (e.g. from another recording), or an .npy table.
+    """
+    import logging
+
+    log = logging.getLogger("msim.pattern")
+    if spec == "rosette":
         return RosettePattern(points_per_second)
-    return FilePattern(spec)
+    if spec is None or spec == "measured":
+        if not DEFAULT_PATTERN_FILE.exists():
+            if not DEFAULT_RECORDING.exists() or DEFAULT_RECORDING.stat().st_size < 1_000_000:
+                raise FileNotFoundError(
+                    f"--pattern measured needs {DEFAULT_PATTERN_FILE} or the recording to build it from, "
+                    f"{DEFAULT_RECORDING} (run `git lfs pull` in mslam). Alternatives: `msim gen-pattern "
+                    f"<recording.pbscan>`, a pattern file, or `--pattern rosette` (synthetic).")
+            log.info("building the measured Mid360 pattern from %s (once) -> %s", DEFAULT_RECORDING,
+                     DEFAULT_PATTERN_FILE)
+            build_recorded_pattern(DEFAULT_RECORDING, DEFAULT_PATTERN_FILE)
+        return RecordedPattern(DEFAULT_PATTERN_FILE)
+    path = Path(spec)
+    if not path.is_file():
+        raise ValueError(f"--pattern {spec!r}: expected one of {', '.join(PATTERN_CHOICES)} or an existing file")
+    if path.suffix == ".npz":
+        return RecordedPattern(path)
+    return FilePattern(path)

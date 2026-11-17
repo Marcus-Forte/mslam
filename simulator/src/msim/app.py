@@ -35,7 +35,7 @@ class SimOptions:
     gt_log: str | None = None
     record: str | None = None
     caster: str = "box"                # box | mujoco
-    pattern: str | None = None
+    pattern: str = "measured"         # measured | rosette | path to a pattern file
     range_noise: float = 0.0
     intensity_noise: float = 0.0       # relative std of the reported reflectivity
     imu_accel_noise: float = 0.0

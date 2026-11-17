@@ -20,6 +20,7 @@
 #include "mslam/config/JsonConfig.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/ImuScanSync.hh"
+#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
@@ -69,11 +70,7 @@ struct ReplayResult {
 
 std::shared_ptr<mslam::VoxelHashMap>
 makeMap(const mslam::SlamConfiguration &config) {
-  auto map = std::make_shared<mslam::VoxelHashMap>(
-      config.map_parameters.resolution,
-      config.map_parameters.max_points_per_voxel);
-  map->setNumAdjacentVoxelSearch(1);
-  return map;
+  return mslam::makeVoxelHashMap(config.map_parameters);
 }
 
 ReplayResult resultOf(const mslam::Slam &slam,

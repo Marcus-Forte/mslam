@@ -10,7 +10,8 @@ namespace {
 
 // A complete, valid configuration; `slam_extra` is spliced into the "slam"
 // object (e.g. `, "imu_fusion": "dead_reckoning"`).
-std::string configText(const std::string &slam_extra) {
+std::string configText(const std::string &slam_extra,
+                       const std::string &map_extra = "") {
   return R"({
     "imu": true,
     "lidar": true,
@@ -26,7 +27,8 @@ std::string configText(const std::string &slam_extra) {
         "deskew": true,
         "points_per_second": 200000
     },
-    "map": { "resolution": 0.1, "max_points_per_voxel": 5 },
+    "map": { "resolution": 0.1, "max_points_per_voxel": 5)" +
+         map_extra + R"( },
     "slam": {
         "optimizer_iterations": 3,
         "reg_iterations": 3,
@@ -46,9 +48,10 @@ protected:
   }
   void TearDown() override { std::filesystem::remove_all(dir_); }
 
-  mslam::SlamConfiguration load(const std::string &slam_extra) {
+  mslam::SlamConfiguration load(const std::string &slam_extra,
+                                const std::string &map_extra = "") {
     const auto path = dir_ / "config.jsonc";
-    std::ofstream(path) << configText(slam_extra);
+    std::ofstream(path) << configText(slam_extra, map_extra);
     mslam::JsonConfig config(path);
     config.load();
     return config.getConfig();
@@ -90,6 +93,27 @@ TEST_F(JsonConfigTest, NumThreadsRejectsAnInvalidValue) {
   EXPECT_THROW(load(R"(, "num_threads": 2.5)"), std::runtime_error);
   EXPECT_THROW(load(R"(, "num_threads": true)"), std::runtime_error);
   EXPECT_THROW(load(R"(, "num_threads": 257)"), std::runtime_error);
+}
+
+TEST_F(JsonConfigTest, MapSearchRadiusDefaultsToOneWhenAbsent) {
+  EXPECT_EQ(load("").map_parameters.search_radius, 1);
+}
+
+TEST_F(JsonConfigTest, MapSearchRadiusParsesValidValues) {
+  EXPECT_EQ(load("", R"(, "search_radius": 0)").map_parameters.search_radius,
+            0);
+  EXPECT_EQ(load("", R"(, "search_radius": 3)").map_parameters.search_radius,
+            3);
+  EXPECT_EQ(load("", R"(, "search_radius": 8)").map_parameters.search_radius,
+            8);
+}
+
+TEST_F(JsonConfigTest, MapSearchRadiusRejectsAnInvalidValue) {
+  EXPECT_THROW(load("", R"(, "search_radius": -1)"), std::runtime_error);
+  EXPECT_THROW(load("", R"(, "search_radius": 9)"), std::runtime_error);
+  EXPECT_THROW(load("", R"(, "search_radius": 1.5)"), std::runtime_error);
+  EXPECT_THROW(load("", R"(, "search_radius": 2.0)"), std::runtime_error);
+  EXPECT_THROW(load("", R"(, "search_radius": "2")"), std::runtime_error);
 }
 
 } // namespace

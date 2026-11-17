@@ -1,6 +1,7 @@
 #include "SyntheticScene.hh"
 
 #include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/SensorInput.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamOutput.hh"
@@ -94,13 +95,9 @@ public:
 
 struct Fixture {
   explicit Fixture(mslam::SlamConfiguration config = testConfig())
-      : config(config), map(std::make_shared<mslam::VoxelHashMap>(
-                            config.map_parameters.resolution,
-                            config.map_parameters.max_points_per_voxel)),
+      : config(config), map(mslam::makeVoxelHashMap(config.map_parameters)),
         slam(silentLogger(), config, map),
-        pipeline(slam, config, silentLogger(), output) {
-    map->setNumAdjacentVoxelSearch(1);
-  }
+        pipeline(slam, config, silentLogger(), output) {}
 
   mslam::SlamConfiguration config;
   std::shared_ptr<mslam::VoxelHashMap> map;

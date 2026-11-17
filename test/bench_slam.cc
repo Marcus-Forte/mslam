@@ -36,6 +36,7 @@
 #include "msensor/recorder/scan_player.hh"
 #include "mslam/config/JsonConfig.hh"
 #include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/PointCloudIO.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamOutput.hh"
@@ -224,10 +225,7 @@ int main(int argc, char **argv) {
   logger->set_level(spdlog::level::off);
 
   for (int run = 0; run < repeats; ++run) {
-    auto map = std::make_shared<mslam::VoxelHashMap>(
-        config.map_parameters.resolution,
-        config.map_parameters.max_points_per_voxel);
-    map->setNumAdjacentVoxelSearch(1);
+    auto map = mslam::makeVoxelHashMap(config.map_parameters);
     mslam::Slam slam(logger, config, map);
     mslam::NullSlamOutput null_output;
     MapCollector collector;

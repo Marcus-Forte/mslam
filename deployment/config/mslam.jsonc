@@ -18,6 +18,11 @@
     "map": {
         "resolution": 0.1,
         "max_points_per_voxel": 10,
+        // Voxels searched around a query (optional, default 1 = 3x3x3, max 8).
+        // Neighbours are only guaranteed within search_radius * resolution;
+        // a larger slam.max_correspondence_distance may miss matches or find
+        // a non-nearest one (Slam logs a warning at startup).
+        "search_radius": 1,
         // Bound the registration map so per-scan cost stays flat over long runs.
         "max_voxels": 300000, // 0 disables the voxel budget
         "max_range": 0, // 0 disables radius pruning (m)

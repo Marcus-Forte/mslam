@@ -21,7 +21,8 @@ ImuScanSync.cc
 ../utils/Parallel.cc
 SlamPipeline.cc
 SlamRunner.cc
-Slam.cc)
+Slam.cc
+MapFactory.cc)
 target_link_libraries(slam
   PUBLIC spdlog::spdlog slam_grpc maps moptim
   PRIVATE msensor scan_recorder sensors_proto)

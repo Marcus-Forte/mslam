@@ -148,6 +148,20 @@ void JsonConfig::load() {
   if (!root["map"]["dense_map"].empty()) {
     config_.map_parameters.dense_map = root["map"]["dense_map"].asBool();
   }
+  if (!root["map"]["search_radius"].empty()) {
+    const auto &search_radius = root["map"]["search_radius"];
+    // jsoncpp's isInt()/isIntegral() accept 2.0; only a JSON integer token
+    // (intValue/uintValue) is a valid radius.
+    const bool is_integer_token = search_radius.type() == Json::intValue ||
+                                  search_radius.type() == Json::uintValue;
+    if (!is_integer_token || search_radius.asDouble() < 0.0 ||
+        search_radius.asDouble() > MapParameters::kMaxSearchRadius) {
+      throw std::runtime_error(
+          "Invalid map search_radius: expected an integer in [0, " +
+          std::to_string(MapParameters::kMaxSearchRadius) + "]");
+    }
+    config_.map_parameters.search_radius = search_radius.asInt();
+  }
   if (!std::isfinite(config_.map_parameters.resolution) ||
       config_.map_parameters.resolution <= 0.0F ||
       config_.map_parameters.max_points_per_voxel == 0 ||

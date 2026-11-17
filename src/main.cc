@@ -5,6 +5,7 @@
 #include "msensor/config/config.hh"
 #include "msensor/lidar/mid360.hh"
 #include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
@@ -79,11 +80,7 @@ int main(int argc, char **argv) {
 
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
-  auto voxel_map = std::make_shared<mslam::VoxelHashMap>(
-      config.map_parameters.resolution,
-      config.map_parameters.max_points_per_voxel);
-  voxel_map->setNumAdjacentVoxelSearch(1); /// \todo add configurable?
-  map = std::move(voxel_map);
+  map = mslam::makeVoxelHashMap(config.map_parameters);
 
   mslam::SlamServer slam_server(logger);
   slam_server.start();

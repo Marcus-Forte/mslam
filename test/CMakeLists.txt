@@ -129,7 +129,7 @@ gtest_discover_tests(test_parallel)
 add_executable(mslam_draft draft.cc)
 target_link_libraries(mslam_draft moptim maps slam ILidar)
 
-# Offline replay benchmark (not registered with CTest, not built by default):
+# Offline replay benchmark (not registered with CTest, built by default):
 #   cmake --build --preset build-gcc --target bench_slam
-add_executable(bench_slam EXCLUDE_FROM_ALL bench_slam.cc)
+add_executable(bench_slam bench_slam.cc)
 target_link_libraries(bench_slam slam maps mslam::config scan_recorder)

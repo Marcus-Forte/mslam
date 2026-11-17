@@ -71,7 +71,8 @@ Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
   } else {
     warnIfGateExceedsMapReach(logger_,
                               config_.parameters.max_correspondence_distance,
-                              config_.map_parameters.resolution, 1);
+                              config_.map_parameters.resolution,
+                              config_.map_parameters.search_radius);
   }
   ResetPose();
 }

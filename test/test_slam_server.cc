@@ -4,7 +4,9 @@
 #include <chrono>
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
@@ -27,6 +29,12 @@ public:
   void stopProcessing() override { ++stops; }
   void requestReset() override { ++resets; }
   int starts = 0, stops = 0, resets = 0;
+};
+
+class FakeSensorStatus final : public mslam::ISensorStatus {
+public:
+  mslam::SensorStatus sensorStatus() const override { return status; }
+  mslam::SensorStatus status;
 };
 
 class SlamServerTest : public ::testing::Test {
@@ -558,6 +566,122 @@ TEST(SlamServerStreamMap, ABlockedClientDoesNotBlockThePublisherOrOthers) {
   // blocked Write would stall for seconds.
   EXPECT_LT(worst, std::chrono::milliseconds(250));
   expectSequence(healthy_chunks, 0, n, 0, n * 20000);
+}
+
+// ---------------------------------------------------------------------------
+// Sensor link status.
+
+using namespace std::chrono_literals;
+
+TEST(SensorLinkClassification, NoLinkIsDisconnectedWhateverTheAges) {
+  EXPECT_EQ(mslam::classifySensorLink(false, std::nullopt, std::nullopt),
+            mslam::SensorLink::Disconnected);
+  EXPECT_EQ(mslam::classifySensorLink(false, 10ms, 10ms),
+            mslam::SensorLink::Disconnected);
+}
+
+TEST(SensorLinkClassification, ConnectedWithoutSamplesIsIdle) {
+  // A paused playback server: connected, nothing arrives.
+  EXPECT_EQ(mslam::classifySensorLink(true, std::nullopt, std::nullopt),
+            mslam::SensorLink::ConnectedIdle);
+}
+
+TEST(SensorLinkClassification, StreamingNeedsBothStreamsFresh) {
+  EXPECT_EQ(mslam::classifySensorLink(true, 48ms, 5ms),
+            mslam::SensorLink::Streaming);
+  // The limit itself still counts as arriving.
+  EXPECT_EQ(mslam::classifySensorLink(true, mslam::kSensorStreamingMaxAge, 0ms),
+            mslam::SensorLink::Streaming);
+  EXPECT_EQ(mslam::classifySensorLink(true, 48ms, std::nullopt),
+            mslam::SensorLink::ConnectedIdle);
+  EXPECT_EQ(mslam::classifySensorLink(true, std::nullopt, 5ms),
+            mslam::SensorLink::ConnectedIdle);
+  EXPECT_EQ(
+      mslam::classifySensorLink(true, mslam::kSensorStreamingMaxAge + 1ms, 5ms),
+      mslam::SensorLink::ConnectedIdle);
+  EXPECT_EQ(mslam::classifySensorLink(true, 48ms, 10s),
+            mslam::SensorLink::ConnectedIdle);
+}
+
+TEST_F(SlamServerTest, StatusIsUnknownWithoutASensorStatusSource) {
+  sensors::Empty request;
+  sensors::SlamStatus response;
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_UNKNOWN);
+  EXPECT_TRUE(response.sensor_address().empty());
+  EXPECT_EQ(response.scan_age_ms(), -1);
+  EXPECT_EQ(response.imu_age_ms(), -1);
+}
+
+TEST_F(SlamServerTest, StatusReportsTheSensorLink) {
+  sensors::Empty request;
+  sensors::SlamStatus response;
+  auto source = std::make_shared<FakeSensorStatus>();
+  server_.setSensorStatus(source);
+
+  source->status = {.link = mslam::SensorLink::Streaming,
+                    .address = "10.0.0.2:50051",
+                    .scan_age = 48ms,
+                    .imu_age = 5ms};
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_STREAMING);
+  EXPECT_EQ(response.sensor_address(), "10.0.0.2:50051");
+  EXPECT_EQ(response.scan_age_ms(), 48);
+  EXPECT_EQ(response.imu_age_ms(), 5);
+
+  source->status = {.link = mslam::SensorLink::ConnectedIdle,
+                    .address = "10.0.0.2:50051",
+                    .scan_age = 90'000ms};
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_CONNECTED_IDLE);
+  EXPECT_EQ(response.scan_age_ms(), 90'000);
+  EXPECT_EQ(response.imu_age_ms(), -1);
+
+  source->status = {.link = mslam::SensorLink::Disconnected};
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_DISCONNECTED);
+
+  source->status = {.link = mslam::SensorLink::NotApplicable,
+                    .address = "local"};
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_NOT_APPLICABLE);
+  EXPECT_EQ(response.sensor_address(), "local");
+
+  // An age beyond int32 saturates instead of wrapping.
+  source->status = {.link = mslam::SensorLink::ConnectedIdle,
+                    .scan_age = std::chrono::hours(24 * 60)};
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.scan_age_ms(), std::numeric_limits<int32_t>::max());
+
+  server_.setSensorStatus(nullptr);
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_UNKNOWN);
+}
+
+TEST(SlamServerStatus, IsServedOverTheWire) {
+  RunningServer rs;
+  const auto get = [&] {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + 5s);
+    sensors::SlamStatus status;
+    EXPECT_TRUE(rs.stub->GetStatus(&context, sensors::Empty{}, &status).ok());
+    return status;
+  };
+  EXPECT_EQ(get().sensor_link(), sensors::SENSOR_LINK_UNKNOWN);
+
+  auto source = std::make_shared<FakeSensorStatus>();
+  source->status = {.link = mslam::SensorLink::Streaming,
+                    .address = "sensor:50051",
+                    .scan_age = 10ms,
+                    .imu_age = 2ms};
+  rs.server.setSensorStatus(source);
+  auto status = get();
+  EXPECT_EQ(status.sensor_link(), sensors::SENSOR_LINK_STREAMING);
+  EXPECT_EQ(status.sensor_address(), "sensor:50051");
+
+  source->status = {.link = mslam::SensorLink::Disconnected,
+                    .address = "sensor:50051"};
+  EXPECT_EQ(get().sensor_link(), sensors::SENSOR_LINK_DISCONNECTED);
 }
 
 } // namespace

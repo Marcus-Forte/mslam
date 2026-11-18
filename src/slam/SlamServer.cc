@@ -4,7 +4,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
+#include <optional>
 #include <random>
 #include <stdexcept>
 
@@ -434,6 +437,11 @@ grpc::Status SlamServer::GetPose(grpc::ServerContext *context,
 
 void SlamServer::setControl(ISlamControl *control) { control_.store(control); }
 
+void SlamServer::setSensorStatus(std::shared_ptr<const ISensorStatus> source) {
+  std::lock_guard lock(sensor_status_mutex_);
+  sensor_status_ = std::move(source);
+}
+
 grpc::Status SlamServer::Stop(grpc::ServerContext *, const sensors::Empty *,
                               sensors::Empty *) {
   if (auto *control = control_.load()) {
@@ -458,6 +466,51 @@ grpc::Status SlamServer::Reset(grpc::ServerContext *, const sensors::Empty *,
   if (auto *control = control_.load()) {
     control->requestReset();
   }
+  return grpc::Status::OK;
+}
+
+namespace {
+
+sensors::SensorLink toGRPC(SensorLink link) {
+  switch (link) {
+  case SensorLink::NotApplicable:
+    return sensors::SENSOR_LINK_NOT_APPLICABLE;
+  case SensorLink::Disconnected:
+    return sensors::SENSOR_LINK_DISCONNECTED;
+  case SensorLink::ConnectedIdle:
+    return sensors::SENSOR_LINK_CONNECTED_IDLE;
+  case SensorLink::Streaming:
+    return sensors::SENSOR_LINK_STREAMING;
+  case SensorLink::Unknown:
+    break;
+  }
+  return sensors::SENSOR_LINK_UNKNOWN;
+}
+
+/// Milliseconds for the wire: -1 when empty, saturated at the int32 maximum.
+int32_t ageMs(const std::optional<std::chrono::milliseconds> &age) {
+  if (!age) {
+    return -1;
+  }
+  return static_cast<int32_t>(
+      std::min<int64_t>(age->count(), std::numeric_limits<int32_t>::max()));
+}
+
+} // namespace
+
+grpc::Status SlamServer::GetStatus(grpc::ServerContext *,
+                                   const sensors::Empty *,
+                                   sensors::SlamStatus *response) {
+  std::shared_ptr<const ISensorStatus> source;
+  {
+    std::lock_guard lock(sensor_status_mutex_);
+    source = sensor_status_;
+  }
+  const SensorStatus status = source ? source->sensorStatus() : SensorStatus{};
+  response->set_sensor_link(toGRPC(status.link));
+  response->set_sensor_address(status.address);
+  response->set_scan_age_ms(ageMs(status.scan_age));
+  response->set_imu_age_ms(ageMs(status.imu_age));
   return grpc::Status::OK;
 }
 

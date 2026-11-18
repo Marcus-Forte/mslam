@@ -37,6 +37,31 @@ message MapStreamChunk {
 	PointCloud3 points = 4;
 }
 
+// State of the SLAM server's link to its sensor server.
+enum SensorLink {
+	// The server cannot tell (no sensor status source attached).
+	SENSOR_LINK_UNKNOWN = 0;
+	// The sensor is on-board (remote_scanner "local"); there is no link.
+	SENSOR_LINK_NOT_APPLICABLE = 1;
+	// The sensor server is unreachable.
+	SENSOR_LINK_DISCONNECTED = 2;
+	// Connected, but LiDAR and IMU samples are not both arriving (for example a
+	// paused playback server).
+	SENSOR_LINK_CONNECTED_IDLE = 3;
+	// Connected and both LiDAR and IMU samples are arriving.
+	SENSOR_LINK_STREAMING = 4;
+}
+
+message SlamStatus {
+	SensorLink sensor_link = 1;
+	// Sensor server the SLAM server connects to ("host:port"); empty when none.
+	string sensor_address = 2;
+	// Milliseconds since the last LiDAR scan / IMU sample arrived; -1 if none
+	// has arrived yet (or the sensor is not remote).
+	int32 scan_age_ms = 3;
+	int32 imu_age_ms = 4;
+}
+
 service SlamService {
 	// Deprecated: use StreamMap. Joins the whole map into one message.
 	rpc GetMap(Empty) returns (PointCloud3);
@@ -51,6 +76,8 @@ service SlamService {
 	rpc Stop(Empty) returns (Empty);
 	rpc Start(Empty) returns (Empty);
 	rpc Reset(Empty) returns (Empty);
+	// One-shot status, cheap enough to poll about once per second.
+	rpc GetStatus(Empty) returns (SlamStatus);
 }
 
 

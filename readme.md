@@ -324,6 +324,17 @@ also a check of the parallel code:
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5 --threads 4
 ```
 
+## Sensor link status (`GetStatus`)
+
+`SlamService.GetStatus` (`grpc/slam.proto`) reports whether the SLAM server is
+connected to its sensor server: `SENSOR_LINK_STREAMING` (connected, LiDAR and
+IMU samples arriving), `SENSOR_LINK_CONNECTED_IDLE` (connected, samples not
+arriving, for example a paused `playback_publisher`), `SENSOR_LINK_DISCONNECTED`,
+`SENSOR_LINK_NOT_APPLICABLE` (`remote_scanner` is `"local"`) and
+`SENSOR_LINK_UNKNOWN`, with the sensor address and the age in milliseconds of
+the last scan and IMU sample (-1 if none yet). The Python viewer shows it as a
+second LED below the connection LED (see `client/README.md`).
+
 ## Map stream (`StreamMap`)
 
 `SlamService.StreamMap` (`grpc/slam.proto`) streams the map as it grows, with a

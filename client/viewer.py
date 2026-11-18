@@ -16,6 +16,7 @@ from map_renderer import MapRenderer
 from map_store import MapStore
 from map_stream import ServerTooOldError, StreamEnd, stream_map
 from points import to_viser_points
+from sensor_status import SensorState, SensorStatusMonitor, sensor_led_html
 
 PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
 if str(PROTO_GEN_DIR) not in sys.path:
@@ -93,6 +94,9 @@ class SlamViewerClient:
 
         self._connection_led = self._viser_server.gui.add_html(led_html(ConnectionState.CONNECTING, server_addr))
         self._connection_monitor = ConnectionMonitor(server_addr, self._show_connection)
+        # The SLAM server's own link to its sensor server (the LED above is the viewer's link to the SLAM server).
+        self._sensor_led = self._viser_server.gui.add_html(sensor_led_html(SensorState.UNKNOWN, ""))
+        self._sensor_monitor = SensorStatusMonitor(self._control_stub, self._show_sensor)
 
         self._follow_dropdown = self._viser_server.gui.add_dropdown(
             "Follow",
@@ -139,6 +143,7 @@ class SlamViewerClient:
 
     def run(self) -> None:
         self._connection_monitor.start(self._shutdown_event.is_set, self._shutdown_event.wait)
+        self._sensor_monitor.start(self._shutdown_event.is_set, self._shutdown_event.wait)
         map_increment_thread = threading.Thread(target=self._run_stream_map_increments, daemon=True)
         map_flush_thread = threading.Thread(
             target=self._map_renderer.run, args=(self._shutdown_event.is_set, self._shutdown_event.wait), daemon=True
@@ -164,6 +169,9 @@ class SlamViewerClient:
 
     def _show_connection(self, state: ConnectionState) -> None:
         self._connection_led.content = led_html(state, self._server_addr)
+
+    def _show_sensor(self, state: SensorState, address: str) -> None:
+        self._sensor_led.content = sensor_led_html(state, address)
 
     def _log_stream_exception(self, stream_name: str, exc: Exception) -> None:
         if isinstance(exc, ServerTooOldError):

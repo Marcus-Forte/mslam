@@ -6,6 +6,7 @@
 #include "msensor/lidar/mid360.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/MapFactory.hh"
+#include "mslam/slam/SensorStatus.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
@@ -19,6 +20,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 
@@ -28,6 +30,34 @@ namespace {
 // newest scan, so a deeper scan queue would be discarded on arrival.
 constexpr uint32_t k_remote_imu_queue = 1000;
 constexpr uint32_t k_remote_scan_queue = 5;
+
+// Sensor link reported by the GetStatus RPC for a remote sensor server.
+class RemoteSensorStatus final : public mslam::ISensorStatus {
+public:
+  explicit RemoteSensorStatus(std::shared_ptr<msensor::SensorsRemoteClient> c)
+      : client_(std::move(c)) {}
+
+  mslam::SensorStatus sensorStatus() const override {
+    const auto scan_age = client_->lastScanAge();
+    const auto imu_age = client_->lastImuAge();
+    return {.link =
+                mslam::classifySensorLink(client_->linkUp(), scan_age, imu_age),
+            .address = client_->address(),
+            .scan_age = scan_age,
+            .imu_age = imu_age};
+  }
+
+private:
+  std::shared_ptr<msensor::SensorsRemoteClient> client_;
+};
+
+// An on-board sensor has no link to report.
+class LocalSensorStatus final : public mslam::ISensorStatus {
+public:
+  mslam::SensorStatus sensorStatus() const override {
+    return {.link = mslam::SensorLink::NotApplicable, .address = "local"};
+  }
+};
 
 // Set from the signal handler, polled by the SLAM loop.
 std::atomic<bool> g_stop_requested{false};
@@ -126,6 +156,7 @@ int main(int argc, char **argv) {
     mid360->startSampling();
     lidar_sensor = mid360;
     imu_sensor = mid360;
+    slam_server.setSensorStatus(std::make_shared<LocalSensorStatus>());
     logger->info("Initialized local Mid360 using config: {}",
                  mid360_config_path.string());
 
@@ -138,7 +169,10 @@ int main(int argc, char **argv) {
     remote->start();
     lidar_sensor = remote;
     imu_sensor = remote;
-    logger->info("Connected to remote sensor server at {}",
+    slam_server.setSensorStatus(std::make_shared<RemoteSensorStatus>(remote));
+    // start() only launches the reader threads (gRPC connects lazily and keeps
+    // retrying), so whether the link is up is what GetStatus reports.
+    logger->info("Connecting to remote sensor server at {}",
                  config.remote_scanner);
   }
 
@@ -154,5 +188,6 @@ int main(int argc, char **argv) {
 
   // The runner is about to be destroyed: detach it from the server.
   slam_server.setControl(nullptr);
+  slam_server.setSensorStatus(nullptr);
   return 0;
 }

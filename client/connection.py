@@ -59,15 +59,19 @@ def next_state(current: ConnectionState, connectivity: grpc.ChannelConnectivity)
     return ConnectionState.DISCONNECTED if current is ConnectionState.DISCONNECTED else ConnectionState.CONNECTING
 
 
-def led_html(state: ConnectionState, address: str) -> str:
-    color = state.color
+def led_row_html(color: str, text_html: str) -> str:
+    """One status row: a glowing dot in `color` and `text_html` (already escaped)."""
     return (
         '<div style="display:flex;align-items:center;gap:0.6em;padding:0.1em 0.75em;font-size:0.875em">'
         f'<span style="flex:none;width:0.85em;height:0.85em;border-radius:50%;background:{color};'
         f'box-shadow:0 0 0.4em {color}"></span>'
-        f"<span>SLAM <code>{html.escape(address)}</code>: {state.label}</span>"
+        f"<span>{text_html}</span>"
         "</div>"
     )
+
+
+def led_html(state: ConnectionState, address: str) -> str:
+    return led_row_html(state.color, f"SLAM <code>{html.escape(address)}</code>: {state.label}")
 
 
 class ConnectionMonitor:

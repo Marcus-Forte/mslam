@@ -2,6 +2,7 @@
 
 #include "mslam/common/Points.hh"
 #include "mslam/common/State.hh"
+#include "mslam/slam/SensorStatus.hh"
 #include "mslam/slam/SlamOutput.hh"
 #include "slam.grpc.pb.h"
 #include <atomic>
@@ -33,6 +34,11 @@ public:
   /// The control the Start / Stop / Reset RPCs act on (not owned; must outlive
   /// the server or be cleared with nullptr before it is destroyed).
   void setControl(ISlamControl *control);
+
+  /// Where the GetStatus RPC reads the sensor link from. Shared, so a request
+  /// in flight never outlives it; nullptr detaches (GetStatus then reports
+  /// SENSOR_LINK_UNKNOWN).
+  void setSensorStatus(std::shared_ptr<const ISensorStatus> source);
 
   // ISlamOutput. Called from the SLAM thread.
   void updatePose(const Pose3D &pose) override;
@@ -77,11 +83,16 @@ private:
   grpc::Status Reset(grpc::ServerContext *, const sensors::Empty *,
                      sensors::Empty *response) override;
 
+  grpc::Status GetStatus(grpc::ServerContext *, const sensors::Empty *,
+                         sensors::SlamStatus *response) override;
+
   std::shared_ptr<spdlog::logger> logger_;
   std::string address_;
   std::unique_ptr<grpc::Server> server_;
   std::atomic<bool> stopping_{false};
   std::atomic<ISlamControl *> control_{nullptr};
+  mutable std::mutex sensor_status_mutex_;
+  std::shared_ptr<const ISensorStatus> sensor_status_;
 
   mutable std::mutex map_increment_mutex_;
   mutable std::mutex transformed_scan_mutex_;

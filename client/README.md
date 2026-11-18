@@ -9,6 +9,17 @@ server coming back). It watches the gRPC channel state (an HTTP/2 connection to 
 check which RPCs the server implements, and it does not notice a server that stops answering without closing the
 connection, such as a pulled cable.
 
+The second LED shows the SLAM server's own link to its sensor server (`sensor_status.py`), which the SLAM server reports
+through the `GetStatus` RPC (polled once a second):
+
+- **green, streaming**: connected, and both LiDAR and IMU samples are arriving (the last of each is at most 2 s old);
+- **amber, connected, no data**: connected, but samples are not arriving on both streams, for example a
+  `playback_publisher` that is paused (it starts paused) or a sensor that is idle;
+- **red, disconnected**: the sensor server is unreachable (the SLAM server keeps retrying every second);
+- **grey, on-board sensor**: `remote_scanner` is `"local"`, so there is no link to report;
+- **grey, unknown**: the viewer cannot ask (the SLAM server is unreachable, see the first LED) or the SLAM server is too
+  old to implement `GetStatus`; everything else in the viewer still works against an old server.
+
 The **Follow** dropdown keeps the sensor still on screen and moves the world around it, as rviz does with a target
 frame (`follow.py`):
 

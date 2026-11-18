@@ -6,7 +6,7 @@
 # | remote_recorder    | remote-recorder | MSLAM_INSTALL_REMOTE_RECORDER |
 #
 # playback_publisher replays a .pbscan as a sensor server; remote_recorder
-# (`remote_recorder <host:port> [out.pbscan]`) records a sensor server's
+# (`remote_recorder -a <host:port> [-o out.pbscan]`) records a sensor server's
 # streams into a .pbscan. Both are written to the top of the build tree, next
 # to mslam. Installation is opt-in to keep them out of deployment images by
 # default; the gcc preset turns both on. Installed tools share mslam's runtime

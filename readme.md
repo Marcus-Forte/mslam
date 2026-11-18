@@ -111,7 +111,7 @@ replay:
 
 ```bash
 cmake --build --preset build-gcc --target remote-recorder
-./build/gcc/remote_recorder 192.168.178.129:50051 my_run.pbscan   # Ctrl-C stops and closes the file
+./build/gcc/remote_recorder -a 192.168.178.129:50051 -o my_run.pbscan   # Ctrl-C stops and closes the file
 ```
 
 Like the replay server, it is installed only with

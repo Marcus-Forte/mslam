@@ -1,0 +1,32 @@
+# Hallway -> N1 -> N2 -> N3 -> hallway -> S3 -> S2 -> S1 -> hallway -> start.
+# Passes every interior door of the office scene and returns to the start pose.
+# Speeds are nominal: segment times are 1.5 * length / speed (quintic ease in/out).
+speed: 1.0
+lead_in: 1.0
+lead_out: 1.0
+waypoints:
+  - {p: [-10.0, 0.0, 1.2], yaw_deg: 0}
+  - {p: [-8.0, 0.0, 1.2]}
+  - {p: [-8.0, 1.5, 1.2]}          # door to N1
+  - {p: [-8.0, 3.5, 1.2]}
+  - {p: [-6.0, 4.5, 1.2]}
+  - {p: [-4.0, 4.5, 1.2]}          # door N1 | N2
+  - {p: [-2.0, 4.0, 1.2]}
+  - {p: [1.5, 3.8, 1.2]}
+  - {p: [4.0, 4.5, 1.2]}           # door N2 | N3
+  - {p: [6.5, 4.0, 1.2]}
+  - {p: [8.0, 3.0, 1.2]}
+  - {p: [8.0, 1.5, 1.2]}           # door N3 to the hallway
+  - {p: [8.0, 0.0, 1.2]}
+  - {p: [8.5, -1.5, 1.2]}          # door to S3
+  - {p: [8.5, -3.5, 1.2]}
+  - {p: [7.0, -4.5, 1.2]}
+  - {p: [5.0, -4.5, 1.2]}          # door S3 | S2
+  - {p: [3.0, -4.0, 1.2]}
+  - {p: [-0.5, -3.5, 1.2]}
+  - {p: [-3.0, -4.5, 1.2]}         # door S2 | S1
+  - {p: [-5.0, -5.0, 1.2]}
+  - {p: [-7.0, -3.5, 1.2]}
+  - {p: [-7.5, -1.5, 1.2]}         # door S1 to the hallway
+  - {p: [-7.5, 0.0, 1.2]}
+  - {p: [-10.0, 0.0, 1.2], yaw_deg: 0}

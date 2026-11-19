@@ -1,0 +1,53 @@
+# Office floor: a 24 x 3 m hallway with three rooms north (N1..N3) and three south (S1..S3),
+# 24 x 15 m overall. Every room opens onto the hallway, and neighbouring rooms are joined by
+# interior doors, so the plan has loops. Inner faces are 0.1 m inside the centre lines.
+# Start: west end of the hallway.
+name: office
+wall_height: 2.8
+wall_thickness: 0.2
+start: {position: [-10.0, 0.0, 1.0], yaw_deg: 0}
+walls:
+  - {from: [-12, -7.5], to: [12, -7.5]}      # outer south
+  - {from: [-12, 7.5], to: [12, 7.5]}        # outer north
+  - {from: [-12, -7.5], to: [-12, 7.5]}      # outer west
+  - {from: [12, -7.5], to: [12, 7.5]}        # outer east
+  - from: [-12, 1.5]                         # hallway north wall: doors to N1, N2, N3
+    to: [12, 1.5]
+    openings:
+      - {at: 4.0, width: 1.1, height: 2.1}   # x = -8
+      - {at: 12.0, width: 1.1, height: 2.1}  # x = 0
+      - {at: 20.0, width: 1.1, height: 2.1}  # x = 8
+  - from: [-12, -1.5]                        # hallway south wall: doors to S1, S2, S3
+    to: [12, -1.5]
+    openings:
+      - {at: 4.5, width: 1.1, height: 2.1}   # x = -7.5
+      - {at: 13.0, width: 1.1, height: 2.1}  # x = 1
+      - {at: 20.5, width: 1.1, height: 2.1}  # x = 8.5
+  - from: [-4, 1.5]                          # N1 | N2
+    to: [-4, 7.5]
+    openings: [{at: 3.0, width: 1.0, height: 2.1}]
+  - from: [4, 1.5]                           # N2 | N3
+    to: [4, 7.5]
+    openings: [{at: 3.0, width: 1.0, height: 2.1}]
+  - from: [-3, -1.5]                         # S1 | S2
+    to: [-3, -7.5]
+    openings: [{at: 3.0, width: 1.0, height: 2.1}]
+  - from: [5, -1.5]                          # S2 | S3
+    to: [5, -7.5]
+    openings: [{at: 3.0, width: 1.0, height: 2.1}]
+boxes:
+  - {name: cabinet_hall, center: [-5.0, 1.0], size: [0.8, 0.4, 1.8]}
+  - {name: bench_hall, center: [4.0, -1.0], size: [1.6, 0.4, 0.5]}
+  - {name: pillar_hall, center: [10.5, 0.0], size: [0.4, 0.4, 2.8]}
+  - {name: desk_n1, center: [-9.5, 5.5], size: [1.6, 0.8, 0.75], yaw_deg: 10}
+  - {name: shelf_n1, center: [-5.0, 6.8], size: [1.4, 0.4, 1.9]}
+  - {name: table_n2, center: [0.0, 5.5], size: [2.0, 1.0, 0.75], yaw_deg: -20}
+  - {name: crate_n2, center: [2.8, 2.6], size: [0.7, 0.7, 0.9], yaw_deg: 30}
+  - {name: desk_n3, center: [9.0, 6.0], size: [1.4, 0.8, 0.75]}
+  - {name: cabinet_n3, center: [11.4, 3.5], size: [0.4, 1.6, 1.8]}
+  - {name: sofa_s1, center: [-9.0, -5.8], size: [2.0, 0.9, 0.8], yaw_deg: 5}
+  - {name: pillar_s1, center: [-5.5, -4.0], size: [0.5, 0.5, 2.8]}
+  - {name: table_s2, center: [1.0, -5.5], size: [1.6, 1.6, 0.75], yaw_deg: 45}
+  - {name: shelf_s2, center: [-2.5, -6.0], size: [0.4, 2.0, 1.8]}
+  - {name: crate_s3, center: [10.0, -6.0], size: [0.8, 0.8, 1.2], yaw_deg: 15}
+  - {name: wedge_s3, center: [7.5, -3.0], size: [1.2, 0.3, 1.5], yaw_deg: -25}

@@ -10,7 +10,15 @@ import grpc
 from tests import helpers  # noqa: F401  (puts the client directory on sys.path)
 
 from proto_gen import slam_pb2, slam_pb2_grpc  # noqa: E402
-from sensor_status import SensorState, SensorStatusMonitor, sensor_led_html, state_from_status  # noqa: E402
+from sensor_status import (  # noqa: E402
+    GraphInfo,
+    SensorState,
+    SensorStatusMonitor,
+    graph_info_from_status,
+    graph_led_html,
+    sensor_led_html,
+    state_from_status,
+)
 
 S = SensorState
 
@@ -69,6 +77,22 @@ class StateMappingTest(unittest.TestCase):
         self.assertNotIn("<code>", text)
 
 
+class GraphInfoTest(unittest.TestCase):
+    def test_odometry_status_has_no_graph(self) -> None:
+        info = graph_info_from_status(slam_pb2.SlamStatus(keyframes=5))
+        self.assertEqual(info, GraphInfo())
+        self.assertEqual(graph_led_html(info), "")
+
+    def test_pose_graph_status_shows_keyframes_and_loop_closures(self) -> None:
+        status = slam_pb2.SlamStatus(strategy=slam_pb2.SLAM_STRATEGY_POSE_GRAPH, keyframes=74, loop_closures=32)
+        info = graph_info_from_status(status)
+        self.assertEqual(info, GraphInfo(True, 74, 32))
+        text = graph_led_html(info)
+        self.assertIn("74 keyframes", text)
+        self.assertIn("32 loop closures", text)
+        self.assertIn("1 loop closure<", graph_led_html(GraphInfo(True, 3, 1)) + "<")
+
+
 class MonitorTest(unittest.TestCase):
     def setUp(self) -> None:
         self.stop = threading.Event()
@@ -102,6 +126,35 @@ class MonitorTest(unittest.TestCase):
         with self.changed:
             ok = self.changed.wait_for(lambda: self.changes and self.changes[-1][0] is state, timeout)
         self.assertTrue(ok, f"no {state} within {timeout} s; changes {self.changes}")
+
+    def test_reports_graph_changes_to_on_graph(self) -> None:
+        slam = FakeSlam()
+        server, port = start_server(slam)
+        self.servers.append(server)
+        graphs: list[GraphInfo] = []
+        done = threading.Event()
+
+        def on_graph(info: GraphInfo) -> None:
+            graphs.append(info)
+            if info.keyframes == 9:
+                done.set()
+
+        channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+        self.channels.append(channel)
+        monitor = SensorStatusMonitor(
+            slam_pb2_grpc.SlamServiceStub(channel),
+            self.on_change,
+            poll_interval=0.05,
+            rpc_timeout=1.0,
+            on_graph=on_graph,
+        )
+        monitor.start(self.stop.is_set, self.stop.wait)
+        self.assertEqual(graphs[0], GraphInfo())  # once at start
+
+        slam.status = slam_pb2.SlamStatus(strategy=slam_pb2.SLAM_STRATEGY_POSE_GRAPH, keyframes=9, loop_closures=2)
+        self.assertTrue(done.wait(6.0), graphs)
+        self.assertEqual(graphs[-1], GraphInfo(True, 9, 2))
+        self.assertEqual(len(graphs), 2)  # no repeat while it stays the same
 
     def test_follows_the_servers_sensor_link(self) -> None:
         slam = FakeSlam()

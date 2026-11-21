@@ -15,6 +15,10 @@ enum class DownsampleFilter { VoxelGrid, VoxelHash };
 /// (pose, velocity, biases). DeadReckoning: the IMU is only integrated forward
 /// and that pose seeds a pose-only scan registration.
 enum class ImuFusion { PreintegrationFactor, DeadReckoning };
+/// Which estimator runs. Odometry: LiDAR-inertial odometry only (default).
+/// PoseGraph: the same odometry plus a keyframe pose-graph back end with loop
+/// closure; see `PoseGraphParameters`.
+enum class SlamStrategy { Odometry, PoseGraph };
 
 inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   switch (level) {
@@ -88,6 +92,17 @@ inline constexpr std::string_view toString(ImuFusion fusion) {
   throw std::runtime_error("Invalid IMU fusion");
 }
 
+inline constexpr std::string_view toString(SlamStrategy strategy) {
+  switch (strategy) {
+  case SlamStrategy::Odometry:
+    return "odometry";
+  case SlamStrategy::PoseGraph:
+    return "pose_graph";
+  }
+
+  throw std::runtime_error("Invalid SLAM strategy");
+}
+
 /**
  * @brief Algorithm Paramters.
  *
@@ -100,6 +115,61 @@ struct SlamParameters {
   // Threads for the correspondence search and normal estimation: 1 runs
   // sequentially, 0 uses every hardware thread. Results do not depend on it.
   unsigned int num_threads = 1;
+};
+
+/**
+ * @brief Pose-graph back end (only used when `strategy` is PoseGraph).
+ *
+ * The msensor driver already accumulates each scan, so a scan is dense enough
+ * and there is no minimum scan count: a keyframe's mini map is built from the
+ * scans between it and the next keyframe.
+ */
+struct PoseGraphParameters {
+  // --- Keyframes ---
+  // A scan opens a new keyframe when it moved this far from the current one.
+  // 0.5 m / 15 deg keeps mini maps compact while consecutive keyframes still
+  // overlap strongly (needed by the loop verification).
+  double keyframe_distance = 0.5; // m
+  double keyframe_angle = 0.26;   // rad (about 15 deg)
+  // Close a keyframe after this long even when standing still, bounding the
+  // mini map (and the wait for a loop check). 0 = off.
+  double keyframe_max_interval_s = 0.0; // s
+  // Thinning of a mini map; half the default registration voxel (0.1 m) keeps
+  // the detail ICP verification needs at a modest point count.
+  double mini_map_voxel_size = 0.05; // m
+
+  // --- Loop closure ---
+  // Candidates: keyframes within this distance (map frame) of the new one.
+  // Chosen a few times the expected drift over a loop, but small enough to
+  // keep scans overlapping.
+  double loop_search_radius = 2.0; // m
+  // Skip candidates younger than this many keyframes, so neighbours along the
+  // trajectory are not mistaken for revisits (10 keyframes = about 5 m).
+  unsigned int loop_min_separation = 10; // keyframes
+  // The verification target is the candidate plus this many keyframes on each
+  // side (a denser, less noisy target than one mini map).
+  unsigned int loop_submap_keyframes = 2;
+  // Verification gates, the two figures register_scans reports. 0.05 m is
+  // about twice the map noise (21 mm RMS measured), 60 % rejects partial or
+  // wrong overlaps.
+  double loop_max_rms = 0.05;             // m
+  double loop_min_matched_fraction = 0.6; // (0, 1]
+  // 1-sigma of a loop edge; a verified ICP result is tighter than odometry.
+  double loop_sigma_translation = 0.02; // m
+  double loop_sigma_rotation = 0.005;   // rad
+
+  // --- Odometry edges ---
+  // 1-sigma of the relative pose between consecutive keyframes. Larger than a
+  // loop edge so a closure pulls the chain, but not so loose that the graph
+  // ignores the odometry.
+  double odometry_sigma_translation = 0.05; // m
+  double odometry_sigma_rotation = 0.01;    // rad
+
+  // --- Optimizer ---
+  unsigned int optimizer_iterations = 20; // Levenberg-Marquardt iterations
+  // true: run the back end inline on the SLAM thread so a replay does not
+  // depend on timing (bench_slam, integration test); false: worker thread.
+  bool synchronous = false;
 };
 
 /**
@@ -151,6 +221,8 @@ struct SlamConfiguration {
   PreProcessor preprocessor;
   SlamParameters parameters;
   MapParameters map_parameters;
+  SlamStrategy strategy = SlamStrategy::Odometry;
+  PoseGraphParameters pose_graph; // used when strategy == PoseGraph
 
   friend std::ostream &operator<<(std::ostream &os, SlamConfiguration config) {
     os << "IMU: " << config.with_imu << "\n"
@@ -182,7 +254,30 @@ struct SlamConfiguration {
        << "Max Corr. Distance: "
        << config.parameters.max_correspondence_distance << "\n"
        << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n"
-       << "Threads: " << config.parameters.num_threads << "\n";
+       << "Threads: " << config.parameters.num_threads << "\n"
+       << "Strategy: " << toString(config.strategy) << "\n";
+    if (config.strategy == SlamStrategy::PoseGraph) {
+      const auto &pg = config.pose_graph;
+      os << "# Pose Graph Parameters #" << "\n"
+         << "Keyframe distance: " << pg.keyframe_distance << "\n"
+         << "Keyframe angle: " << pg.keyframe_angle << "\n"
+         << "Keyframe max interval: " << pg.keyframe_max_interval_s << "\n"
+         << "Mini map voxel size: " << pg.mini_map_voxel_size << "\n"
+         << "Loop search radius: " << pg.loop_search_radius << "\n"
+         << "Loop min separation: " << pg.loop_min_separation << "\n"
+         << "Loop submap keyframes: " << pg.loop_submap_keyframes << "\n"
+         << "Loop max RMS: " << pg.loop_max_rms << "\n"
+         << "Loop min matched fraction: " << pg.loop_min_matched_fraction
+         << "\n"
+         << "Loop sigma translation: " << pg.loop_sigma_translation << "\n"
+         << "Loop sigma rotation: " << pg.loop_sigma_rotation << "\n"
+         << "Odometry sigma translation: " << pg.odometry_sigma_translation
+         << "\n"
+         << "Odometry sigma rotation: " << pg.odometry_sigma_rotation << "\n"
+         << "Pose graph optimizer iterations: " << pg.optimizer_iterations
+         << "\n"
+         << "Pose graph synchronous: " << pg.synchronous << "\n";
+    }
     return os;
   }
 };

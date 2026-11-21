@@ -3,6 +3,7 @@
 #include "jsoncpp/json/reader.h"
 #include "jsoncpp/json/writer.h"
 #include "mslam/config/IConfig.hh"
+#include "mslam/config/Validation.hh"
 
 #include <cmath>
 #include <cstdio>
@@ -51,16 +52,7 @@ std::string qualified(std::string_view section, std::string_view key) {
 
 void rejectUnknownKeys(const Json::Value &object, std::string_view section,
                        std::initializer_list<std::string_view> known) {
-  for (const auto &name : object.getMemberNames()) {
-    bool found = false;
-    for (const auto &candidate : known) {
-      found = found || candidate == name;
-    }
-    if (!found) {
-      fail("registration config: unknown key '" + qualified(section, name) +
-           "'");
-    }
-  }
+  mslam::rejectUnknownKeys(object, section, known, "registration config");
 }
 
 const Json::Value *optionalMember(const Json::Value &object,

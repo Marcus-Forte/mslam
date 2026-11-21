@@ -57,6 +57,8 @@ gtest_discover_tests(test_slam)
 add_executable(test_json_config
 test_json_config.cc)
 target_link_libraries(test_json_config mslam::config GTest::gtest_main)
+target_compile_definitions(test_json_config
+  PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 gtest_discover_tests(test_json_config)
 
@@ -133,3 +135,23 @@ target_link_libraries(mslam_draft moptim maps slam ILidar)
 #   cmake --build --preset build-gcc --target bench_slam
 add_executable(bench_slam bench_slam.cc)
 target_link_libraries(bench_slam slam maps mslam::config scan_recorder)
+
+add_executable(test_pose_graph_optimizer
+test_pose_graph_optimizer.cc)
+target_link_libraries(test_pose_graph_optimizer slam GTest::gtest_main)
+
+gtest_discover_tests(test_pose_graph_optimizer)
+
+add_executable(test_pose_graph_keyframes
+test_pose_graph_keyframes.cc)
+target_link_libraries(test_pose_graph_keyframes slam GTest::gtest_main)
+
+gtest_discover_tests(test_pose_graph_keyframes)
+
+add_executable(test_pose_graph_backend
+test_pose_graph_backend.cc)
+target_link_libraries(test_pose_graph_backend slam GTest::gtest_main)
+target_compile_definitions(test_pose_graph_backend
+  PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+gtest_discover_tests(test_pose_graph_backend)

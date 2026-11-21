@@ -22,7 +22,11 @@ ImuScanSync.cc
 SlamPipeline.cc
 SlamRunner.cc
 Slam.cc
-MapFactory.cc)
+MapFactory.cc
+posegraph/PoseGraphOptimizer.cc
+posegraph/KeyframeBuilder.cc
+posegraph/LoopCloser.cc
+posegraph/PoseGraphBackend.cc)
 target_link_libraries(slam
   PUBLIC spdlog::spdlog slam_grpc maps moptim
   PRIVATE msensor scan_recorder sensors_proto)

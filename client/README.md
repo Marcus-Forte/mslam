@@ -67,6 +67,29 @@ viewer logs one error ("too old for this viewer") and keeps retrying at the norm
 - Colours are per point and independent of how the stream was chunked: intensity over the fixed range 0 to 255
   (`points.INTENSITY_RANGE`), or, without intensity, height over a fixed range (`points.HEIGHT_RANGE_M`).
 
+Pose-graph strategy: the viewer asks `GetStatus` for `strategy` when it (re)connects. For `POSE_GRAPH` it streams
+`StreamKeyframes` instead of `StreamMap`; for odometry, or a server too old to implement `GetStatus`, it streams the map
+exactly as described here. The choice is made once per viewer run (a server restarted with another strategy needs the
+viewer restarted; it logs this).
+
+- `keyframe_store.py` is the model (no viser, no gRPC): one `KeyframeView` per keyframe (points in the keyframe's own
+  frame, colours, `position` and `wxyz`), and `apply(message)` implements the `StreamKeyframes` contract in
+  `grpc/slam.proto`: the epoch announcement clears, an added keyframe must be the next id, a pose table only replaces
+  poses (the point arrays are shared, never copied or re-sent), a protocol violation clears and asks for epoch 0.
+- `keyframe_stream.py` runs one `StreamKeyframes` call against a store (`stream_keyframes`) and decides the stream
+  (`uses_pose_graph`).
+- `keyframe_renderer.py` shows the store in viser: one point-cloud node per keyframe at `<prefix>/kf_<id>`, created
+  once with its `position` and `wxyz`. A pose update only assigns `position` and `wxyz` of the nodes that moved, in one
+  `ViserServer.atomic()` window, so a loop closure sends poses and no points. Flushes are rate limited like the map's.
+- Each keyframe also gets a small axis triad (`add_frame`, `axes_length` 0.18 m, `axes_radius` 0.006 m) named
+  `<prefix>/axes_<id>`, placed by the same pose under `/world`. It is created with the keyframe's cloud, moved with it
+  in the same atomic window on a pose update, and removed on an epoch change. The **Keyframe axes** checkbox (default
+  on, shown only on this path) toggles the axes' `visible` without re-creating them.
+- The open keyframe (the scans since the last keyframe, up to about 0.5 m of travel) is not in the stream. The live
+  transformed scan, which the server publishes in the map frame, stays on screen and covers that gap.
+- The status panel shows `Pose graph: N keyframes, M loop closures` (from `GetStatus`) when the strategy is the pose
+  graph.
+
 Resume and reset:
 
 - Every request carries the stored `(epoch, next_offset)`. After a stream error the viewer reconnects (every 5 s) and

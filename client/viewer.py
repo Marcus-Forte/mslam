@@ -12,11 +12,14 @@ import numpy as np
 from connection import ConnectionMonitor, ConnectionState, led_html
 from follow import FOLLOW_MODES, IDENTITY, FollowMode, FollowView, Transform
 from geometry import euler_xyz_to_wxyz
+from keyframe_renderer import KeyframeRenderer
+from keyframe_store import KeyframeStore
+from keyframe_stream import stream_keyframes, uses_pose_graph
 from map_renderer import MapRenderer
 from map_store import MapStore
 from map_stream import ServerTooOldError, StreamEnd, stream_map
 from points import to_viser_points
-from sensor_status import SensorState, SensorStatusMonitor, sensor_led_html
+from sensor_status import GraphInfo, SensorState, SensorStatusMonitor, graph_led_html, sensor_led_html
 
 PROTO_GEN_DIR = Path(__file__).resolve().parent / "proto_gen"
 if str(PROTO_GEN_DIR) not in sys.path:
@@ -66,6 +69,17 @@ class SlamViewerClient:
             atomic=self._viser_server.atomic,
             node_prefix=f"{WORLD_NODE}/slam/map",
         )
+        # Pose-graph strategy: one node per keyframe, placed by its pose (viewer.py picks this path from
+        # GetStatus.strategy; the map renderer above stays unused then).
+        self._keyframe_store = KeyframeStore()
+        self._keyframe_renderer = KeyframeRenderer(
+            self._keyframe_store,
+            self._viser_server.scene,
+            point_size=point_size * MAP_POINT_SIZE_SCALE,
+            atomic=self._viser_server.atomic,
+            node_prefix=f"{WORLD_NODE}/slam/keyframes",
+        )
+        self._map_mode: str | None = None
         self._scan_cloud = self._viser_server.scene.add_point_cloud(
             name=f"{WORLD_NODE}/slam/scan",
             points=np.empty((0, 3), dtype=np.float32),
@@ -96,7 +110,8 @@ class SlamViewerClient:
         self._connection_monitor = ConnectionMonitor(server_addr, self._show_connection)
         # The SLAM server's own link to its sensor server (the LED above is the viewer's link to the SLAM server).
         self._sensor_led = self._viser_server.gui.add_html(sensor_led_html(SensorState.UNKNOWN, ""))
-        self._sensor_monitor = SensorStatusMonitor(self._control_stub, self._show_sensor)
+        self._graph_led = self._viser_server.gui.add_html("")
+        self._sensor_monitor = SensorStatusMonitor(self._control_stub, self._show_sensor, on_graph=self._show_graph)
 
         self._follow_dropdown = self._viser_server.gui.add_dropdown(
             "Follow",
@@ -105,6 +120,18 @@ class SlamViewerClient:
             hint="Keep the sensor still on screen and move the world around it, as rviz does with a target frame. "
             "Position: rviz Orbit; Position + yaw: rviz ThirdPersonFollower; Full pose: also roll and pitch.",
         )
+        # Pose-graph path only: shown when the viewer streams keyframes (see _choose_map_mode).
+        self._axes_checkbox = self._viser_server.gui.add_checkbox(
+            "Keyframe axes",
+            initial_value=True,
+            visible=False,
+            hint="Draw a small coordinate axis at each pose-graph keyframe.",
+        )
+
+        @self._axes_checkbox.on_update
+        def _on_axes_toggled(_: Any) -> None:
+            self._keyframe_renderer.set_axes_visible(self._axes_checkbox.value)
+
         self._follow_view = FollowView()
         # Written by the pose stream thread, read by the pose render thread.
         self._pose_lock = threading.Lock()
@@ -148,12 +175,18 @@ class SlamViewerClient:
         map_flush_thread = threading.Thread(
             target=self._map_renderer.run, args=(self._shutdown_event.is_set, self._shutdown_event.wait), daemon=True
         )
+        keyframe_flush_thread = threading.Thread(
+            target=self._keyframe_renderer.run,
+            args=(self._shutdown_event.is_set, self._shutdown_event.wait),
+            daemon=True,
+        )
         scan_thread = threading.Thread(target=self._run_stream_transformed_scan, daemon=True)
         correspondence_thread = threading.Thread(target=self._run_stream_correspondences, daemon=True)
         pose_thread = threading.Thread(target=self._run_stream_pose, daemon=True)
         pose_render_thread = threading.Thread(target=self._run_pose_render, daemon=True)
         map_increment_thread.start()
         map_flush_thread.start()
+        keyframe_flush_thread.start()
         scan_thread.start()
         correspondence_thread.start()
         pose_thread.start()
@@ -172,6 +205,9 @@ class SlamViewerClient:
 
     def _show_sensor(self, state: SensorState, address: str) -> None:
         self._sensor_led.content = sensor_led_html(state, address)
+
+    def _show_graph(self, info: GraphInfo) -> None:
+        self._graph_led.content = graph_led_html(info)
 
     def _log_stream_exception(self, stream_name: str, exc: Exception) -> None:
         if isinstance(exc, ServerTooOldError):
@@ -241,9 +277,38 @@ class SlamViewerClient:
     def _run_stream_pose(self) -> None:
         self._run_stream("pose", self._stream_pose)
 
+    def _choose_map_mode(self, stub: Any) -> str:
+        """ "keyframes" when the server runs the pose-graph strategy, else "map". Decided once: the other path's
+        store and scene nodes would otherwise be left behind, so a server restarted with another strategy needs the
+        viewer restarted (logged)."""
+        wanted = "keyframes" if uses_pose_graph(stub) else "map"
+        if self._map_mode is None:
+            self._map_mode = wanted
+            self._axes_checkbox.visible = wanted == "keyframes"
+            logger.info("Map stream: %s", "StreamKeyframes (pose graph)" if wanted == "keyframes" else "StreamMap")
+        elif wanted != self._map_mode:
+            logger.error(
+                "The SLAM server now runs another strategy (%s); restart the viewer. Keeping %s.",
+                wanted,
+                self._map_mode,
+            )
+        return self._map_mode
+
     def _stream_map_increments(self) -> None:
         with grpc.insecure_channel(self._server_addr) as channel:
             stub = slam_pb2_grpc.SlamServiceStub(channel)
+            if self._choose_map_mode(stub) == "keyframes":
+                # The open keyframe (the scans since the last one) is not in this stream: the live transformed
+                # scan, drawn by the scan stream in the map frame, covers it.
+                end = stream_keyframes(
+                    stub,
+                    self._keyframe_store,
+                    on_change=lambda change: self._keyframe_renderer.notify() if change.changed else None,
+                    should_stop=self._shutdown_event.is_set,
+                )
+                if end is StreamEnd.RESYNC:
+                    self._shutdown_event.wait(timeout=RESYNC_DELAY_SEC)
+                return
             # The local map stays on screen while disconnected; the request resumes from the stored position and
             # the map only clears if the server announces another epoch.
             end = stream_map(

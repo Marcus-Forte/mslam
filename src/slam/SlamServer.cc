@@ -56,7 +56,8 @@ SlamServer::SlamServer(std::shared_ptr<spdlog::logger> logger,
                        std::string address)
     : logger_(std::move(logger)),
       address_(address.empty() ? g_default_slam_server_address : address),
-      map_epoch_(initialEpoch()), pose_(Pose3D::Zero()) {}
+      keyframe_epoch_(initialEpoch()), map_epoch_(initialEpoch()),
+      pose_(Pose3D::Zero()) {}
 
 SlamServer::~SlamServer() { stop(); }
 
@@ -90,6 +91,7 @@ void SlamServer::stop() {
 
   stopping_.store(true);
   map_increment_cv_.notify_all();
+  keyframe_cv_.notify_all();
   transformed_scan_cv_.notify_all();
   correspondences_cv_.notify_all();
   pose_cv_.notify_all();
@@ -118,6 +120,20 @@ void SlamServer::updateMapIncrement(PointCloud increment) {
   map_increment_cv_.notify_all();
 }
 
+void SlamServer::updateMapIncrement(
+    std::shared_ptr<const PointCloud> increment) {
+  std::scoped_lock lock(map_increment_mutex_);
+  map_increment_ = increment;
+  map_history_.emplace_back(std::move(increment));
+  ++map_increment_version_;
+  map_increment_cv_.notify_all();
+}
+
+void SlamServer::updateGraphStatus(const GraphStatus &status) {
+  std::scoped_lock lock(graph_status_mutex_);
+  graph_status_ = status;
+}
+
 void SlamServer::updateTransformedScan(PointCloud scan) {
   auto shared_scan = std::make_shared<const PointCloud>(std::move(scan));
   std::scoped_lock lock(transformed_scan_mutex_);
@@ -126,7 +142,73 @@ void SlamServer::updateTransformedScan(PointCloud scan) {
   transformed_scan_cv_.notify_all();
 }
 
+namespace {
+
+sensors::PoseQuat toPoseQuat(const Eigen::Affine3d &pose) {
+  const Eigen::Matrix3d rotation = pose.linear();
+  Eigen::Quaterniond q(rotation);
+  q.normalize();
+  sensors::PoseQuat out;
+  out.set_x(pose.translation().x());
+  out.set_y(pose.translation().y());
+  out.set_z(pose.translation().z());
+  out.set_qw(q.w());
+  out.set_qx(q.x());
+  out.set_qy(q.y());
+  out.set_qz(q.z());
+  return out;
+}
+
+} // namespace
+
+void SlamServer::addKeyframe(std::uint64_t id, const Eigen::Affine3d &pose,
+                             std::shared_ptr<const PointCloud> cloud) {
+  StoredKeyframe stored{std::move(cloud), toPoseQuat(pose)};
+  {
+    std::scoped_lock lock(keyframe_mutex_);
+    if (id != keyframes_.size()) {
+      // Ids are consecutive from 0 after each reset; anything else is a bug
+      // in the caller, and storing it would break the stream's id contract.
+      if (logger_) {
+        logger_->error("addKeyframe: id {} but {} keyframes held; ignored", id,
+                       keyframes_.size());
+      }
+      return;
+    }
+    keyframes_.push_back(std::move(stored));
+  }
+  keyframe_cv_.notify_all();
+}
+
+void SlamServer::updateKeyframePoses(std::uint64_t graph_version,
+                                     std::span<const Eigen::Affine3d> poses) {
+  auto table = std::make_shared<PoseTable>();
+  table->graph_version = graph_version;
+  table->poses.reserve(poses.size());
+  for (const auto &pose : poses) {
+    table->poses.push_back(toPoseQuat(pose));
+  }
+  {
+    std::scoped_lock lock(keyframe_mutex_);
+    pose_table_ = std::move(table);
+  }
+  keyframe_cv_.notify_all();
+}
+
 void SlamServer::reset() {
+  {
+    std::scoped_lock lock(keyframe_mutex_);
+    keyframes_.clear();
+    pose_table_.reset();
+    if (++keyframe_epoch_ == 0) {
+      keyframe_epoch_ = 1;
+    }
+  }
+  keyframe_cv_.notify_all();
+  clearMap();
+}
+
+void SlamServer::clearMap() {
   {
     std::scoped_lock lock(map_increment_mutex_);
     map_increment_.reset();
@@ -296,6 +378,129 @@ SlamServer::StreamMap(grpc::ServerContext *context,
     *chunk.mutable_points() = toGRPC(points);
     if (!writer->Write(chunk)) {
       break;
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status SlamServer::StreamKeyframes(
+    grpc::ServerContext *context, const sensors::KeyframeStreamRequest *request,
+    grpc::ServerWriter<sensors::KeyframeStreamMessage> *writer) {
+  // The cursor: `offset` is the first keyframe id not yet sent, `pending` the
+  // keyframes [offset, offset + pending.size()) already copied out of the
+  // list (pointers only). `table` is the pose table last sent and
+  // `table_covered` how many poses of it went out.
+  uint64_t epoch = 0;
+  uint64_t offset = 0;
+  std::vector<StoredKeyframe> pending;
+  std::shared_ptr<const PoseTable> sent_table;
+  uint64_t table_covered = 0;
+
+  auto write_epoch = [&]() {
+    sensors::KeyframeStreamMessage message;
+    message.mutable_epoch_reset()->set_epoch(epoch);
+    return writer->Write(message);
+  };
+
+  {
+    std::scoped_lock lock(keyframe_mutex_);
+    epoch = keyframe_epoch_;
+    if (request->epoch() == epoch) {
+      offset =
+          std::min<uint64_t>(request->next_keyframe_id(), keyframes_.size());
+    }
+  }
+  if (!write_epoch()) {
+    return grpc::Status::OK;
+  }
+
+  while (!context->IsCancelled() && !stopping_.load()) {
+    bool reset_seen = false;
+    std::shared_ptr<const PoseTable> table;
+    {
+      std::unique_lock lock(keyframe_mutex_);
+      // Poses are worth sending when the table changed, or when keyframes
+      // went out that the (unchanged) table covers but did not reach yet.
+      auto table_due = [&]() {
+        const uint64_t covered_now =
+            pose_table_ ? std::min<uint64_t>(pose_table_->poses.size(), offset)
+                        : 0;
+        return pose_table_ &&
+               (pose_table_ != sent_table || covered_now > table_covered);
+      };
+      keyframe_cv_.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+        return stopping_.load() || keyframe_epoch_ != epoch ||
+               !pending.empty() ||
+               offset + pending.size() < keyframes_.size() || table_due();
+      });
+      if (stopping_.load()) {
+        break;
+      }
+      if (keyframe_epoch_ != epoch) {
+        epoch = keyframe_epoch_;
+        offset = 0;
+        pending.clear();
+        sent_table.reset();
+        table_covered = 0;
+        reset_seen = true;
+      } else {
+        const size_t next = offset + pending.size();
+        const size_t count =
+            std::min(keyframes_.size() - std::min(next, keyframes_.size()),
+                     g_max_pointers_per_lock -
+                         std::min(pending.size(), g_max_pointers_per_lock));
+        pending.insert(pending.end(), keyframes_.begin() + next,
+                       keyframes_.begin() + next + count);
+        if (pending.empty() && table_due()) {
+          table = pose_table_;
+        }
+      }
+    }
+    if (reset_seen) {
+      // Announce the new epoch at once, before any of its data.
+      if (!write_epoch()) {
+        break;
+      }
+      continue;
+    }
+
+    if (!pending.empty()) {
+      // One keyframe per message: a cloud can be large. The conversion and the
+      // write happen outside the lock.
+      const StoredKeyframe &front = pending.front();
+      sensors::KeyframeStreamMessage message;
+      auto *added = message.mutable_added();
+      added->set_epoch(epoch);
+      added->set_id(offset);
+      *added->mutable_pose() = front.pose;
+      if (front.cloud) {
+        *added->mutable_cloud() = toGRPC(*front.cloud);
+      }
+      pending.erase(pending.begin());
+      ++offset;
+      if (!writer->Write(message)) {
+        break;
+      }
+      continue;
+    }
+
+    if (table) {
+      const uint64_t covered = std::min<uint64_t>(table->poses.size(), offset);
+      sensors::KeyframeStreamMessage message;
+      auto *poses = message.mutable_poses();
+      poses->set_epoch(epoch);
+      poses->set_graph_version(table->graph_version);
+      for (uint64_t id = 0; id < covered; ++id) {
+        auto *entry = poses->add_poses();
+        entry->set_id(id);
+        *entry->mutable_pose() = table->poses[id];
+      }
+      sent_table = table;
+      table_covered = covered;
+      if (!writer->Write(message)) {
+        break;
+      }
     }
   }
 
@@ -511,6 +716,17 @@ grpc::Status SlamServer::GetStatus(grpc::ServerContext *,
   response->set_sensor_address(status.address);
   response->set_scan_age_ms(ageMs(status.scan_age));
   response->set_imu_age_ms(ageMs(status.imu_age));
+  GraphStatus graph;
+  {
+    std::lock_guard lock(graph_status_mutex_);
+    graph = graph_status_;
+  }
+  response->set_strategy(graph.strategy == SlamStrategy::PoseGraph
+                             ? sensors::SLAM_STRATEGY_POSE_GRAPH
+                             : sensors::SLAM_STRATEGY_ODOMETRY);
+  response->set_graph_version(graph.graph_version);
+  response->set_keyframes(static_cast<uint32_t>(graph.keyframes));
+  response->set_loop_closures(static_cast<uint32_t>(graph.loop_closures));
   return grpc::Status::OK;
 }
 

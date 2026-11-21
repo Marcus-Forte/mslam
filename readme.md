@@ -46,6 +46,30 @@ found, or with `-DMSLAM_WITH_TBB=OFF`, mslam is built sequential and a
 }
 ```
 
+### Strategy
+
+`slam.strategy` (optional) selects the estimator: `"odometry"` (default, the
+LiDAR-inertial odometry alone) or `"pose_graph"` (the same odometry plus a
+keyframe pose-graph back end with loop closure). An unknown value is rejected.
+The optional top-level `pose_graph` block is read only for `pose_graph`; every
+key is optional:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `keyframe_distance` | 0.5 m | movement that opens a new keyframe |
+| `keyframe_angle` | 0.26 rad | rotation that opens a new keyframe |
+| `keyframe_max_interval_s` | 0 (off) | closes a keyframe after this long, even when still |
+| `mini_map_voxel_size` | 0.05 m | thinning of a keyframe's mini map, and the voxel a keyframe owns |
+| `loop_search_radius` | 2.0 m | loop candidates within this distance |
+| `loop_min_separation` | 10 | keyframes skipped as recent neighbours |
+| `loop_submap_keyframes` | 2 | neighbours on each side of a candidate in the verification target |
+| `loop_max_rms` | 0.05 m | loop accepted only at or below this RMS |
+| `loop_min_matched_fraction` | 0.6 | loop accepted only at or above this matched fraction, in (0, 1] |
+| `loop_sigma_translation` / `loop_sigma_rotation` | 0.02 m / 0.005 rad | loop edge noise |
+| `odometry_sigma_translation` / `odometry_sigma_rotation` | 0.05 m / 0.01 rad | odometry edge noise |
+| `optimizer_iterations` | 20 | pose-graph optimizer iterations |
+| `synchronous` | false | run the back end inline (deterministic replays) |
+
 ## Docker
 
 Build and run from the repository root:
@@ -324,6 +348,27 @@ also a check of the parallel code:
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5 --threads 4
 ```
 
+`--strategy <odometry|pose_graph>` overrides `slam.strategy`. With
+`pose_graph` each run ends with `SlamPipeline::finish()` (the open keyframe
+joins the graph, the worker drains) and more lines follow the usual ones:
+the back end's counters (keyframes, odometry edges, loop attempts, accepted and
+rejected, optimizations, map re-sends, back-end time) with the range of the
+accepted loops (keyframe gap, RMS, matched fraction), a `map:` line with the
+duplication of the published map (its points, the distinct map-frame voxels of
+`mini_map_voxel_size` they fill, their ratio, about 1 when each voxel is
+published once, and the points held in the keyframes' views, which overlap),
+then the final pose in the
+odom frame (it must equal the odometry run's to the last digit) and in the map
+frame, the distance between the two and each one's distance from the origin.
+`--save-map` then writes the keyframe-rendered map of the final result, last
+keyframe included. Use `test/integration/mslam_pose_graph.jsonc`, which is the
+integration config with `strategy` and a synchronous `pose_graph` block; with
+`"synchronous": false` the worker thread runs and the result is the same.
+
+```bash
+build/gcc/test/bench_slam test/integration/mslam_pose_graph.jsonc test/data/living_room_garden.pbscan 1
+```
+
 ## Sensor link status (`GetStatus`)
 
 `SlamService.GetStatus` (`grpc/slam.proto`) reports whether the SLAM server is
@@ -334,6 +379,13 @@ arriving, for example a paused `playback_publisher`), `SENSOR_LINK_DISCONNECTED`
 `SENSOR_LINK_UNKNOWN`, with the sensor address and the age in milliseconds of
 the last scan and IMU sample (-1 if none yet). The Python viewer shows it as a
 second LED below the connection LED (see `client/README.md`).
+
+It also reports the estimator: `strategy` (`SLAM_STRATEGY_ODOMETRY` or
+`SLAM_STRATEGY_POSE_GRAPH`) and, for the pose graph, `graph_version` (increases
+with every result of the back end), `keyframes` and `loop_closures` (accepted
+loop edges); all 0 for odometry. The viewer picks `StreamKeyframes` instead of
+`StreamMap` when the strategy is `POSE_GRAPH`, and shows the two counts below
+the LEDs.
 
 ## Map stream (`StreamMap`)
 
@@ -371,3 +423,45 @@ On the server each stream has its own handler thread that copies chunk pointers
 (at most 1024 per lock acquisition) out of `map_history_`, then concatenates,
 converts and writes without holding the lock. The SLAM thread's calls stay O(1)
 and never wait on a client.
+
+## Keyframe stream (`StreamKeyframes`)
+
+With `slam.strategy` `pose_graph`, `SlamService.StreamKeyframes`
+(`grpc/slam.proto`) streams the map as keyframes instead of points of one
+growing cloud, so a loop closure re-sends poses, not points. With `odometry` it
+announces its epoch and stays silent. The contract follows `StreamMap`:
+
+- A **keyframe** has a consecutive `id` from 0 in each **epoch**, a pose in the
+  map frame and its mini map in the keyframe's **own** frame (place it with the
+  pose). A mini map holds only the voxels (`mini_map_voxel_size`, decided in the
+  odom frame) that no earlier keyframe owns, so the union of the keyframes is a
+  single layer: each voxel once. Keyframe 0 is the origin keyframe, the seed
+  scans at the identity pose, and is sent before the first registered scan. It is sent once, as `KeyframeAdded{epoch, id, pose, cloud}`, in order
+  from the stream's cursor on, with no gap and no duplicate.
+- **Pose encoding**: `PoseQuat` = `x y z` plus the unit quaternion `qw qx qy qz`
+  (Hamilton, w first). It maps straight to viser's `position` and `wxyz` and has
+  no Euler singularity (unlike `Pose3D`).
+- `KeyframePoses{epoch, graph_version, [(id, pose)]}` carries the current pose
+  of keyframes `[0, n)` and is sent when an optimization moved them, and once
+  after a client resumes. A slow client may skip intermediate tables but always
+  gets the latest. A table never mentions a keyframe the stream has not sent
+  yet.
+- The first message of every stream, and again after a reset, is
+  `KeyframeEpoch{epoch}`: the client drops every keyframe it holds when the
+  epoch differs from its own. Epochs are never 0, differ between server
+  processes and change only on a SLAM **reset**. This epoch is **not** the
+  `StreamMap` epoch: that one also changes whenever the pipeline re-sends the
+  point map after an optimization, while the keyframes stay valid.
+- **Resume**: send the `epoch` and the next id you need
+  (`KeyframeStreamRequest{epoch, next_keyframe_id}`). If the epoch is the
+  server's current one the stream continues from that id (past the end is
+  clamped), otherwise it starts at 0.
+- The open keyframe (the scans since the last one) is not in the stream, so the
+  newest few metres appear when the next keyframe opens. The Python viewer keeps
+  showing the live transformed scan, which the server publishes in the map
+  frame, for that gap.
+
+The server keeps the keyframe clouds as shared pointers and the latest pose
+table behind its own mutex; the SLAM thread's calls are O(1) (the pose table is
+converted outside the lock and swapped in), and a handler copies at most 1024
+pointers per acquisition and writes outside the lock.

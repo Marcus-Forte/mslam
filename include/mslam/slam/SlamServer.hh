@@ -10,6 +10,7 @@
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <spdlog/logger.h>
 #include <string>
 #include <vector>
@@ -43,10 +44,23 @@ public:
   // ISlamOutput. Called from the SLAM thread.
   void updatePose(const Pose3D &pose) override;
   void updateMapIncrement(PointCloud increment) override;
+  /// Keeps the pointer: O(1) on the SLAM thread whatever the cloud's size.
+  void updateMapIncrement(std::shared_ptr<const PointCloud> increment) override;
+  void updateGraphStatus(const GraphStatus &status) override;
   void updateTransformedScan(PointCloud scan) override;
-  /// Drops the accumulated map history and the latest increment, and starts a
-  /// new map epoch (open StreamMap streams announce it).
+  /// Full reset: drops the map (see clearMap()) and the keyframes, and starts
+  /// a new keyframe epoch (open StreamKeyframes streams announce it).
   void reset() override;
+  /// Drops the accumulated map history and the latest increment, and starts a
+  /// new map epoch (open StreamMap streams announce it). The keyframes stay.
+  void clearMap() override;
+  /// O(1): the pointer is kept in the keyframe list.
+  void addKeyframe(std::uint64_t id, const Eigen::Affine3d &pose,
+                   std::shared_ptr<const PointCloud> cloud) override;
+  /// The pose table is converted outside the lock and published by swapping a
+  /// pointer. Streams send the latest table, skipping intermediate ones.
+  void updateKeyframePoses(std::uint64_t graph_version,
+                           std::span<const Eigen::Affine3d> poses) override;
 
   void updateCorrespondences(const PointCloud &correspondences);
 
@@ -62,6 +76,11 @@ private:
   StreamMap(grpc::ServerContext *context,
             const sensors::MapStreamRequest *request,
             grpc::ServerWriter<sensors::MapStreamChunk> *writer) override;
+
+  grpc::Status StreamKeyframes(
+      grpc::ServerContext *context,
+      const sensors::KeyframeStreamRequest *request,
+      grpc::ServerWriter<sensors::KeyframeStreamMessage> *writer) override;
 
   grpc::Status
   GetTransformedScan(grpc::ServerContext *context, const sensors::Empty *,
@@ -93,6 +112,27 @@ private:
   std::atomic<ISlamControl *> control_{nullptr};
   mutable std::mutex sensor_status_mutex_;
   std::shared_ptr<const ISensorStatus> sensor_status_;
+
+  // Keyframes (pose-graph strategy). Own epoch, not the map's: the map epoch
+  // also changes whenever an optimization makes the pipeline re-send the point
+  // map, while the keyframes and their clouds stay valid then. Only reset()
+  // bumps keyframe_epoch_. Everything below is guarded by keyframe_mutex_.
+  struct StoredKeyframe {
+    std::shared_ptr<const PointCloud> cloud; // keyframe frame
+    sensors::PoseQuat pose;                  // map frame, when it was added
+  };
+  struct PoseTable {
+    uint64_t graph_version = 0;
+    std::vector<sensors::PoseQuat> poses; // index = keyframe id
+  };
+  mutable std::mutex keyframe_mutex_;
+  mutable std::condition_variable keyframe_cv_;
+  uint64_t keyframe_epoch_;
+  std::vector<StoredKeyframe> keyframes_; // index = keyframe id
+  std::shared_ptr<const PoseTable> pose_table_;
+
+  mutable std::mutex graph_status_mutex_;
+  GraphStatus graph_status_;
 
   mutable std::mutex map_increment_mutex_;
   mutable std::mutex transformed_scan_mutex_;

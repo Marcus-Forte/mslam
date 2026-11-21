@@ -16,6 +16,7 @@ States:
 
 import html
 import logging
+from dataclasses import dataclass
 import sys
 import threading
 from collections.abc import Callable
@@ -74,6 +75,30 @@ def state_from_status(status: Any) -> SensorState:
     return _LINK_TO_STATE.get(status.sensor_link, SensorState.UNKNOWN)
 
 
+@dataclass(frozen=True)
+class GraphInfo:
+    """The pose-graph part of `SlamStatus`. `pose_graph` is False for the odometry strategy (and for a server too
+    old to say), in which case the counts are 0."""
+
+    pose_graph: bool = False
+    keyframes: int = 0
+    loop_closures: int = 0
+
+
+def graph_info_from_status(status: Any) -> GraphInfo:
+    if status.strategy != slam_pb2.SLAM_STRATEGY_POSE_GRAPH:
+        return GraphInfo()
+    return GraphInfo(True, status.keyframes, status.loop_closures)
+
+
+def graph_led_html(info: GraphInfo) -> str:
+    """The status row for the pose graph; an empty string for odometry (nothing to show)."""
+    if not info.pose_graph:
+        return ""
+    closures = f"{info.loop_closures} loop closure{'s' if info.loop_closures != 1 else ''}"
+    return led_row_html("#228be6", f"Pose graph: {info.keyframes} keyframes, {closures}")
+
+
 def sensor_led_html(state: SensorState, address: str) -> str:
     prefix = f"Sensor <code>{html.escape(address)}</code>" if address else "Sensor"
     return led_row_html(state.color, f"{prefix}: {state.label}")
@@ -89,9 +114,15 @@ class SensorStatusMonitor:
         on_change: Callable[[SensorState, str], None],
         poll_interval: float = POLL_INTERVAL_SEC,
         rpc_timeout: float = RPC_TIMEOUT_SEC,
+        on_graph: Callable[[GraphInfo], None] | None = None,
     ) -> None:
+        """`on_graph(info)` (optional) is called from the polling thread when the pose-graph part of the status
+        changes, and once at start with the default (odometry) info."""
         self._stub = stub
         self._on_change = on_change
+        self._on_graph = on_graph
+        self._graph = GraphInfo()
+        self._latest_graph: GraphInfo | None = None
         self._poll_interval = poll_interval
         self._rpc_timeout = rpc_timeout
         self._state = SensorState.UNKNOWN
@@ -109,11 +140,14 @@ class SensorStatusMonitor:
             if exc.code() == grpc.StatusCode.UNIMPLEMENTED:
                 return SensorState.SERVER_TOO_OLD, ""
             return SensorState.SERVER_UNREACHABLE, ""
+        self._latest_graph = graph_info_from_status(status)
         return state_from_status(status), status.sensor_address
 
     def start(self, should_stop: Callable[[], bool], wait: Callable[[float], bool]) -> None:
         """Start polling; `wait(seconds)` sleeps and returns True when the viewer shuts down."""
         self._on_change(self._state, self._address)
+        if self._on_graph is not None:
+            self._on_graph(self._graph)
         self._thread = threading.Thread(target=self._loop, args=(should_stop, wait), daemon=True)
         self._thread.start()
 
@@ -124,6 +158,9 @@ class SensorStatusMonitor:
                 self._log(state, address)
                 self._state, self._address = state, address
                 self._on_change(state, address)
+            if self._on_graph is not None and self._latest_graph not in (None, self._graph):
+                self._graph = self._latest_graph
+                self._on_graph(self._graph)
             if wait(self._poll_interval):
                 return
 

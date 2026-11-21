@@ -265,11 +265,137 @@ recorded for both.
   writes outside it, and `reset()` bumps the epoch in O(1) so open streams
   announce it; see the readme.
 
+## Pose-graph strategy
+
+`slam.strategy` selects the estimator (`odometry`, the default, or
+`pose_graph`; see the readme). `pose_graph` keeps the odometry exactly as it is
+and adds a back end that corrects its drift with loop closures. The pipeline
+owns a `PoseGraphBackend` (`include/mslam/slam/posegraph/`) only in this mode;
+with `odometry` nothing of it exists or runs, and the results are bit for bit
+those of the odometry alone.
+
+**Frames.** `Slam`, the registrations and the registration map stay in the
+**odom** frame, the frame of the drifting odometry. The back end only reads
+their output and never feeds anything back. Its result is `T_map_odom =
+pose_kf * pose_kf_odom^-1` of the newest keyframe: the correction of the odom
+frame into the **map** frame, in which the optimized keyframes live. Exactly the
+identity until the first optimization. The pipeline applies it on the output
+side only: the published pose, transformed scan and per-scan map increment are
+`T_map_odom * odom`. The registration map is never rebuilt.
+
+**Keyframes and mini maps.** The msensor driver already accumulates each scan
+(`accumulate_scan_count`), so a scan is dense enough and there is no minimum
+scan count. `KeyframeSelector` opens a keyframe when a scan moved more than
+`keyframe_distance` or turned more than `keyframe_angle` from the current one
+(or `keyframe_max_interval_s` passed). Every scan between two keyframes, the
+one that opens the keyframe included, goes into two clouds of that keyframe,
+both thinned to one running centroid per `mini_map_voxel_size` voxel (so memory
+and per-scan cost are bounded by the occupied voxels) and expressed in the
+keyframe's own frame once it is sealed:
+- the **view** (`MiniMapBuilder`): everything the keyframe saw. Only the loop
+  verification reads it, because a keyframe that revisits a place owns almost
+  nothing there. Views of different keyframes overlap.
+- the **owned mini map** (`OwnedMapBuilder`): only the voxels no earlier keyframe
+  owns. A voxel belongs to the FIRST keyframe that observes it, decided on the
+  voxel in the odom frame, which never changes (so no re-keying after an
+  optimization). Sealed voxels are a hash set that only grows; the open keyframe
+  keeps a centroid per voxel it owns, emitted in first-seen order. Everything
+  published (the keyframe stream, the `StreamMap` re-send, `--save-map`) is this
+  cloud, so the published map has each voxel once.
+`onScan` returns the voxels this scan made the open keyframe own, and the
+pipeline publishes those, moved by `T_map_odom`, as the per-scan map increment
+instead of the registration map's own (odometry keeps the latter). Ownership is
+decided on the caller thread; the worker only ever sees sealed clouds.
+
+A keyframe is sealed (its clouds final) when the next one opens. The first one
+is the **origin keyframe**: the pipeline calls `sealOpenKeyframe()` after the
+last seed scan, so keyframe 0 is exactly the seed scans at the identity pose
+(the gauge), in the graph and published before the first registered scan, and the
+next scan opens keyframe 1. The interval trigger is ignored for seed scans, so a
+short `keyframe_max_interval_s` cannot split them. The back end gets each scan
+with the time of its last point, the registration time (see "Time convention").
+
+**Loop closure.** When a keyframe is sealed it gets an odometry edge from its
+predecessor (`pose_odom_a^-1 * pose_odom_b`, information from
+`odometry_sigma_*`), and `LoopCloser` looks for the nearest keyframe whose graph
+pose is within `loop_search_radius` and at least `loop_min_separation` keyframes
+older. It verifies it with `ScanSequenceRegistration`: the target is the
+candidate's view plus `loop_submap_keyframes` neighbours' views on each side
+(in the candidate's frame, through their current graph poses), the new keyframe's
+view starts from the graph's relative pose. Gates: `matched / used points >=
+loop_min_matched_fraction` and `rms <= loop_max_rms`; ICP uses a 0.2 m
+correspondence gate and 0.1 m map voxels. An accepted candidate becomes a
+robust (Huber) loop edge with information from `loop_sigma_*`; each attempt is
+logged at debug. There is no policy beyond that: in a room-scale recording almost
+every keyframe finds a candidate and verifies.
+
+**Optimizer.** `PoseGraphOptimizer`: sparse Levenberg-Marquardt over keyframes
+1..N-1 (`Eigen::SparseMatrix`, `SimplicialLDLT`), run when a loop edge was
+added. The residual is `se3Log(Z^-1 * T_i^-1 * T_j)` in the `[rho, omega]`
+order of `SE3.hh` with the LEFT increment `T <- se3Exp(d) * T`, as in
+`SE3Manifold`. The Jacobians are `dr/dd_j = Jl^-1(r) * Ad((T_i Z)^-1)` and
+`dr/dd_i = -dr/dd_j`, checked against central finite differences
+(`test_pose_graph_optimizer`); keyframe 0 never moves.
+
+**Threads.** With `pose_graph.synchronous` the whole back end runs inside
+`onScan`, so a replay is deterministic (`bench_slam`, the integration test).
+Otherwise sealed keyframes go through a queue to one worker thread that closes
+loops, optimizes and renders, and the SLAM thread only inserts points into the
+open mini map. The worker publishes an immutable `PoseGraphResult` (versions,
+`T_map_odom`, poses, edges, keyframe clouds in both frames, counters) through a
+`shared_ptr`; the pipeline reads it between scans, so every `ISlamOutput` call
+stays on the SLAM thread. Both modes process the same keyframes in the same
+order, so the graph after `flush()` is identical (the number of map re-sends can
+differ, because the worker batches results). `finish()` seals the open keyframe
+at the end of a recording and drains the worker. Each optimization logs two
+info lines: the cost and chi2/dof (`2 * cost / (6 * edges)`, about 1 when the
+residuals match their sigmas) before and after, whether it converged, and for
+each new loop edge its residual in mm and mrad before and after plus its
+verification RMS and matched %; then the max and RMS residual of the odometry
+and loop edges after it, the worst edge by sigma-normalised error, and the
+largest keyframe displacement and the change of `T_map_odom` (`bench_slam
+--log-level info` shows them). Each keyframe also logs one info line as it enters
+the graph: its id and time since keyframe 0, the scans and time it covers, why it
+closed (`seed`, `distance`, `angle`, `interval` or `finish`), its odom pose (and
+the map pose once an optimization made it differ), the step from the previous
+keyframe, and the points it owns (with the running total) and holds in its view. Known limits: views still
+overlap in memory (the total is printed by `bench_slam`); after a correction
+keyframes move against each other in the map frame, so two keyframes' owned
+voxels can overlap by the size of the correction (0.6 mm and 2.7 mm on the two
+recordings against a 50 mm voxel), and a long loop with a pruned registration map
+(`map.max_range`) would own the revisited area twice; merging on closure is the
+follow-up for that.
+
+**When the map is re-sent.** `PoseGraphResult::map_version` increases only when
+an optimization moved existing keyframes. When the pipeline sees it change it
+calls `ISlamOutput::clearMap()` and publishes each keyframe's rendered cloud
+(`pose * mini_map`, owned voxels only, shared, not copied) as one map increment,
+then the open keyframe's owned voxels placed by `T_map_odom * pose_odom`, so `StreamMap` clients
+see one epoch change and then the corrected map. Keyframes queued in the worker
+at that moment are published when their result arrives. `finish()` does a final
+re-send.
+
+**Viewer paths.** Two, chosen by `GetStatus.strategy`:
+- `StreamMap` (every strategy): the re-send above. No client change; a closure
+  costs the whole map once.
+- `StreamKeyframes` (pose graph): the pipeline also gives the output each
+  keyframe once (`addKeyframe(id, pose, mini_map)`, the cloud in the keyframe's
+  own frame) and, when `map_version` changed, the pose table
+  (`updateKeyframePoses`). `SlamServer` keeps the pointers and the latest table;
+  a stream sends `KeyframeAdded` per keyframe and `KeyframePoses` when the table
+  changed, so a closure moves nodes and re-sends no points. It has its own epoch,
+  bumped only by `reset()`: the map epoch also changes at every re-send, while
+  the keyframes stay valid. The open keyframe is not in the stream; the viewer's
+  live transformed scan (published in the map frame) covers the gap of up to one
+  keyframe. See the readme for the contract and `client/README.md` for the
+  viewer.
+
 ## Offline benchmark
 
 `test/bench_slam.cc` (target `bench_slam`, built on demand, not in CTest) reads a
 `.pbscan` synchronously and drives `SlamPipeline` as fast as possible; see the
-readme for how to run it.
+readme for how to run it. `--strategy pose_graph` adds the back end's counters
+and the final pose in both frames.
 
 ## Notes
 

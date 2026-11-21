@@ -25,6 +25,7 @@
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
+#include "mslam/slam/Transform.hh"
 #include "mslam/utils/Parallel.hh"
 
 #include <gtest/gtest.h>
@@ -60,9 +61,18 @@ constexpr auto k_max_imu_wait = 30s;
 // Fails the test instead of hanging if the live run cannot finish.
 constexpr auto k_watchdog = 180s;
 
+/// Pose-graph strategy: where the corrected (map frame) trajectory ended.
+struct PoseGraphOutcome {
+  mslam::Pose3D map_pose;
+  std::size_t keyframes = 0;
+  std::size_t accepted_loops = 0;
+  std::size_t rejected_loops = 0;
+};
+
 /// What one replay ended with.
 struct ReplayResult {
-  mslam::Pose3D pose;
+  mslam::Pose3D pose; ///< odom frame (the estimator's own pose)
+  std::optional<PoseGraphOutcome> graph; ///< only with the pose-graph strategy
   mslam::RegistrationStats registration;
   mslam::ImuSyncStats sync;
   std::size_t scans = 0; ///< scans the pipeline processed
@@ -75,8 +85,22 @@ makeMap(const mslam::SlamConfiguration &config) {
 
 ReplayResult resultOf(const mslam::Slam &slam,
                       const mslam::SlamPipeline &pipeline) {
-  return {slam.getPose(), slam.registrationStats(), pipeline.syncStats(),
-          pipeline.timings().scans};
+  ReplayResult result{slam.getPose(), std::nullopt, slam.registrationStats(),
+                      pipeline.syncStats(), pipeline.timings().scans};
+  if (const auto graph = pipeline.backendResult()) {
+    const Eigen::Affine3d map = pipeline.mapFromOdom() * slam.getTransform();
+    const Eigen::Matrix3d rotation = map.linear();
+    const Eigen::Vector3d position = map.translation();
+    const Eigen::Vector3d euler = mslam::rotationToEuler(rotation);
+    PoseGraphOutcome outcome;
+    outcome.map_pose << position.x(), position.y(), position.z(), euler.x(),
+        euler.y(), euler.z();
+    outcome.keyframes = graph->stats.keyframes;
+    outcome.accepted_loops = graph->stats.candidates_accepted;
+    outcome.rejected_loops = graph->stats.candidates_rejected;
+    result.graph = outcome;
+  }
+  return result;
 }
 
 /// The reference: the recording read in file order on the calling thread.
@@ -112,6 +136,7 @@ ReplayResult replaySynchronously(const mslam::SlamConfiguration &config,
     }
   }
   drain(true);
+  pipeline.finish(); // pose graph: seal the last keyframe (no-op otherwise)
   return resultOf(slam, pipeline);
 }
 
@@ -121,6 +146,7 @@ class CountingOutput final : public mslam::ISlamOutput {
 public:
   void updatePose(const mslam::Pose3D &) override {}
   void updateTransformedScan(mslam::PointCloud) override {}
+  using mslam::ISlamOutput::updateMapIncrement;
   void updateMapIncrement(mslam::PointCloud) override {
     processed_scans_.fetch_add(1);
   }
@@ -289,6 +315,13 @@ protected:
     logger->set_level(spdlog::level::off);
 
     synchronous_ = replaySynchronously(config, logger, recording);
+    // The same recording with the pose-graph back end (synchronous: no
+    // thread, so the result does not depend on timing).
+    mslam::JsonConfig graph_json(source_dir /
+                                 "test/integration/mslam_pose_graph.jsonc");
+    graph_json.load();
+    pose_graph_ =
+        replaySynchronously(graph_json.getConfig(), logger, recording);
     live_ = replayThroughTheLiveLoop(config, logger, recording);
     if (mslam::ParallelExecutor::available()) {
       auto parallel_config = config;
@@ -300,6 +333,16 @@ protected:
               << "Live loop:   " << live_->result
               << " dropped_scans=" << live_->dropped_scans
               << " imu_wait_timeouts=" << live_->imu_wait_timeouts << "\n";
+    std::cout << "Pose graph:  " << *pose_graph_;
+    if (const auto &g = pose_graph_->graph) {
+      std::cout << " map_pose=[" << g->map_pose[0] << " " << g->map_pose[1]
+                << " " << g->map_pose[2] << " " << g->map_pose[3] << " "
+                << g->map_pose[4] << " " << g->map_pose[5]
+                << "] keyframes=" << g->keyframes
+                << " loops accepted=" << g->accepted_loops
+                << " rejected=" << g->rejected_loops;
+    }
+    std::cout << "\n";
     if (four_threads_.has_value()) {
       std::cout << "4 threads:   " << *four_threads_ << "\n";
     }
@@ -309,6 +352,7 @@ protected:
     synchronous_.reset();
     live_.reset();
     four_threads_.reset();
+    pose_graph_.reset();
   }
 
   void SetUp() override {
@@ -322,11 +366,14 @@ protected:
   static std::optional<LiveRun> live_;
   /// The synchronous replay with slam.num_threads = 4 (absent without TBB).
   static std::optional<ReplayResult> four_threads_;
+  /// The synchronous replay with strategy = pose_graph.
+  static std::optional<ReplayResult> pose_graph_;
 };
 
 std::optional<ReplayResult> SlamIntegration::synchronous_;
 std::optional<LiveRun> SlamIntegration::live_;
 std::optional<ReplayResult> SlamIntegration::four_threads_;
+std::optional<ReplayResult> SlamIntegration::pose_graph_;
 
 TEST_F(SlamIntegration, LivingRoomGardenReturnsToOrigin) {
   ASSERT_TRUE(live_->finished) << "The live run did not consume the recording";
@@ -398,6 +445,42 @@ TEST_F(SlamIntegration, FourThreadsMatchTheSynchronousReplay) {
     EXPECT_EQ(parallel.pose[i], sync.pose[i])
         << "pose[" << i << "] differs by " << parallel.pose[i] - sync.pose[i];
   }
+}
+
+// The pose-graph strategy leaves the odometry alone and corrects it on the
+// output side. The recording does not end exactly where it started (the
+// odometry ends 0.0436 m from the origin and nobody knows the true end), so the
+// corrected pose is not expected to go to the origin: it must stay close to the
+// odometry pose, and a jump bigger than the threshold means a bad loop edge.
+// Measured (dev container, aarch64, GCC 16): the map pose ends 0.4 mm from the
+// odom pose and 0.0435 m from the origin, with 32 accepted and 0 rejected loop
+// verifications; the threshold leaves a factor of 50.
+constexpr double k_max_map_odom_offset_m = 0.02;
+
+TEST_F(SlamIntegration, PoseGraphClosesTheLoop) {
+  ASSERT_TRUE(pose_graph_->graph.has_value());
+  const auto &graph = *pose_graph_->graph;
+  const auto &sync = *synchronous_;
+  RecordProperty("pose_graph_loops_accepted",
+                 std::to_string(graph.accepted_loops));
+
+  EXPECT_GE(graph.accepted_loops, 1U);
+  EXPECT_GT(graph.keyframes, 10U);
+
+  // The odom frame is the odometry's, bit for bit.
+  EXPECT_EQ(pose_graph_->scans, sync.scans);
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(pose_graph_->pose[i], sync.pose[i])
+        << "odom pose[" << i << "] differs by "
+        << pose_graph_->pose[i] - sync.pose[i];
+  }
+
+  // The map frame stays near it and inside the origin gate.
+  const Eigen::Vector3d odom_position(sync.pose[0], sync.pose[1], sync.pose[2]);
+  const Eigen::Vector3d map_position(graph.map_pose[0], graph.map_pose[1],
+                                     graph.map_pose[2]);
+  EXPECT_LT((map_position - odom_position).norm(), k_max_map_odom_offset_m);
+  EXPECT_LT(positionNorm(graph.map_pose), k_max_origin_offset_m);
 }
 
 } // namespace

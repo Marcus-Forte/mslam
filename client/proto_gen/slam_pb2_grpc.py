@@ -50,6 +50,11 @@ class SlamServiceStub(object):
                 request_serializer=slam__pb2.MapStreamRequest.SerializeToString,
                 response_deserializer=slam__pb2.MapStreamChunk.FromString,
                 _registered_method=True)
+        self.StreamKeyframes = channel.unary_stream(
+                '/sensors.SlamService/StreamKeyframes',
+                request_serializer=slam__pb2.KeyframeStreamRequest.SerializeToString,
+                response_deserializer=slam__pb2.KeyframeStreamMessage.FromString,
+                _registered_method=True)
         self.GetTransformedScan = channel.unary_stream(
                 '/sensors.SlamService/GetTransformedScan',
                 request_serializer=slam__pb2.Empty.SerializeToString,
@@ -107,6 +112,16 @@ class SlamServiceServicer(object):
 
     def StreamMap(self, request, context):
         """Cursor-based map stream: every increment from the cursor on, in order.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamKeyframes(self, request, context):
+        """Pose-graph strategy: keyframes with their mini maps (once each, in the
+        keyframe frame) and the optimized poses, so that a loop closure re-sends
+        poses and not points. With the odometry strategy the stream announces its
+        epoch and stays silent.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -172,6 +187,11 @@ def add_SlamServiceServicer_to_server(servicer, server):
                     servicer.StreamMap,
                     request_deserializer=slam__pb2.MapStreamRequest.FromString,
                     response_serializer=slam__pb2.MapStreamChunk.SerializeToString,
+            ),
+            'StreamKeyframes': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamKeyframes,
+                    request_deserializer=slam__pb2.KeyframeStreamRequest.FromString,
+                    response_serializer=slam__pb2.KeyframeStreamMessage.SerializeToString,
             ),
             'GetTransformedScan': grpc.unary_stream_rpc_method_handler(
                     servicer.GetTransformedScan,
@@ -290,6 +310,33 @@ class SlamService(object):
             '/sensors.SlamService/StreamMap',
             slam__pb2.MapStreamRequest.SerializeToString,
             slam__pb2.MapStreamChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamKeyframes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/sensors.SlamService/StreamKeyframes',
+            slam__pb2.KeyframeStreamRequest.SerializeToString,
+            slam__pb2.KeyframeStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,

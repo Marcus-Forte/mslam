@@ -10,6 +10,7 @@
 //   bench_slam <config.jsonc> <recording.pbscan> [repeats] [--save-map out.ply]
 //              [--imu-fusion <preintegration_factor|dead_reckoning>]
 //              [--trajectory out.csv] [--threads <n>]
+//              [--strategy <odometry|pose_graph>]
 //
 // Prints one line per run: the scan count, the total and per-stage wall time
 // in milliseconds and the final pose. It is not registered with CTest.
@@ -32,15 +33,27 @@
 //
 // --threads overrides slam.num_threads of the config (1 sequential, 0 every
 // hardware thread). The pose must not depend on it.
+//
+// --log-level shows the log at that level (the run is silent otherwise); with
+// the pose graph each optimization logs its error in physical units at info.
+//
+// --strategy overrides slam.strategy. With pose_graph the run ends with
+// SlamPipeline::finish() (the open keyframe joins the graph and the back end
+// drains), and extra lines follow the usual ones: the back end's counters and
+// the final pose in the odom frame (it must equal the odometry run's) and in
+// the corrected map frame. --save-map then writes the keyframe-rendered map of
+// that final result, last keyframe included.
 #include "msensor/conversions/lidar_imu_conversions.hh"
 #include "msensor/recorder/scan_player.hh"
 #include "mslam/config/JsonConfig.hh"
+#include "mslam/map/Voxel.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/PointCloudIO.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
+#include "mslam/slam/Transform.hh"
 
 #include <spdlog/spdlog.h>
 
@@ -57,6 +70,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tsl/robin_set.h>
 #include <vector>
 
 #include <spdlog/fmt/fmt.h>
@@ -76,6 +90,7 @@ class MapCollector final : public mslam::ISlamOutput {
 public:
   void updatePose(const mslam::Pose3D &) override {}
   void updateTransformedScan(mslam::PointCloud) override {}
+  using mslam::ISlamOutput::updateMapIncrement;
   void updateMapIncrement(mslam::PointCloud increment) override {
     chunks_.push_back(std::move(increment));
   }
@@ -110,19 +125,112 @@ void appendTrajectoryRow(std::string &out, std::uint64_t timestamp_ns,
   }
 }
 
+double distance(const Eigen::Vector3d &a, const Eigen::Vector3d &b) {
+  return (a - b).norm();
+}
+
+double median(std::vector<double> values) {
+  if (values.empty()) {
+    return 0.0;
+  }
+  std::sort(values.begin(), values.end());
+  return values[values.size() / 2];
+}
+
+/// Pose-graph strategy: the back end's counters and the final pose in both
+/// frames.
+void printPoseGraph(const mslam::PoseGraphResult &graph,
+                    const mslam::SlamPipeline &pipeline,
+                    const mslam::Slam &slam, const mslam::StageTimings &timings,
+                    double voxel_size) {
+  const auto &s = graph.stats;
+  std::printf("  pose_graph: keyframes=%zu odometry_edges=%zu "
+              "loop_attempts=%zu accepted=%zu rejected=%zu optimizations=%zu "
+              "map_resends=%zu | backend=%.1f ms (optimizer %.1f ms)\n",
+              s.keyframes, s.odometry_edges,
+              s.candidates_accepted + s.candidates_rejected,
+              s.candidates_accepted, s.candidates_rejected, s.optimizations,
+              timings.map_resends, toMs(timings.backend),
+              1e3 * s.optimizer_seconds);
+
+  std::vector<double> gaps;
+  std::vector<double> rms;
+  std::vector<double> matched;
+  for (const auto &edge : graph.edges) {
+    if (edge.kind == mslam::EdgeKind::Loop) {
+      gaps.push_back(static_cast<double>(edge.to - edge.from));
+      rms.push_back(1e3 * edge.verify_rms);
+      matched.push_back(100.0 * edge.verify_matched_fraction);
+    }
+  }
+  if (!gaps.empty()) {
+    const auto range = [](const std::vector<double> &v) {
+      return std::make_pair(*std::min_element(v.begin(), v.end()),
+                            *std::max_element(v.begin(), v.end()));
+    };
+    const auto [g0, g1] = range(gaps);
+    const auto [r0, r1] = range(rms);
+    const auto [m0, m1] = range(matched);
+    std::printf("  loops: gap min/median/max=%.0f/%.0f/%.0f keyframes | rms "
+                "%.1f/%.1f/%.1f mm | matched %.1f/%.1f/%.1f %%\n",
+                g0, median(gaps), g1, r0, median(rms), r1, m0, median(matched),
+                m1);
+  }
+
+  // Duplication of the published map: the keyframe clouds as StreamKeyframes
+  // and the final map re-send publish them (what --save-map writes after
+  // finish()), counted against the distinct map-frame voxels they fill.
+  std::size_t published = 0;
+  tsl::robin_set<mslam::Voxel3> voxels;
+  const auto inverse = static_cast<float>(1.0 / voxel_size);
+  for (const auto &cloud : graph.map_clouds) {
+    published += cloud->size();
+    for (const auto &point : *cloud) {
+      voxels.insert(mslam::PointToVoxel(point, inverse));
+    }
+  }
+  std::printf("  map: published=%zu points, distinct voxels=%zu (%.3f m), "
+              "ratio=%.3f | keyframe views=%zu points\n",
+              published, voxels.size(), voxel_size,
+              voxels.empty() ? 0.0
+                             : static_cast<double>(published) /
+                                   static_cast<double>(voxels.size()),
+              s.view_points);
+
+  const Eigen::Affine3d odom = slam.getTransform();
+  const Eigen::Affine3d map = pipeline.mapFromOdom() * odom;
+  const mslam::Pose3D odom_pose = slam.getPose();
+  const Eigen::Matrix3d map_rotation = map.linear();
+  const Eigen::Vector3d map_euler = mslam::rotationToEuler(map_rotation);
+  const Eigen::Vector3d map_position = map.translation();
+  std::printf("  pose odom=[%.9f %.9f %.9f %.9f %.9f %.9f]\n"
+              "  pose map =[%.9f %.9f %.9f %.9f %.9f %.9f]\n"
+              "  distance odom-map=%.4f m | from origin: odom=%.4f m "
+              "map=%.4f m\n",
+              odom_pose[0], odom_pose[1], odom_pose[2], odom_pose[3],
+              odom_pose[4], odom_pose[5], map_position.x(), map_position.y(),
+              map_position.z(), map_euler.x(), map_euler.y(), map_euler.z(),
+              distance(odom.translation(), map_position),
+              odom.translation().norm(), map_position.norm());
+}
+
 int usage(const char *program) {
   std::fprintf(stderr,
                "usage: %s config.jsonc recording.pbscan [repeats] "
                "[--save-map out.ply] "
                "[--imu-fusion preintegration_factor|dead_reckoning] "
-               "[--trajectory out.csv] [--threads n]\n"
+               "[--trajectory out.csv] [--threads n] "
+               "[--strategy odometry|pose_graph] [--log-level level]\n"
                "  --save-map writes the final map (all published increments) "
                "of the last run\n"
                "  --imu-fusion overrides slam.imu_fusion of the config\n"
                "  --threads overrides slam.num_threads of the config "
                "(1 sequential, 0 all hardware threads)\n"
                "  --trajectory writes one CSV row per registered scan "
-               "(last run)\n",
+               "(last run)\n"
+               "  --strategy overrides slam.strategy of the config\n"
+               "  --log-level trace|debug|info|warning|error shows the log "
+               "(default: off)\n",
                program);
   return 1;
 }
@@ -137,6 +245,8 @@ int main(int argc, char **argv) {
   bool save_trajectory = false;
   std::optional<mslam::ImuFusion> imu_fusion;
   std::optional<unsigned> num_threads;
+  std::optional<mslam::SlamStrategy> strategy;
+  std::optional<spdlog::level::level_enum> log_level;
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--save-map") {
@@ -162,6 +272,29 @@ int main(int argc, char **argv) {
         imu_fusion = mslam::ImuFusion::DeadReckoning;
       } else {
         std::fprintf(stderr, "error: invalid --imu-fusion %s\n", argv[i]);
+        return usage(argv[0]);
+      }
+    } else if (arg == "--strategy") {
+      if (i + 1 >= argc) {
+        return usage(argv[0]);
+      }
+      const std::string_view value = argv[++i];
+      if (value == mslam::toString(mslam::SlamStrategy::Odometry)) {
+        strategy = mslam::SlamStrategy::Odometry;
+      } else if (value == mslam::toString(mslam::SlamStrategy::PoseGraph)) {
+        strategy = mslam::SlamStrategy::PoseGraph;
+      } else {
+        std::fprintf(stderr, "error: invalid --strategy %s\n", argv[i]);
+        return usage(argv[0]);
+      }
+    } else if (arg == "--log-level") {
+      if (i + 1 >= argc) {
+        return usage(argv[0]);
+      }
+      try {
+        log_level = mslam::parseLogLevel(argv[++i]);
+      } catch (const std::exception &) {
+        std::fprintf(stderr, "error: invalid --log-level %s\n", argv[i]);
         return usage(argv[0]);
       }
     } else if (arg == "--threads") {
@@ -220,9 +353,12 @@ int main(int argc, char **argv) {
   if (num_threads.has_value()) {
     config.parameters.num_threads = *num_threads;
   }
+  if (strategy.has_value()) {
+    config.strategy = *strategy;
+  }
 
   auto logger = spdlog::default_logger();
-  logger->set_level(spdlog::level::off);
+  logger->set_level(log_level.value_or(spdlog::level::off));
 
   for (int run = 0; run < repeats; ++run) {
     auto map = mslam::makeVoxelHashMap(config.map_parameters);
@@ -269,6 +405,7 @@ int main(int argc, char **argv) {
       }
     }
     drain(true);
+    pipeline.finish(); // pose graph only: seal the last keyframe, drain
     const double total_ms =
         toMs(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
                                                                   wall_start));
@@ -295,6 +432,11 @@ int main(int argc, char **argv) {
                 "stale_dropped=%zu overflow_dropped=%zu\n",
                 sync.scans, sync.scans_uncovered, sync.splits,
                 sync.stale_dropped, sync.overflow_dropped);
+
+    if (const auto graph = pipeline.backendResult()) {
+      printPoseGraph(*graph, pipeline, slam, timings,
+                     config.pose_graph.mini_map_voxel_size);
+    }
 
     if (save_trajectory && run == repeats - 1) {
       trajectory_file << k_trajectory_header << trajectory_rows;

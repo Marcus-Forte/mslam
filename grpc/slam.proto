@@ -37,6 +37,68 @@ message MapStreamChunk {
 	PointCloud3 points = 4;
 }
 
+// Position and orientation of a frame, as viser takes them: `position` and the
+// unit quaternion `wxyz` (Hamilton convention, w first, rotation of the frame
+// into its parent). A quaternion has no gimbal singularity, unlike the Euler
+// angles of Pose3D.
+message PoseQuat {
+	double x = 1;
+	double y = 2;
+	double z = 3;
+	double qw = 4;
+	double qx = 5;
+	double qy = 6;
+	double qz = 7;
+}
+
+// Pose-graph strategy. Resume position of a StreamKeyframes call. Leave both
+// at 0 to start from the beginning. If `epoch` is not the server's current
+// keyframe epoch, `next_keyframe_id` is ignored and the stream starts at 0.
+message KeyframeStreamRequest {
+	uint64 epoch = 1;
+	// The first keyframe id the client does not have yet.
+	uint64 next_keyframe_id = 2;
+}
+
+// First message of a stream, and again whenever the server is reset: the
+// keyframe epoch changed, so the client drops every keyframe it holds.
+message KeyframeEpoch {
+	uint64 epoch = 1;
+}
+
+// A keyframe, sent once. Ids are consecutive from 0 in each epoch.
+message KeyframeAdded {
+	uint64 epoch = 1;
+	uint64 id = 2;
+	// Pose in the map frame when the keyframe was added; a later KeyframePoses
+	// supersedes it.
+	PoseQuat pose = 3;
+	// The keyframe's mini map in the keyframe's OWN frame: place it with `pose`.
+	PointCloud3 cloud = 4;
+}
+
+// The current map-frame pose of keyframes [0, n), sent when an optimization
+// moved them (and once after a client resumes). Only poses: no points.
+message KeyframePoses {
+	uint64 epoch = 1;
+	// Increases with every result of the back end (also reported by GetStatus).
+	uint64 graph_version = 2;
+	repeated KeyframePoseEntry poses = 3;
+}
+
+message KeyframePoseEntry {
+	uint64 id = 1;
+	PoseQuat pose = 2;
+}
+
+message KeyframeStreamMessage {
+	oneof payload {
+		KeyframeEpoch epoch_reset = 1;
+		KeyframeAdded added = 2;
+		KeyframePoses poses = 3;
+	}
+}
+
 // State of the SLAM server's link to its sensor server.
 enum SensorLink {
 	// The server cannot tell (no sensor status source attached).
@@ -52,6 +114,11 @@ enum SensorLink {
 	SENSOR_LINK_STREAMING = 4;
 }
 
+enum SlamStrategy {
+	SLAM_STRATEGY_ODOMETRY = 0;
+	SLAM_STRATEGY_POSE_GRAPH = 1;
+}
+
 message SlamStatus {
 	SensorLink sensor_link = 1;
 	// Sensor server the SLAM server connects to ("host:port"); empty when none.
@@ -60,6 +127,13 @@ message SlamStatus {
 	// has arrived yet (or the sensor is not remote).
 	int32 scan_age_ms = 3;
 	int32 imu_age_ms = 4;
+	// Estimator in use (config slam.strategy).
+	SlamStrategy strategy = 5;
+	// Pose-graph strategy only (0 otherwise): increases with every new result of
+	// the back end; keyframes in the graph; accepted loop closures.
+	uint64 graph_version = 6;
+	uint32 keyframes = 7;
+	uint32 loop_closures = 8;
 }
 
 service SlamService {
@@ -70,6 +144,11 @@ service SlamService {
 	rpc GetMapIncrements(Empty) returns (stream PointCloud3);
 	// Cursor-based map stream: every increment from the cursor on, in order.
 	rpc StreamMap(MapStreamRequest) returns (stream MapStreamChunk);
+	// Pose-graph strategy: keyframes with their mini maps (once each, in the
+	// keyframe frame) and the optimized poses, so that a loop closure re-sends
+	// poses and not points. With the odometry strategy the stream announces its
+	// epoch and stays silent.
+	rpc StreamKeyframes(KeyframeStreamRequest) returns (stream KeyframeStreamMessage);
 	rpc GetTransformedScan(Empty) returns (stream PointCloud3);
 	rpc GetCorrespondences(Empty) returns (stream PointCloud3);
 	rpc GetPose(Empty) returns (stream Pose3D);

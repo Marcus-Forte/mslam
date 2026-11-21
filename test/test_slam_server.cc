@@ -1,7 +1,9 @@
 #include "mslam/slam/SlamServer.hh"
 
+#include <Eigen/Geometry>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
 #include <limits>
@@ -355,9 +357,9 @@ TEST(SlamServerStreamMap, OversizedIncrementGoesAlone) {
 TEST(SlamServerStreamMap, EmptyIncrementsAdvanceOffsetsWithoutAMessage) {
   RunningServer rs;
   // Published before the client connects: covered by the chunk's range.
-  rs.server.updateMapIncrement({});
+  rs.server.updateMapIncrement(mslam::PointCloud{});
   rs.publish(1, 5);
-  rs.server.updateMapIncrement({});
+  rs.server.updateMapIncrement(mslam::PointCloud{});
   rs.publish(1, 5);
   {
     MapStream stream(rs);
@@ -373,8 +375,8 @@ TEST(SlamServerStreamMap, EmptyIncrementsAdvanceOffsetsWithoutAMessage) {
   Chunk chunk;
   ASSERT_TRUE(stream.next(chunk));
   auto drained = stream.readUntil(4);
-  rs.server.updateMapIncrement({});
-  rs.server.updateMapIncrement({});
+  rs.server.updateMapIncrement(mslam::PointCloud{});
+  rs.server.updateMapIncrement(mslam::PointCloud{});
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   rs.publish(1, 4);
   ASSERT_TRUE(stream.next(chunk));
@@ -611,6 +613,45 @@ TEST_F(SlamServerTest, StatusIsUnknownWithoutASensorStatusSource) {
   EXPECT_TRUE(response.sensor_address().empty());
   EXPECT_EQ(response.scan_age_ms(), -1);
   EXPECT_EQ(response.imu_age_ms(), -1);
+  // No pose-graph back end reported: odometry, nothing in the graph.
+  EXPECT_EQ(response.strategy(), sensors::SLAM_STRATEGY_ODOMETRY);
+  EXPECT_EQ(response.graph_version(), 0U);
+  EXPECT_EQ(response.keyframes(), 0U);
+  EXPECT_EQ(response.loop_closures(), 0U);
+}
+
+TEST_F(SlamServerTest, StatusReportsThePoseGraph) {
+  sensors::Empty request;
+  sensors::SlamStatus response;
+  server_.updateGraphStatus({.strategy = mslam::SlamStrategy::PoseGraph,
+                             .graph_version = 42,
+                             .keyframes = 17,
+                             .loop_closures = 3});
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.strategy(), sensors::SLAM_STRATEGY_POSE_GRAPH);
+  EXPECT_EQ(response.graph_version(), 42U);
+  EXPECT_EQ(response.keyframes(), 17U);
+  EXPECT_EQ(response.loop_closures(), 3U);
+
+  // The sensor link part is independent of it.
+  EXPECT_EQ(response.sensor_link(), sensors::SENSOR_LINK_UNKNOWN);
+
+  server_.updateGraphStatus({});
+  ASSERT_TRUE(service().GetStatus(nullptr, &request, &response).ok());
+  EXPECT_EQ(response.strategy(), sensors::SLAM_STRATEGY_ODOMETRY);
+  EXPECT_EQ(response.graph_version(), 0U);
+}
+
+TEST_F(SlamServerTest, ASharedIncrementIsStoredWithoutACopy) {
+  const auto cloud = std::make_shared<const mslam::PointCloud>(
+      mslam::PointCloud{{1.0F, 2.0F, 3.0F, 4.0F}});
+  server_.updateMapIncrement(cloud);
+  // The server holds the very object (history + latest increment).
+  EXPECT_GE(cloud.use_count(), 2);
+  sensors::Empty request;
+  sensors::PointCloud3 map;
+  ASSERT_TRUE(service().GetMap(nullptr, &request, &map).ok());
+  EXPECT_EQ(map.x_size(), 1);
 }
 
 TEST_F(SlamServerTest, StatusReportsTheSensorLink) {
@@ -682,6 +723,250 @@ TEST(SlamServerStatus, IsServedOverTheWire) {
   source->status = {.link = mslam::SensorLink::Disconnected,
                     .address = "sensor:50051"};
   EXPECT_EQ(get().sensor_link(), sensors::SENSOR_LINK_DISCONNECTED);
+}
+
+// ---------------------------------------------------------------------------
+// StreamKeyframes
+
+using KeyframeMessage = sensors::KeyframeStreamMessage;
+
+Eigen::Affine3d poseAtX(double x, double yaw = 0.0) {
+  Eigen::Affine3d pose = Eigen::Affine3d::Identity();
+  pose.linear() =
+      Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+  pose.translation() = Eigen::Vector3d(x, 0.0, 0.0);
+  return pose;
+}
+
+// Keyframe `id` has `id + 1` points, so a mix-up is visible in the sizes.
+void addKeyframes(mslam::SlamServer &server, std::size_t first,
+                  std::size_t count) {
+  for (std::size_t id = first; id < first + count; ++id) {
+    server.addKeyframe(
+        id, poseAtX(static_cast<double>(id)),
+        std::make_shared<const mslam::PointCloud>(cloudOf(id + 1)));
+  }
+}
+
+class KeyframeStream {
+public:
+  KeyframeStream(RunningServer &s, uint64_t epoch = 0, uint64_t next_id = 0) {
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(30));
+    sensors::KeyframeStreamRequest request;
+    request.set_epoch(epoch);
+    request.set_next_keyframe_id(next_id);
+    reader = s.stub->StreamKeyframes(&context, request);
+  }
+  ~KeyframeStream() {
+    context.TryCancel();
+    reader->Finish();
+  }
+
+  bool next(KeyframeMessage &message) { return reader->Read(&message); }
+
+  // The epoch announcement every stream starts with.
+  uint64_t readEpoch() {
+    KeyframeMessage message;
+    EXPECT_TRUE(next(message));
+    EXPECT_EQ(message.payload_case(), KeyframeMessage::kEpochReset);
+    return message.epoch_reset().epoch();
+  }
+
+  grpc::ClientContext context;
+  std::unique_ptr<grpc::ClientReader<KeyframeMessage>> reader;
+};
+
+TEST(SlamServerStreamKeyframes, KeyframesArriveInOrderWithTheirCloudsAndPoses) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 3);
+  KeyframeStream stream(rs);
+  const uint64_t epoch = stream.readEpoch();
+  EXPECT_NE(epoch, 0U);
+
+  for (uint64_t id = 0; id < 3; ++id) {
+    KeyframeMessage message;
+    ASSERT_TRUE(stream.next(message));
+    ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+    const auto &added = message.added();
+    EXPECT_EQ(added.epoch(), epoch);
+    EXPECT_EQ(added.id(), id);
+    EXPECT_EQ(added.cloud().x_size(), static_cast<int>(id + 1));
+    EXPECT_DOUBLE_EQ(added.pose().x(), static_cast<double>(id));
+    EXPECT_DOUBLE_EQ(added.pose().qw(), 1.0); // identity rotation
+    EXPECT_DOUBLE_EQ(added.pose().qz(), 0.0);
+  }
+
+  // A keyframe added while the stream is open follows.
+  addKeyframes(rs.server, 3, 1);
+  KeyframeMessage message;
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+  EXPECT_EQ(message.added().id(), 3U);
+}
+
+TEST(SlamServerStreamKeyframes, APoseUpdateArrivesAsAPoseTableWithoutPoints) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 3);
+  KeyframeStream stream(rs);
+  stream.readEpoch();
+  KeyframeMessage message;
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_TRUE(stream.next(message));
+  }
+
+  const std::vector<Eigen::Affine3d> moved = {
+      poseAtX(0.0), poseAtX(1.5, M_PI / 2.0), poseAtX(2.5)};
+  rs.server.updateKeyframePoses(9, moved);
+
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kPoses);
+  const auto &poses = message.poses();
+  EXPECT_EQ(poses.graph_version(), 9U);
+  ASSERT_EQ(poses.poses_size(), 3);
+  EXPECT_EQ(poses.poses(1).id(), 1U);
+  EXPECT_DOUBLE_EQ(poses.poses(1).pose().x(), 1.5);
+  // A 90 degree yaw as a unit quaternion: w = z = sqrt(0.5).
+  EXPECT_NEAR(poses.poses(1).pose().qw(), std::sqrt(0.5), 1e-12);
+  EXPECT_NEAR(poses.poses(1).pose().qz(), std::sqrt(0.5), 1e-12);
+}
+
+TEST(SlamServerStreamKeyframes, ASlowClientStillGetsTheLatestPoseTable) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 2);
+  // Three tables before the client reads anything: it may skip the first two
+  // but must end on the third.
+  for (uint64_t version = 1; version <= 3; ++version) {
+    rs.server.updateKeyframePoses(
+        version,
+        std::vector<Eigen::Affine3d>{
+            poseAtX(0.0), poseAtX(1.0 + static_cast<double>(version))});
+  }
+  KeyframeStream stream(rs);
+  stream.readEpoch();
+  uint64_t last_version = 0;
+  KeyframeMessage message;
+  int adds = 0;
+  while (last_version < 3 && stream.next(message)) {
+    if (message.payload_case() == KeyframeMessage::kAdded) {
+      ++adds;
+    } else if (message.payload_case() == KeyframeMessage::kPoses) {
+      last_version = message.poses().graph_version();
+      EXPECT_EQ(message.poses().poses_size(), 2);
+    }
+  }
+  EXPECT_EQ(last_version, 3U);
+  EXPECT_EQ(adds, 2);
+}
+
+TEST(SlamServerStreamKeyframes, AResetAnnouncesANewEpochAtOnce) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 2);
+  KeyframeStream stream(rs);
+  const uint64_t first_epoch = stream.readEpoch();
+  KeyframeMessage message;
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_TRUE(stream.next(message));
+
+  rs.server.reset();
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kEpochReset);
+  const uint64_t second_epoch = message.epoch_reset().epoch();
+  EXPECT_NE(second_epoch, first_epoch);
+  EXPECT_NE(second_epoch, 0U);
+
+  // Ids restart at 0 in the new epoch.
+  addKeyframes(rs.server, 0, 1);
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+  EXPECT_EQ(message.added().epoch(), second_epoch);
+  EXPECT_EQ(message.added().id(), 0U);
+}
+
+TEST(SlamServerStreamKeyframes, ClearingTheMapKeepsTheKeyframeEpoch) {
+  // The pipeline re-sends the point map after every optimization with
+  // clearMap(); the keyframes must survive it.
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 1);
+  KeyframeStream stream(rs);
+  const uint64_t epoch = stream.readEpoch();
+  KeyframeMessage message;
+  ASSERT_TRUE(stream.next(message));
+
+  rs.server.clearMap();
+  addKeyframes(rs.server, 1, 1);
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+  EXPECT_EQ(message.added().epoch(), epoch);
+  EXPECT_EQ(message.added().id(), 1U);
+}
+
+TEST(SlamServerStreamKeyframes, ResumeSkipsWhatTheClientAlreadyHas) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 5);
+  uint64_t epoch = 0;
+  {
+    KeyframeStream first(rs);
+    epoch = first.readEpoch();
+  }
+
+  KeyframeStream resumed(rs, epoch, 3);
+  EXPECT_EQ(resumed.readEpoch(), epoch);
+  KeyframeMessage message;
+  for (uint64_t id = 3; id < 5; ++id) {
+    ASSERT_TRUE(resumed.next(message));
+    ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+    EXPECT_EQ(message.added().id(), id);
+  }
+  addKeyframes(rs.server, 5, 1);
+  ASSERT_TRUE(resumed.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+  EXPECT_EQ(message.added().id(), 5U); // nothing was repeated in between
+}
+
+TEST(SlamServerStreamKeyframes, ResumeAfterAnOptimizationGetsTheCurrentPoses) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 3);
+  rs.server.updateKeyframePoses(
+      4, std::vector<Eigen::Affine3d>{poseAtX(0), poseAtX(1.1), poseAtX(2.2)});
+  uint64_t epoch = 0;
+  {
+    KeyframeStream first(rs);
+    epoch = first.readEpoch();
+  }
+  KeyframeStream resumed(rs, epoch, 3); // has all three keyframes
+  resumed.readEpoch();
+  KeyframeMessage message;
+  ASSERT_TRUE(resumed.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kPoses);
+  EXPECT_EQ(message.poses().graph_version(), 4U);
+  EXPECT_EQ(message.poses().poses_size(), 3);
+}
+
+TEST(SlamServerStreamKeyframes, AStaleEpochRestartsFromTheFirstKeyframe) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 3);
+  KeyframeStream stream(rs, /*epoch=*/12345, /*next_id=*/2);
+  const uint64_t epoch = stream.readEpoch();
+  EXPECT_NE(epoch, 12345U);
+  KeyframeMessage message;
+  ASSERT_TRUE(stream.next(message));
+  ASSERT_EQ(message.payload_case(), KeyframeMessage::kAdded);
+  EXPECT_EQ(message.added().id(), 0U);
+}
+
+TEST(SlamServerStreamKeyframes, AnOutOfSequenceKeyframeIsIgnored) {
+  RunningServer rs;
+  addKeyframes(rs.server, 0, 1);
+  addKeyframes(rs.server, 5, 1); // would leave a gap
+  KeyframeStream stream(rs);
+  stream.readEpoch();
+  KeyframeMessage message;
+  ASSERT_TRUE(stream.next(message));
+  EXPECT_EQ(message.added().id(), 0U);
+  addKeyframes(rs.server, 1, 1);
+  ASSERT_TRUE(stream.next(message));
+  EXPECT_EQ(message.added().id(), 1U);
 }
 
 } // namespace

@@ -1,0 +1,56 @@
+// Pose-graph variant of mslam.jsonc (same odometry settings).
+// SLAM configuration scoped to the integration test. Pinned on purpose so the
+// regression assertion does not depend on config/mslam.jsonc, which is tuned
+// interactively. Values match the run used to calibrate the origin tolerance.
+{
+    "imu": true,
+    "lidar": true,
+    "camera": false,
+    "imu_acceleration_scale": 9.80665,
+    "log_level": "info", // trace || debug || info || warning || error
+    "map_type": "voxel",
+    "remote_scanner": "localhost:50051", // the integration test connects directly to its own replay server
+
+    "preprocessor": {
+        "voxel_size": 0.1,
+        "min_distance_to_center": 1.0,
+        "min_intensity": 50,
+        "downsample_filter": "voxel_hash",
+        "deskew": true,
+        "points_per_second": 200000
+    },
+    "map": {
+        "resolution": 0.1,
+        "max_points_per_voxel": 5,
+        "max_voxels": 0,
+        "max_range": 0,
+        "dense_map": false
+    },
+
+    "slam": {
+        "optimizer_iterations": 3,
+        "reg_iterations": 3,
+        "max_correspondence_distance": 0.3,
+        "strategy": "pose_graph"
+    },
+
+    // Pose-graph back end; "synchronous" runs it inline so the replay is
+    // deterministic. Values are the defaults, spelled out to pin them.
+    "pose_graph": {
+        "keyframe_distance": 0.5,
+        "keyframe_angle": 0.26,
+        "keyframe_max_interval_s": 0,
+        "mini_map_voxel_size": 0.05,
+        "loop_search_radius": 2.0,
+        "loop_min_separation": 10,
+        "loop_submap_keyframes": 2,
+        "loop_max_rms": 0.05,
+        "loop_min_matched_fraction": 0.6,
+        "loop_sigma_translation": 0.02,
+        "loop_sigma_rotation": 0.005,
+        "odometry_sigma_translation": 0.05,
+        "odometry_sigma_rotation": 0.01,
+        "optimizer_iterations": 20,
+        "synchronous": true
+    }
+}

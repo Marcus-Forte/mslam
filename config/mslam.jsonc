@@ -3,7 +3,7 @@
     "lidar" : true,
     "camera": false,
     "imu_acceleration_scale": 9.80665,
-    "log_level": "debug", // trace || debug || info || warning || error
+    "log_level": "info", // trace || debug || info || warning || error
     "map_type": "voxel",
     "remote_scanner": "localhost:50051", // "local" for on-board Mid360, or host:port of a sensor/replay server
 
@@ -17,7 +17,7 @@
     },
     "map": {
         "resolution": 0.1,
-        "max_points_per_voxel": 10,
+        "max_points_per_voxel": 2,
         // Voxels searched around a query (optional, default 1 = 3x3x3, max 8).
         // Neighbours are only guaranteed within search_radius * resolution;
         // a larger slam.max_correspondence_distance may miss matches or find
@@ -41,6 +41,31 @@
         // default 1 = sequential; 0 = every hardware thread, n = at most n). The
         // pose does not depend on it (bit for bit). Needs a build with oneTBB,
         // otherwise a value other than 1 logs a warning and runs sequentially.
-        "num_threads": 1
+        "num_threads": 1,
+        // Estimator (optional, default "odometry" = LiDAR-inertial odometry only):
+        //   "odometry": the odometry alone
+        //   "N": the same odometry plus keyframes, loop closure and a
+        //                 pose-graph back end (see "pose_graph" below)
+        "strategy": "pose_graph"
     }
+
+    // Pose-graph back end, read only when "strategy" is "pose_graph"; every key
+    // is optional (defaults shown).
+    // , "pose_graph": {
+    //     "keyframe_distance": 0.5,            // m moved before a new keyframe
+    //     "keyframe_angle": 0.26,              // rad turned before a new keyframe
+    //     "keyframe_max_interval_s": 0,        // s; closes a keyframe while still, 0 = off
+    //     "mini_map_voxel_size": 0.05,         // m, thinning of a keyframe's mini map
+    //     "loop_search_radius": 2.0,           // m, loop candidates around a keyframe
+    //     "loop_min_separation": 10,           // keyframes skipped as recent neighbours
+    //     "loop_submap_keyframes": 2,          // neighbours each side forming the target
+    //     "loop_max_rms": 0.05,                // m, verification gate
+    //     "loop_min_matched_fraction": 0.6,    // (0, 1], verification gate
+    //     "loop_sigma_translation": 0.02,      // m
+    //     "loop_sigma_rotation": 0.005,        // rad
+    //     "odometry_sigma_translation": 0.05,  // m
+    //     "odometry_sigma_rotation": 0.01,     // rad
+    //     "optimizer_iterations": 20,
+    //     "synchronous": false                 // true: back end inline (deterministic replays)
+    // }
 }

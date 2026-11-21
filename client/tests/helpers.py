@@ -26,3 +26,36 @@ def make_cloud(count: int, start: int = 0) -> lidar_pb2.PointCloud3:
 
 def make_chunk(epoch: int, first: int, next_: int, count: int = 0, start: int = 0) -> slam_pb2.MapStreamChunk:
     return slam_pb2.MapStreamChunk(epoch=epoch, first_offset=first, next_offset=next_, points=make_cloud(count, start))
+
+
+def make_pose(x: float = 0.0, y: float = 0.0, z: float = 0.0, yaw: float = 0.0) -> slam_pb2.PoseQuat:
+    """A `PoseQuat` at (x, y, z) rotated by `yaw` about z (unit quaternion, w first)."""
+    import math
+
+    return slam_pb2.PoseQuat(x=x, y=y, z=z, qw=math.cos(yaw / 2), qx=0.0, qy=0.0, qz=math.sin(yaw / 2))
+
+
+def make_epoch(epoch: int) -> slam_pb2.KeyframeStreamMessage:
+    return slam_pb2.KeyframeStreamMessage(epoch_reset=slam_pb2.KeyframeEpoch(epoch=epoch))
+
+
+def make_added(epoch: int, keyframe_id: int, count: int = 4, pose: slam_pb2.PoseQuat | None = None):
+    """Keyframe `keyframe_id` with `count` points (see `make_cloud`; x counts up from 1000 * id)."""
+    return slam_pb2.KeyframeStreamMessage(
+        added=slam_pb2.KeyframeAdded(
+            epoch=epoch,
+            id=keyframe_id,
+            pose=pose if pose is not None else make_pose(x=float(keyframe_id)),
+            cloud=make_cloud(count, start=1000 * keyframe_id),
+        )
+    )
+
+
+def make_poses(epoch: int, graph_version: int, poses: list[slam_pb2.PoseQuat]):
+    return slam_pb2.KeyframeStreamMessage(
+        poses=slam_pb2.KeyframePoses(
+            epoch=epoch,
+            graph_version=graph_version,
+            poses=[slam_pb2.KeyframePoseEntry(id=index, pose=pose) for index, pose in enumerate(poses)],
+        )
+    )

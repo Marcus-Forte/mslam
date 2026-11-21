@@ -7,13 +7,20 @@
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
+#include "mslam/slam/Transform.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <memory>
 #include <mutex>
+#include <set>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -54,17 +61,73 @@ public:
   void updateTransformedScan(mslam::PointCloud scan) override {
     std::lock_guard lock(mutex_);
     last_scan_size_ = scan.size();
+    if (!scan.empty()) {
+      last_scan_first_ = scan.front();
+    }
     ++scans_;
+    events_.push_back(Event::Scan);
   }
+  using mslam::ISlamOutput::updateMapIncrement;
   void updateMapIncrement(mslam::PointCloud increment) override {
     std::lock_guard lock(mutex_);
     last_increment_size_ = increment.size();
     ++increments_;
+    increment_points_ += increment.size();
+    increment_clouds_.push_back(std::move(increment));
+    events_.push_back(Event::OwnedIncrement);
+  }
+  void updateMapIncrement(
+      std::shared_ptr<const mslam::PointCloud> increment) override {
+    std::lock_guard lock(mutex_);
+    last_increment_size_ = increment->size();
+    ++increments_;
+    ++shared_increments_;
+    events_.push_back(Event::SharedIncrement);
+  }
+  void updateGraphStatus(const mslam::GraphStatus &status) override {
+    std::lock_guard lock(mutex_);
+    last_graph_status_ = status;
+    ++graph_status_updates_;
   }
   void reset() override {
     std::lock_guard lock(mutex_);
     ++resets_;
+    events_.push_back(Event::Reset);
   }
+
+  void clearMap() override {
+    std::lock_guard lock(mutex_);
+    ++clear_maps_;
+    if (clear_maps_ == 1) {
+      increments_before_first_clear_ = increment_clouds_.size();
+    }
+    events_.push_back(Event::ClearMap);
+  }
+  void addKeyframe(std::uint64_t id, const Eigen::Affine3d &pose,
+                   std::shared_ptr<const mslam::PointCloud> cloud) override {
+    std::lock_guard lock(mutex_);
+    keyframe_ids_.push_back(id);
+    keyframe_clouds_.push_back(std::move(cloud));
+    last_keyframe_pose_ = pose;
+    events_.push_back(Event::AddKeyframe);
+  }
+  void updateKeyframePoses(std::uint64_t graph_version,
+                           std::span<const Eigen::Affine3d> poses) override {
+    std::lock_guard lock(mutex_);
+    pose_table_versions_.push_back(graph_version);
+    last_pose_table_.assign(poses.begin(), poses.end());
+    events_.push_back(Event::UpdateKeyframePoses);
+  }
+
+  enum class Event {
+    Scan,
+    OwnedIncrement,
+    SharedIncrement,
+    Reset,
+    ClearMap,
+    AddKeyframe,
+    UpdateKeyframePoses
+  };
 
   /// Polls until @p predicate holds (called with the lock held), up to 10 s.
   /// (Polling rather than a condition variable: the thread sanitizer runtime
@@ -91,6 +154,20 @@ public:
   int scans_ = 0;
   int increments_ = 0;
   int resets_ = 0;
+  int shared_increments_ = 0;
+  std::size_t increment_points_ = 0; ///< points in owned increments, in total
+  std::vector<mslam::PointCloud> increment_clouds_; ///< ... and their content
+  std::size_t increments_before_first_clear_ = static_cast<std::size_t>(-1);
+  int clear_maps_ = 0;
+  std::vector<std::uint64_t> keyframe_ids_;
+  std::vector<std::shared_ptr<const mslam::PointCloud>> keyframe_clouds_;
+  Eigen::Affine3d last_keyframe_pose_ = Eigen::Affine3d::Identity();
+  std::vector<std::uint64_t> pose_table_versions_;
+  std::vector<Eigen::Affine3d> last_pose_table_;
+  int graph_status_updates_ = 0;
+  mslam::GraphStatus last_graph_status_;
+  mslam::Point last_scan_first_;
+  std::vector<Event> events_;
 };
 
 struct Fixture {
@@ -174,6 +251,355 @@ TEST(SlamPipeline, ResetClearsMapPoseAndNotifiesTheOutput) {
   EXPECT_EQ(f.output.resets_, 1);
   EXPECT_EQ(f.output.last_pose_, mslam::Pose3D::Zero());
   EXPECT_EQ(f.slam.getPose(), mslam::Pose3D::Zero());
+}
+
+// ---------------------------------------------------------------------------
+// Pose-graph strategy.
+
+mslam::SlamConfiguration poseGraphConfig() {
+  mslam::SlamConfiguration config = testConfig();
+  config.strategy = mslam::SlamStrategy::PoseGraph;
+  auto &pg = config.pose_graph;
+  pg.synchronous = true; // no thread: the test decides when things happen
+  pg.keyframe_max_interval_s = 0.5; // a keyframe every 5 scans, standing still
+  pg.loop_min_separation = 1;       // so that every keyframe sees the first
+  pg.loop_search_radius = 2.0;
+  return config;
+}
+
+// A different sampling of the same room each time, like consecutive scans.
+mslam::Scan samplingScan(std::uint64_t sequence) {
+  mslam::Scan scan = roomScan(sequence);
+  scan.points = test::sampleRoom(400.0F, 1 + static_cast<unsigned>(sequence));
+  return scan;
+}
+
+void feed(Fixture &f, int count, int first = 0) {
+  for (int i = first; i < first + count; ++i) {
+    f.pipeline.processScan(samplingScan(static_cast<std::uint64_t>(i)), {});
+  }
+}
+
+TEST(SlamPipeline, OdometryStrategyRunsNoBackEndAndPublishesPlainly) {
+  Fixture f;
+  feed(f, mslam::SlamPipeline::kInitScans + 12);
+
+  EXPECT_EQ(f.pipeline.backendResult(), nullptr);
+  EXPECT_TRUE(f.pipeline.mapFromOdom().matrix().isIdentity(0.0));
+  EXPECT_EQ(f.pipeline.timings().backend.count(), 0);
+  EXPECT_EQ(f.pipeline.timings().map_resends, 0U);
+  EXPECT_EQ(f.output.graph_status_updates_, 0);
+  EXPECT_EQ(f.output.resets_, 0);
+  EXPECT_EQ(f.output.clear_maps_, 0);
+  EXPECT_TRUE(f.output.keyframe_ids_.empty());
+  EXPECT_TRUE(f.output.pose_table_versions_.empty());
+  EXPECT_EQ(f.output.shared_increments_, 0);
+  // One owned increment per scan, as before.
+  EXPECT_EQ(f.output.increments_, mslam::SlamPipeline::kInitScans + 12);
+  f.pipeline.finish(); // a no-op
+  EXPECT_EQ(f.output.resets_, 0);
+}
+
+TEST(SlamPipeline, PoseGraphStrategyLeavesTheOdometryPoseAlone) {
+  Fixture odometry;
+  Fixture graph(poseGraphConfig());
+  feed(odometry, mslam::SlamPipeline::kInitScans + 30);
+  feed(graph, mslam::SlamPipeline::kInitScans + 30);
+  ASSERT_NE(graph.pipeline.backendResult(), nullptr);
+  // The estimator is the same computation in both strategies.
+  EXPECT_EQ(graph.slam.getPose(), odometry.slam.getPose());
+  EXPECT_GT(graph.pipeline.timings().backend.count(), 0);
+}
+
+TEST(SlamPipeline, PoseGraphStrategyPublishesInTheMapFrame) {
+  Fixture odometry;
+  Fixture graph(poseGraphConfig());
+  const int scans = mslam::SlamPipeline::kInitScans + 30;
+  feed(odometry, scans);
+  feed(graph, scans);
+
+  const auto result = graph.pipeline.backendResult();
+  ASSERT_NE(result, nullptr);
+  ASSERT_GT(result->stats.loop_edges, 0U);
+  ASSERT_GT(result->map_version, 0U);
+  const Eigen::Affine3d correction = graph.pipeline.mapFromOdom();
+  // The loop edges move the map frame by a little: not the exact identity, and
+  // the test would prove nothing if it were.
+  ASSERT_FALSE(correction.matrix().isIdentity(0.0));
+  EXPECT_LT(correction.translation().norm(), 0.05);
+
+  // Published pose = T_map_odom * odom pose.
+  const Eigen::Affine3d expected = correction * graph.slam.getTransform();
+  const Eigen::Vector3d position(graph.output.last_pose_[0],
+                                 graph.output.last_pose_[1],
+                                 graph.output.last_pose_[2]);
+  EXPECT_LT((position - expected.translation()).norm(), 1e-9);
+  const Eigen::Matrix3d rotation = mslam::eulerToRotation(
+      Eigen::Vector3d(graph.output.last_pose_[3], graph.output.last_pose_[4],
+                      graph.output.last_pose_[5]));
+  const Eigen::Matrix3d expected_rotation = expected.linear();
+  EXPECT_LT((rotation - expected_rotation).norm(), 1e-9);
+
+  // Published scan = T_map_odom * the odometry pipeline's (odom frame) scan;
+  // both pipelines see the same scan with the same odom pose.
+  const Eigen::Vector3d odom_point(odometry.output.last_scan_first_.x,
+                                   odometry.output.last_scan_first_.y,
+                                   odometry.output.last_scan_first_.z);
+  const Eigen::Vector3d expected_point = correction * odom_point;
+  EXPECT_NEAR(graph.output.last_scan_first_.x, expected_point.x(), 1e-4);
+  EXPECT_NEAR(graph.output.last_scan_first_.y, expected_point.y(), 1e-4);
+  EXPECT_NEAR(graph.output.last_scan_first_.z, expected_point.z(), 1e-4);
+
+  EXPECT_EQ(graph.output.last_graph_status_.strategy,
+            mslam::SlamStrategy::PoseGraph);
+  EXPECT_GT(graph.output.last_graph_status_.graph_version, 0U);
+  EXPECT_GT(graph.output.last_graph_status_.keyframes, 1U);
+  EXPECT_GT(graph.output.last_graph_status_.loop_closures, 0U);
+}
+
+TEST(SlamPipeline, AMapVersionChangeResendsTheMapAsKeyframeChunks) {
+  Fixture f(poseGraphConfig());
+  std::uint64_t seen_version = 0;
+  int resends = 0;
+  for (int i = 0; i < mslam::SlamPipeline::kInitScans + 40; ++i) {
+    const std::size_t events_before = f.output.events_.size();
+    f.pipeline.processScan(samplingScan(static_cast<std::uint64_t>(i)), {});
+    const auto result = f.pipeline.backendResult();
+    // The scan applied the result of the scan before it (the back end runs
+    // inline at the end of a scan), so look at how many resets this one saw.
+    const auto begin =
+        f.output.events_.begin() + static_cast<std::ptrdiff_t>(events_before);
+    const auto resets = std::count(begin, f.output.events_.end(),
+                                   RecordingOutput::Event::ClearMap);
+    EXPECT_LE(resets, 1);
+    if (resets == 1) {
+      ++resends;
+      // reset(), then only keyframe chunks (shared clouds, at least the first
+      // keyframe's), then the scan's own events.
+      auto it = std::find(begin, f.output.events_.end(),
+                          RecordingOutput::Event::ClearMap);
+      ++it;
+      int chunks = 0;
+      while (it != f.output.events_.end() &&
+             *it == RecordingOutput::Event::SharedIncrement) {
+        ++chunks;
+        ++it;
+      }
+      EXPECT_GE(chunks, 1);
+      // The open keyframe's owned voxels follow as one owned chunk when it
+      // owns any (in a static room the earlier keyframes own them all), then
+      // the scan's own publications (scan, increment).
+      ASSERT_NE(it, f.output.events_.end());
+      if (*it == RecordingOutput::Event::OwnedIncrement) {
+        ++it;
+      }
+      // The keyframe outputs (new keyframes, the pose table) come with the
+      // result, after the map.
+      while (it != f.output.events_.end() &&
+             (*it == RecordingOutput::Event::AddKeyframe ||
+              *it == RecordingOutput::Event::UpdateKeyframePoses)) {
+        ++it;
+      }
+      ASSERT_NE(it, f.output.events_.end());
+      EXPECT_EQ(*it, RecordingOutput::Event::Scan);
+    }
+    if (result) {
+      EXPECT_GE(result->map_version, seen_version);
+      seen_version = result->map_version;
+    }
+  }
+  EXPECT_GT(resends, 0);
+  EXPECT_EQ(static_cast<std::size_t>(resends),
+            f.pipeline.timings().map_resends);
+  EXPECT_EQ(f.output.clear_maps_, resends);
+  EXPECT_EQ(f.pipeline.backendResult()->map_version,
+            static_cast<std::uint64_t>(
+                f.pipeline.backendResult()->stats.optimizations));
+}
+
+TEST(SlamPipeline, FinishRendersTheWholeMapFromTheKeyframes) {
+  Fixture f(poseGraphConfig());
+  feed(f, mslam::SlamPipeline::kInitScans + 12);
+  const int resets_before = f.output.clear_maps_;
+  f.pipeline.finish();
+
+  const auto result = f.pipeline.backendResult();
+  ASSERT_NE(result, nullptr);
+  EXPECT_EQ(f.output.clear_maps_, resets_before + 1);
+  EXPECT_EQ(f.output.resets_, 0); // keyframes were never invalidated
+  // After the last clearMap(): one chunk per keyframe, nothing else (the open
+  // keyframe was sealed, so no mini map follows).
+  const auto &events = f.output.events_;
+  const auto last_clear = std::find(events.rbegin(), events.rend(),
+                                    RecordingOutput::Event::ClearMap);
+  ASSERT_NE(last_clear, events.rend());
+  std::size_t chunks = 0;
+  for (auto it = last_clear.base();
+       it != events.end() && *it == RecordingOutput::Event::SharedIncrement;
+       ++it) {
+    ++chunks;
+  }
+  EXPECT_EQ(chunks, result->map_clouds.size());
+}
+
+TEST(SlamPipeline,
+     KeyframesGoToTheOutputOnceAndPosesOnlyWhenOptimizationMovedThem) {
+  Fixture f(poseGraphConfig());
+  feed(f, mslam::SlamPipeline::kInitScans + 40);
+  f.pipeline.finish();
+  const auto result = f.pipeline.backendResult();
+  ASSERT_GT(result->poses.size(), 3U);
+
+  // Every keyframe exactly once, in order, as the very mini map of the result
+  // (a shared pointer, not a copy).
+  ASSERT_EQ(f.output.keyframe_ids_.size(), result->poses.size());
+  for (std::size_t id = 0; id < result->poses.size(); ++id) {
+    EXPECT_EQ(f.output.keyframe_ids_[id], id);
+    EXPECT_EQ(f.output.keyframe_clouds_[id], result->mini_maps[id]);
+    EXPECT_FALSE(f.output.keyframe_clouds_[id]->empty());
+  }
+  // Poses were given when optimizations moved the keyframes, never otherwise:
+  // one table per map_version change, with strictly increasing versions, and
+  // the last one holds the final poses.
+  ASSERT_FALSE(f.output.pose_table_versions_.empty());
+  EXPECT_LE(f.output.pose_table_versions_.size(), result->stats.optimizations);
+  for (std::size_t i = 1; i < f.output.pose_table_versions_.size(); ++i) {
+    EXPECT_GT(f.output.pose_table_versions_[i],
+              f.output.pose_table_versions_[i - 1]);
+  }
+  ASSERT_EQ(f.output.last_pose_table_.size(), result->poses.size());
+  for (std::size_t id = 0; id < result->poses.size(); ++id) {
+    EXPECT_TRUE(f.output.last_pose_table_[id].matrix() ==
+                result->poses[id].matrix());
+  }
+
+  // A keyframe is always added before a table that includes it.
+  std::size_t added = 0;
+  for (const auto event : f.output.events_) {
+    if (event == RecordingOutput::Event::AddKeyframe) {
+      ++added;
+    }
+  }
+  EXPECT_EQ(added, result->poses.size());
+
+  // reset() starts the keyframe ids over.
+  f.pipeline.reset();
+  EXPECT_EQ(f.output.resets_, 1);
+  feed(f, mslam::SlamPipeline::kInitScans + 12);
+}
+
+// Distinct voxels of a set of clouds, at `voxel` metres.
+std::size_t distinctVoxels(const std::vector<mslam::PointCloud> &clouds,
+                           std::size_t count, float voxel) {
+  std::set<std::array<int, 3>> voxels;
+  for (std::size_t k = 0; k < count; ++k) {
+    for (const auto &p : clouds[k]) {
+      voxels.insert({static_cast<int>(std::floor(p.x / voxel)),
+                     static_cast<int>(std::floor(p.y / voxel)),
+                     static_cast<int>(std::floor(p.z / voxel))});
+    }
+  }
+  return voxels.size();
+}
+
+TEST(SlamPipeline, OdometryIncrementsAreTheRegistrationMapsNotOwnedVoxels) {
+  Fixture f;
+  feed(f, mslam::SlamPipeline::kInitScans + 12);
+  // One increment per scan, straight from the registration map: no ownership,
+  // so the same place shows up again and again.
+  EXPECT_EQ(f.output.increments_, mslam::SlamPipeline::kInitScans + 12);
+  EXPECT_GT(f.output.increment_points_,
+            distinctVoxels(f.output.increment_clouds_,
+                           f.output.increment_clouds_.size(), 0.05F));
+}
+
+TEST(SlamPipeline, PoseGraphIncrementsAreTheNewlyOwnedVoxelsOnly) {
+  Fixture f(poseGraphConfig());
+  // Different samplings of one room: the registration map would accept new
+  // points from every scan, the single-layer map only new voxels.
+  feed(f, mslam::SlamPipeline::kInitScans + 3);
+
+  // Up to the first re-send the published increments are in the odom frame
+  // (T_map_odom is the identity until the first optimization).
+  const auto &clouds = f.output.increment_clouds_;
+  const std::size_t count =
+      std::min(clouds.size(), f.output.increments_before_first_clear_);
+  ASSERT_GE(count, 8U);
+  std::size_t points = 0;
+  for (std::size_t k = 0; k < count; ++k) {
+    points += clouds[k].size();
+  }
+  // Every voxel exactly once over all the increments (0.05 m = the default
+  // mini_map_voxel_size); the centroid of a voxel lies in the voxel.
+  EXPECT_EQ(points, distinctVoxels(clouds, count, 0.05F));
+  // Later scans see the same room: almost nothing is new after the first.
+  EXPECT_GT(clouds.front().size(), 1000U);
+  EXPECT_LT(clouds[count - 1].size(), clouds.front().size() / 4);
+}
+
+TEST(SlamPipeline, TheSeedScansBecomeTheOriginKeyframe) {
+  Fixture f(poseGraphConfig());
+  feed(f, mslam::SlamPipeline::kInitScans);
+  // Sealed by the last seed scan: in the graph, identity pose, the gauge.
+  auto result = f.pipeline.backendResult();
+  ASSERT_EQ(result->poses.size(), 1U);
+  EXPECT_TRUE(result->poses[0].matrix().isIdentity(0.0));
+  EXPECT_EQ(result->stats.keyframes, 1U);
+  EXPECT_FALSE(result->mini_maps[0]->empty());
+
+  // Published before the first registered scan is processed ...
+  feed(f, 1, mslam::SlamPipeline::kInitScans);
+  ASSERT_EQ(f.output.keyframe_ids_, std::vector<std::uint64_t>{0});
+  EXPECT_EQ(f.output.last_graph_status_.keyframes, 1U);
+  // ... once, not again later, and the next scan opened keyframe 1 (its time
+  // is the first scan after the seeds), which is sealed after the interval.
+  feed(f, 40, mslam::SlamPipeline::kInitScans + 1);
+  f.pipeline.finish();
+  result = f.pipeline.backendResult();
+  ASSERT_GT(result->poses.size(), 3U);
+  for (std::size_t id = 0; id < f.output.keyframe_ids_.size(); ++id) {
+    EXPECT_EQ(f.output.keyframe_ids_[id], id);
+  }
+  EXPECT_EQ(result->stamps_ns[0], roomScan(0).header.timestamp);
+  EXPECT_EQ(result->stamps_ns[1],
+            roomScan(mslam::SlamPipeline::kInitScans).header.timestamp);
+  // The origin owns the seed scans' voxels: the room's 28800 voxels of 5 cm,
+  // all of them hit by ten random samplings.
+  EXPECT_GT(result->mini_maps[0]->size(), 20000U);
+}
+
+TEST(SlamPipeline, TheOriginKeyframeIsPublishedOnceWithTheWorkerToo) {
+  auto config = poseGraphConfig();
+  config.pose_graph.synchronous = false;
+  Fixture f(config);
+  feed(f, mslam::SlamPipeline::kInitScans + 1);
+  // The worker may or may not be done with the origin yet.
+  feed(f, 30, mslam::SlamPipeline::kInitScans + 1);
+  f.pipeline.finish();
+  const auto result = f.pipeline.backendResult();
+  ASSERT_GT(result->poses.size(), 1U);
+  ASSERT_EQ(f.output.keyframe_ids_.size(), result->poses.size());
+  for (std::size_t id = 0; id < result->poses.size(); ++id) {
+    EXPECT_EQ(f.output.keyframe_ids_[id], id); // 0 once, then 1, 2, ...
+  }
+  EXPECT_TRUE(result->poses[0].matrix().isIdentity(0.0));
+}
+
+TEST(SlamPipeline, ResetAlsoResetsTheBackEnd) {
+  Fixture f(poseGraphConfig());
+  feed(f, mslam::SlamPipeline::kInitScans + 20);
+  const auto before = f.pipeline.backendResult();
+  ASSERT_GT(before->poses.size(), 1U);
+  ASSERT_FALSE(f.pipeline.mapFromOdom().matrix().isIdentity(0.0));
+
+  f.pipeline.reset();
+
+  const auto after = f.pipeline.backendResult();
+  EXPECT_TRUE(after->poses.empty());
+  EXPECT_GT(after->graph_version, before->graph_version);
+  EXPECT_TRUE(f.pipeline.mapFromOdom().matrix().isIdentity(0.0));
+  EXPECT_EQ(f.output.last_graph_status_.keyframes, 0U);
+  EXPECT_EQ(f.output.last_pose_, mslam::Pose3D::Zero());
 }
 
 TEST(SlamPipeline, LidarDisabledOnlyConsumesInitScans) {

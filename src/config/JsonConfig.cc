@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <limits>
 
 namespace mslam {
 
@@ -31,6 +32,110 @@ mslam::ImuFusion parseImuFusion(const std::string &fusion) {
   }
 
   throw std::runtime_error("Invalid slam imu_fusion: " + fusion);
+}
+
+mslam::SlamStrategy parseSlamStrategy(const std::string &strategy) {
+  if (strategy == "odometry") {
+    return mslam::SlamStrategy::Odometry;
+  }
+  if (strategy == "pose_graph") {
+    return mslam::SlamStrategy::PoseGraph;
+  }
+
+  throw std::runtime_error("Invalid slam strategy: " + strategy);
+}
+
+// Optional numeric key of the pose_graph block: leaves `value` untouched when
+// absent, throws unless the key is a number in (min, max] (or [min, max] when
+// `min_inclusive`).
+void readPoseGraphNumber(const Json::Value &block, const char *key,
+                         double &value, double min, double max,
+                         bool min_inclusive) {
+  const auto &node = block[key];
+  if (node.isNull()) {
+    return;
+  }
+  const double v = node.isNumeric() ? node.asDouble() : std::nan("");
+  if (!std::isfinite(v) || v > max || (min_inclusive ? v < min : v <= min)) {
+    throw std::runtime_error(std::string("Invalid pose_graph ") + key +
+                             " setting");
+  }
+  value = v;
+}
+
+void readPoseGraphCount(const Json::Value &block, const char *key,
+                        unsigned int &value, unsigned int min,
+                        unsigned int max) {
+  const auto &node = block[key];
+  if (node.isNull()) {
+    return;
+  }
+  // Only a JSON integer token is a count (jsoncpp's isIntegral accepts 2.0).
+  const bool is_integer_token =
+      node.type() == Json::intValue || node.type() == Json::uintValue;
+  if (!is_integer_token || node.asDouble() < min || node.asDouble() > max) {
+    throw std::runtime_error(std::string("Invalid pose_graph ") + key +
+                             " setting: expected an integer in [" +
+                             std::to_string(min) + ", " + std::to_string(max) +
+                             "]");
+  }
+  value = node.asUInt();
+}
+
+PoseGraphParameters parsePoseGraph(const Json::Value &block) {
+  PoseGraphParameters pg;
+  if (block.isNull()) {
+    return pg;
+  }
+  if (!block.isObject()) {
+    throw std::runtime_error("Invalid pose_graph setting: expected an object");
+  }
+  rejectUnknownKeys(
+      block, "pose_graph",
+      {"keyframe_distance", "keyframe_angle", "keyframe_max_interval_s",
+       "mini_map_voxel_size", "loop_search_radius", "loop_min_separation",
+       "loop_submap_keyframes", "loop_max_rms", "loop_min_matched_fraction",
+       "loop_sigma_translation", "loop_sigma_rotation",
+       "odometry_sigma_translation", "odometry_sigma_rotation",
+       "optimizer_iterations", "synchronous"},
+      "config");
+  constexpr double kInf = std::numeric_limits<double>::infinity();
+  constexpr double kPi = 3.14159265358979323846;
+  readPoseGraphNumber(block, "keyframe_distance", pg.keyframe_distance, 0.0,
+                      kInf, false);
+  readPoseGraphNumber(block, "keyframe_angle", pg.keyframe_angle, 0.0, kPi,
+                      false);
+  readPoseGraphNumber(block, "keyframe_max_interval_s",
+                      pg.keyframe_max_interval_s, 0.0, kInf, true);
+  readPoseGraphNumber(block, "mini_map_voxel_size", pg.mini_map_voxel_size, 0.0,
+                      kInf, false);
+  readPoseGraphNumber(block, "loop_search_radius", pg.loop_search_radius, 0.0,
+                      kInf, false);
+  readPoseGraphCount(block, "loop_min_separation", pg.loop_min_separation, 1,
+                     1000000);
+  readPoseGraphCount(block, "loop_submap_keyframes", pg.loop_submap_keyframes,
+                     0, 1000);
+  readPoseGraphNumber(block, "loop_max_rms", pg.loop_max_rms, 0.0, kInf, false);
+  readPoseGraphNumber(block, "loop_min_matched_fraction",
+                      pg.loop_min_matched_fraction, 0.0, 1.0, false);
+  readPoseGraphNumber(block, "loop_sigma_translation",
+                      pg.loop_sigma_translation, 0.0, kInf, false);
+  readPoseGraphNumber(block, "loop_sigma_rotation", pg.loop_sigma_rotation, 0.0,
+                      kInf, false);
+  readPoseGraphNumber(block, "odometry_sigma_translation",
+                      pg.odometry_sigma_translation, 0.0, kInf, false);
+  readPoseGraphNumber(block, "odometry_sigma_rotation",
+                      pg.odometry_sigma_rotation, 0.0, kInf, false);
+  readPoseGraphCount(block, "optimizer_iterations", pg.optimizer_iterations, 1,
+                     10000);
+  if (!block["synchronous"].isNull()) {
+    if (!block["synchronous"].isBool()) {
+      throw std::runtime_error(
+          "Invalid pose_graph synchronous setting: expected on/off");
+    }
+    pg.synchronous = block["synchronous"].asBool();
+  }
+  return pg;
 }
 } // namespace
 
@@ -193,6 +298,14 @@ void JsonConfig::load() {
     config_.parameters.imu_fusion =
         parseImuFusion(root["slam"]["imu_fusion"].asString());
   }
+
+  if (!root["slam"]["strategy"].empty()) {
+    if (!root["slam"]["strategy"].isString()) {
+      throw std::runtime_error("Invalid slam strategy: expected a string");
+    }
+    config_.strategy = parseSlamStrategy(root["slam"]["strategy"].asString());
+  }
+  config_.pose_graph = parsePoseGraph(root["pose_graph"]);
 
   if (!root["slam"]["num_threads"].empty()) {
     const auto &num_threads = root["slam"]["num_threads"];

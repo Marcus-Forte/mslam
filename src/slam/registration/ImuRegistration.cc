@@ -4,7 +4,6 @@
 #include "moptim/DeviceLevenbergMarquardt.hh"
 #include "moptim/FusedCost.hh"
 #include "moptim/LevenbergMarquardt.hh"
-#include "moptim/NumericalCostCentral.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
 #include "mslam/slam/registration/ImuPreintegrationFactor.hh"
@@ -17,7 +16,10 @@ namespace {
 
 using Factor = ImuPreintegrationFactor;
 using PlaneCost = moptim::AnalyticalCost<Point3PlaneDistance, double>;
-using ImuCost = moptim::NumericalCostCentral<ImuPreintegrationFactor, double>;
+// Analytical jacobian (ImuPreintegrationFactor::jacobian): one residual and
+// jacobian evaluation per linear system instead of the 49 residuals of central
+// differences over the 24 tangent dimensions.
+using ImuCost = moptim::AnalyticalCost<ImuPreintegrationFactor, double>;
 using Fused = moptim::FusedCost<double, PlaneCost, ImuCost>;
 
 } // namespace

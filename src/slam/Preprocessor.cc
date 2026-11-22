@@ -142,6 +142,7 @@ std::shared_ptr<Scan> Preprocessor::filterNearCenter(const Scan &scan) const {
 void Preprocessor::process(const Scan &scan,
                            const std::vector<msensor::IMUData> &imu_samples,
                            Scan &out) {
+  const auto deskew_start = std::chrono::steady_clock::now();
   const PointCloud *source = &scan.points;
   if (config_.deskew && config_.points_per_second > 0) {
     const double delta_t = 1.0 / static_cast<double>(config_.points_per_second);
@@ -150,10 +151,13 @@ void Preprocessor::process(const Scan &scan,
     }
   }
 
+  const auto filter_start = std::chrono::steady_clock::now();
+  timings_.deskew += filter_start - deskew_start;
   out.header = scan.header;
   voxel_filter_.apply(*source, config_.min_distance_to_center,
                       config_.voxel_size, config_.downsample_filter,
                       config_.min_intensity, out.points);
+  timings_.filter += std::chrono::steady_clock::now() - filter_start;
 }
 
 std::shared_ptr<Scan>

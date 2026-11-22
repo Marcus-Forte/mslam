@@ -6,6 +6,7 @@
 #include "mslam/map/Voxel.hh"
 
 #include <Eigen/Dense>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <spdlog/spdlog.h>
@@ -81,7 +82,15 @@ public:
   std::shared_ptr<Scan>
   process(const Scan &scan, const std::vector<msensor::IMUData> &imu_samples);
 
+  /// Time spent in process() so far, by part (bench_slam prints it).
+  struct Timings {
+    std::chrono::nanoseconds deskew{0};
+    std::chrono::nanoseconds filter{0};
+  };
+  const Timings &timings() const { return timings_; }
+
 private:
+  Timings timings_;
   PreProcessor config_;
   std::shared_ptr<spdlog::logger> logger_;
 

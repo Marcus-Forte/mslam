@@ -18,7 +18,8 @@ struct ImuPriorSigma {
 };
 
 /**
- * @brief NumericalModel for the two-state IMU preintegration residual.
+ * @brief Model of the two-state IMU preintegration residual, with an analytical
+ * jacobian (AnalyticalCost) and usable by finite differences (NumericalCost).
  *
  * Both ends of the preintegration interval are estimated:
  *  - state_j (the new state): pose + velocity + gyro/accel bias.
@@ -100,6 +101,66 @@ public:
   }
 
   void setState(const double * /*x*/) {}
+
+  /// d residual / d step at zero, written transposed (jac[j + kTangentDim * i]
+  /// = d res[i] / d delta[j]). The step is [rho, omega | dv_j, dbg_j, dba_j |
+  /// dv_i, dbg_i, dba_i] with a LEFT increment on pose_j (SE3Manifold): dR_j =
+  /// [omega]x R_j, dp_j = rho + omega x p_j. Rotation residual r_R =
+  /// Log(dR~^T R_i^T R_j) with dR~ = dR Exp(J_R_bg dbg): d/d omega = Jr^-1(r_R)
+  /// R_j^T, d/d bg_i = -Jr^-1(r_R) E^T Jr(J_R_bg dbg) J_R_bg (E the rotation
+  /// error); the velocity, position and bias rows are linear in the step.
+  void jacobian(const double *x, const double *input,
+                const double * /*observation*/, double *jac) const {
+    using imu_detail::rightJacobianInverseSO3;
+    using imu_detail::rightJacobianSO3;
+    using imu_detail::skew;
+    const ImuState state_i = stateFrom(input, x + kExtrasI);
+    const ImuState state_j = stateFrom(x, x + kExtrasJ);
+    const PreintegratedImu &pre = preintegrated_;
+
+    const Eigen::Vector3d dbg = state_i.gyro_bias - pre.bias_gyro;
+    const Eigen::Vector3d phi_bias = pre.J_R_bg * dbg;
+    const Eigen::Matrix3d Ri_T = state_i.rotation.transpose();
+    const Eigen::Matrix3d corrected_delta_R =
+        pre.delta_R * imu_detail::expSO3(phi_bias);
+    const Eigen::Matrix3d error =
+        corrected_delta_R.transpose() * Ri_T * state_j.rotation;
+    const Eigen::Matrix3d Jr_inv =
+        rightJacobianInverseSO3(imu_detail::logSO3(error));
+    const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
+
+    // Columns of the step: rho 0, omega 3, v_j 6, bg_j 9, ba_j 12, v_i 15,
+    // bg_i 18, ba_i 21.
+    Eigen::Matrix<double, kPreintegrationResidualDim, kTangentDim> J =
+        Eigen::Matrix<double, kPreintegrationResidualDim, kTangentDim>::Zero();
+    J.block<3, 3>(0, 3) = Jr_inv * state_j.rotation.transpose();
+    J.block<3, 3>(0, 18) =
+        -Jr_inv * error.transpose() * rightJacobianSO3(phi_bias) * pre.J_R_bg;
+    J.block<3, 3>(3, 6) = Ri_T;
+    J.block<3, 3>(3, 15) = -Ri_T;
+    J.block<3, 3>(3, 18) = -pre.J_v_bg;
+    J.block<3, 3>(3, 21) = -pre.J_v_ba;
+    J.block<3, 3>(6, 0) = Ri_T;
+    J.block<3, 3>(6, 3) = -Ri_T * skew(state_j.position);
+    J.block<3, 3>(6, 15) = -pre.dt * Ri_T;
+    J.block<3, 3>(6, 18) = -pre.J_p_bg;
+    J.block<3, 3>(6, 21) = -pre.J_p_ba;
+    J.block<3, 3>(9, 9) = I;
+    J.block<3, 3>(9, 18) = -I;
+    J.block<3, 3>(12, 12) = I;
+    J.block<3, 3>(12, 21) = -I;
+
+    Eigen::Map<Eigen::Matrix<double, kTangentDim, kResidualDim>> jac_t(jac);
+    // Coefficient-wise product: a plain product of this size takes Eigen's GEMM
+    // path, which allocates and cannot run in a SYCL kernel.
+    jac_t.leftCols<kPreintegrationResidualDim>() =
+        J.transpose().lazyProduct(sqrt_info_.transpose());
+    jac_t.rightCols<kExtrasDim>().setZero();
+    for (int k = 0; k < kExtrasDim; ++k) {
+      jac_t(kExtrasI - SE3Manifold::kAmbientDim + SE3Manifold::kTangentDim + k,
+            kPreintegrationResidualDim + k) = prior_sqrt_info_[k];
+    }
+  }
 
   void residual(const double *x, const double *input,
                 const double * /*observation*/, double *res) const {

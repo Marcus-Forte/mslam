@@ -110,6 +110,38 @@ inline Eigen::Vector3d logSO3(const Eigen::Matrix3d &R) {
   return axis * angle;
 }
 
+inline Eigen::Matrix3d skew(const Eigen::Vector3d &v) {
+  Eigen::Matrix3d m;
+  m << 0.0, -v.z(), v.y(), v.z(), 0.0, -v.x(), -v.y(), v.x(), 0.0;
+  return m;
+}
+
+/// Right Jacobian of SO(3): Exp(phi + d) ~ Exp(phi) Exp(Jr(phi) d).
+inline Eigen::Matrix3d rightJacobianSO3(const Eigen::Vector3d &phi) {
+  const double theta = phi.norm();
+  const Eigen::Matrix3d W = skew(phi);
+  if (theta < 1e-5) {
+    return Eigen::Matrix3d::Identity() - 0.5 * W + (1.0 / 6.0) * W * W;
+  }
+  const double theta2 = theta * theta;
+  return Eigen::Matrix3d::Identity() - ((1.0 - std::cos(theta)) / theta2) * W +
+         ((theta - std::sin(theta)) / (theta2 * theta)) * W * W;
+}
+
+/// Inverse right Jacobian of SO(3): Log(Exp(phi) Exp(d)) ~ phi + Jr^-1(phi) d.
+inline Eigen::Matrix3d rightJacobianInverseSO3(const Eigen::Vector3d &phi) {
+  const double theta = phi.norm();
+  const Eigen::Matrix3d W = skew(phi);
+  if (theta < 1e-5) {
+    return Eigen::Matrix3d::Identity() + 0.5 * W + (1.0 / 12.0) * W * W;
+  }
+  const double theta2 = theta * theta;
+  return Eigen::Matrix3d::Identity() + 0.5 * W +
+         (1.0 / theta2 -
+          (1.0 + std::cos(theta)) / (2.0 * theta * std::sin(theta))) *
+             W * W;
+}
+
 } // namespace imu_detail
 
 /// The 15-dimensional preintegration residual between two states:

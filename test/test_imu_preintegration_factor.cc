@@ -3,6 +3,9 @@
 #include "mslam/slam/SE3Manifold.hh"
 #include "mslam/slam/registration/ImuPreintegrationFactor.hh"
 
+#include "moptim/AnalyticalCost.hh"
+#include "moptim/NumericalCostCentral.hh"
+
 #include <gtest/gtest.h>
 
 namespace {
@@ -196,3 +199,41 @@ TEST(ImuPreintegrationFactor, ManifoldStepPerturbsTheRightBlocks) {
 }
 
 } // namespace
+
+// The analytical jacobian against central differences of the residual through
+// the product manifold (what the registration used before): the linear
+// systems agree to the finite-difference noise, at the fixture state and at a
+// state far from it (large rotation error, biases away from the linearization).
+TEST(ImuPreintegrationFactor, AnalyticalJacobianMatchesCentralDifferences) {
+  Fixture f;
+  const auto manifold = Factor::makeManifold();
+  const Eigen::Matrix<double, Factor::kResidualDim, 1> zeros =
+      Eigen::Matrix<double, Factor::kResidualDim, 1>::Zero();
+  Eigen::Matrix<double, Factor::kAmbientDim, 1> far = f.x;
+  {
+    Eigen::Matrix<double, Factor::kTangentDim, 1> delta;
+    delta << 0.2, -0.1, 0.3, 0.3, -0.2, 0.25, 0.3, -0.2, 0.1, 2e-3, -3e-3,
+        1e-3, 0.05, -0.04, 0.03, -0.2, 0.1, 0.3, 4e-3, 2e-3, -3e-3, 0.02,
+        -0.03, 0.04;
+    manifold->plus(f.x.data(), delta.data(), far.data());
+  }
+  for (const auto *x : {&f.x, &far}) {
+    moptim::AnalyticalCost<Factor, double> analytical(
+        f.input.data(), zeros.data(), 1, Factor::kInputDim,
+        Factor::kResidualDim, manifold, Factor(f.preintegrator, kWeight));
+    moptim::NumericalCostCentral<Factor, double> numerical(
+        f.input.data(), zeros.data(), 1, Factor::kInputDim,
+        Factor::kResidualDim, manifold, Factor(f.preintegrator, kWeight));
+    Eigen::Matrix<double, Factor::kTangentDim, Factor::kTangentDim> JTJ_a,
+        JTJ_n;
+    Eigen::Matrix<double, Factor::kTangentDim, 1> JTb_a, JTb_n;
+    double cost_a = 0.0, cost_n = 0.0;
+    analytical.computeLinearSystem(x->data(), JTJ_a.data(), JTb_a.data(),
+                                   cost_a);
+    numerical.computeLinearSystem(x->data(), JTJ_n.data(), JTb_n.data(),
+                                  cost_n);
+    EXPECT_EQ(cost_a, cost_n);
+    EXPECT_LT((JTJ_a - JTJ_n).norm(), 1e-6 * JTJ_n.norm());
+    EXPECT_LT((JTb_a - JTb_n).norm(), 1e-6 * JTb_n.norm() + 1e-12);
+  }
+}

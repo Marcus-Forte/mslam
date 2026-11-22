@@ -104,6 +104,10 @@ public:
   void publishPose();
 
   const StageTimings &timings() const { return timings_; }
+  /// The preprocessing time by part (deskew, filter).
+  const Preprocessor::Timings &preprocessTimings() const {
+    return preprocessor_.timings();
+  }
   const ImuSyncStats &syncStats() const { return sync_.stats(); }
 
 private:

@@ -452,6 +452,9 @@ int main(int argc, char **argv) {
     const auto split = slam.registrationTimings();
     const auto split_other = timings.update - split.search - split.normals -
                              split.assembly - split.solve;
+    std::printf("  preprocess split: deskew=%.1f filter=%.1f ms\n",
+                toMs(pipeline.preprocessTimings().deskew),
+                toMs(pipeline.preprocessTimings().filter));
     std::printf("  register split: search=%.1f normals=%.1f assembly=%.1f "
                 "solve=%.1f other=%.1f ms | moptim_launches=%llu "
                 "device_search_launches=%llu normals computed=%zu cached=%zu\n",

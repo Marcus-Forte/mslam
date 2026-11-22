@@ -19,12 +19,18 @@ std::atomic<std::uint64_t> g_launches{0};
 
 class CorrespondenceKernel;
 
+/// Points per claim: small enough to balance the work-groups (the cost of a
+/// point varies with the normal-cache misses), large enough that claiming (an
+/// atomic increment) is negligible.
+constexpr std::size_t kChunk = 32;
+
 struct KernelArgs {
   device::MapView map;
   DeviceNormalCache cache;
   const device::PointXYZI *source;
   std::size_t count;
-  std::size_t chunk;
+  std::size_t chunks;
+  std::size_t *next_chunk;
   float gate_squared;
   std::uint32_t num_neighbors;
   DeviceCorrespondence *results;
@@ -97,6 +103,9 @@ DeviceCorrespondenceSearch::~DeviceCorrespondenceSearch() {
     if (source_copy_ != nullptr) {
       sycl::free(source_copy_, queue);
     }
+    if (next_chunk_ != nullptr) {
+      sycl::free(next_chunk_, queue);
+    }
   }
 }
 
@@ -111,10 +120,17 @@ void DeviceCorrespondenceSearch::reserve(const SyclVoxelHashMap &map,
     if (source_copy_ != nullptr) {
       sycl::free(source_copy_, old_queue);
     }
+    if (next_chunk_ != nullptr) {
+      sycl::free(next_chunk_, old_queue);
+      next_chunk_ = nullptr;
+    }
   }
   sycl::queue &queue = map.context()->queue();
   const std::size_t capacity = std::max<std::size_t>(points, 2 * capacity_);
   results_ = sycl::malloc_shared<DeviceCorrespondence>(capacity, queue);
+  if (next_chunk_ == nullptr) {
+    next_chunk_ = sycl::malloc_shared<std::size_t>(1, queue);
+  }
   source_copy_ = map.context()->hostAccessible()
                      ? nullptr
                      : sycl::malloc_shared<Point>(capacity, queue);
@@ -142,13 +158,15 @@ DeviceCorrespondenceSearch::run(const SyclVoxelHashMap &map,
     points = source_copy_;
   }
 
-  width = std::clamp<std::size_t>(width, 1, count);
   KernelArgs args;
+  args.chunks = (count + kChunk - 1) / kChunk;
+  width = std::clamp<std::size_t>(width, 1, args.chunks);
+  *next_chunk_ = 0;
+  args.next_chunk = next_chunk_;
   args.map = map.view();
   args.cache = map.normalCache();
   args.source = reinterpret_cast<const device::PointXYZI *>(points);
   args.count = count;
-  args.chunk = (count + width - 1) / width;
   args.gate_squared = max_correspondence_distance * max_correspondence_distance;
   args.num_neighbors = static_cast<std::uint32_t>(num_neighbors_);
   args.results = results_;
@@ -158,11 +176,19 @@ DeviceCorrespondenceSearch::run(const SyclVoxelHashMap &map,
       ->queue()
       .parallel_for<CorrespondenceKernel>(
           sycl::nd_range<1>{width, 1},
-          [args](sycl::nd_item<1> item) {
-            const std::size_t begin = item.get_group_linear_id() * args.chunk;
-            const std::size_t end = std::min(args.count, begin + args.chunk);
-            for (std::size_t i = begin; i < end; ++i) {
-              processPoint(args, i);
+          [args](sycl::nd_item<1>) {
+            // Each point writes only its own result, so the results do not
+            // depend on which work-group claimed it.
+            sycl::atomic_ref<std::size_t, sycl::memory_order::relaxed,
+                             sycl::memory_scope::device>
+                next(*args.next_chunk);
+            for (std::size_t chunk = next.fetch_add(1); chunk < args.chunks;
+                 chunk = next.fetch_add(1)) {
+              const std::size_t end =
+                  std::min(args.count, (chunk + 1) * kChunk);
+              for (std::size_t i = chunk * kChunk; i < end; ++i) {
+                processPoint(args, i);
+              }
             }
           })
       .wait_and_throw();

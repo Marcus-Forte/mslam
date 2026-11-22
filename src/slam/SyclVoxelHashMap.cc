@@ -77,9 +77,7 @@ PointCloud SyclVoxelHashMap::addScan(const PointCloud &scan) {
             });
   changed_.erase(std::unique(changed_.begin(), changed_.end(), sameKey),
                  changed_.end());
-  for (const device::VoxelKey &key : changed_) {
-    invalidateAround(key);
-  }
+  invalidateAround(changed_);
   return added;
 }
 
@@ -221,22 +219,40 @@ void SyclVoxelHashMap::growPool(std::size_t slots) {
   pool_capacity_ = capacity;
 }
 
-void SyclVoxelHashMap::invalidateAround(const device::VoxelKey &key) {
+void SyclVoxelHashMap::invalidateAround(
+    const std::vector<device::VoxelKey> &changed) {
   // The normal of a point in voxel u reads the voxels within the search radius
-  // of u, so a change in `key` invalidates the points of every voxel within
-  // that radius of it.
+  // of u, so a change in a voxel invalidates the points of every voxel within
+  // that radius of it. The table is far larger than the caches and the
+  // neighbourhoods are random accesses into it, so all their home slots are
+  // computed and prefetched first, then probed: the misses overlap.
   const device::MapView map = view();
-  for (std::uint32_t s = 0; s < map.num_shifts; ++s) {
-    const device::VoxelKey &shift = map.shifts[s];
-    const std::int64_t slot =
-        device::findSlot(map, key.x - shift.x, key.y - shift.y, key.z - shift.z);
-    if (slot < 0) {
-      continue;
+  probes_.clear();
+  for (const device::VoxelKey &key : changed) {
+    for (std::uint32_t s = 0; s < map.num_shifts; ++s) {
+      const device::VoxelKey &shift = map.shifts[s];
+      const device::VoxelKey neighbour{key.x - shift.x, key.y - shift.y,
+                                       key.z - shift.z};
+      const std::uint32_t home =
+          static_cast<std::uint32_t>(
+              device::hashVoxel(neighbour.x, neighbour.y, neighbour.z)) &
+          map.mask;
+      __builtin_prefetch(keys_ + home);
+      probes_.push_back({neighbour, home});
     }
-    const device::Bucket bucket = buckets_[slot];
-    std::fill(normal_state_ + bucket.offset,
-              normal_state_ + bucket.offset + bucket.count,
-              DeviceNormalCache::kUnknown);
+  }
+  for (const Probe &probe : probes_) {
+    std::uint32_t slot = probe.home;
+    while (keys_[slot].x != device::kEmptyKey) {
+      if (sameKey(keys_[slot], probe.key)) {
+        const device::Bucket bucket = buckets_[slot];
+        std::fill(normal_state_ + bucket.offset,
+                  normal_state_ + bucket.offset + bucket.count,
+                  DeviceNormalCache::kUnknown);
+        break;
+      }
+      slot = (slot + 1) & map.mask;
+    }
   }
 }
 

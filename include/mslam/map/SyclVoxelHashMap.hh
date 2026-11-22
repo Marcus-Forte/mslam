@@ -88,7 +88,7 @@ private:
   std::uint32_t findOrInsertSlot(const device::VoxelKey &key);
   void growTable(std::uint32_t capacity);
   void growPool(std::size_t slots);
-  void invalidateAround(const device::VoxelKey &key);
+  void invalidateAround(const std::vector<device::VoxelKey> &changed);
   void rebuild();
   void updateShifts() const;
 
@@ -113,6 +113,11 @@ private:
   mutable std::uint32_t num_shifts_ = 0;
 
   std::vector<device::VoxelKey> changed_; ///< Scratch of addScan().
+  struct Probe {
+    device::VoxelKey key;
+    std::uint32_t home;
+  };
+  std::vector<Probe> probes_; ///< Scratch of invalidateAround().
 };
 
 } // namespace mslam

@@ -1,5 +1,8 @@
 #include "mslam/slam/SlamPipeline.hh"
 
+#include <algorithm>
+#include <thread>
+
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Transform.hh"
 
@@ -36,6 +39,13 @@ SlamPipeline::SlamPipeline(Slam &slam, const SlamConfiguration &config,
     : slam_(slam), config_(config), logger_(std::move(logger)), output_(output),
       map_(slam.map()), preprocessor_(config.preprocessor, logger_),
       sync_(config.with_imu, config.preprocessor.points_per_second, logger_) {
+  {
+    // The preprocessing kernel runs on as many work-groups as the
+    // registrations' searches (slam.num_threads, 0 = every hardware thread).
+    const unsigned threads = config_.parameters.num_threads;
+    preprocessor_.setDeviceWidth(
+        threads != 0 ? threads : std::max(1U, std::thread::hardware_concurrency()));
+  }
   if (config_.map_parameters.dense_map) {
     dense_map_ = std::make_unique<VoxelHashMap>(kDenseMapVoxelSize,
                                                 kDenseMapVoxelBucketSize);

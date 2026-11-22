@@ -72,6 +72,25 @@ std::shared_ptr<Scan> deskew(const Scan &scan,
                              double delta_t,
                              std::shared_ptr<spdlog::logger> logger = nullptr);
 
+/// The IMU intervals of a scan, for a deskew that starts anywhere in the scan
+/// (the preprocessing kernel's blocks). Interval j starts at boundary_ns[j]
+/// (the scan start, then the times of the IMU samples inside the scan window,
+/// as deskewInto() selects and sorts them), the sensor turns at omega[j] during
+/// it, and orientation[j] is the sensor orientation at its start relative to
+/// the scan end, R_end^T R(t), built from the scan start by deskewInto()'s
+/// zero-order hold. Returns false when no IMU sample is inside the window
+/// (deskewInto() then leaves the scan undistorted).
+struct DeskewIntervals {
+  double start_ns = 0.0;
+  double step_ns = 0.0; ///< Time between two points.
+  std::vector<double> boundary_ns;
+  std::vector<Eigen::Vector3d> omega;
+  std::vector<Eigen::Matrix3d> orientation;
+};
+bool deskewIntervals(const Scan &scan,
+                     const std::vector<msensor::IMUData> &imu_samples,
+                     double delta_t, DeskewIntervals &out);
+
 /**
  * @brief IMU deskew into a caller-owned buffer (same algorithm as the
  *        overload above, without allocating a scan).

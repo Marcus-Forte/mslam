@@ -5,6 +5,7 @@ registration/ImuRegistration.cc
 registration/IcpWorkspace.cc
 registration/DeviceCorrespondenceSearch.cc
 SyclVoxelHashMap.cc
+DevicePreprocessor.cc
 CorrespondenceFinder.cc
 CorrespondenceFinderLogger.cc
 NormalEstimator.cc

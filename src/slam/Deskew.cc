@@ -1,4 +1,5 @@
 #include "mslam/slam/Deskew.hh"
+#include "mslam/slam/DeskewMath.hh"
 #include "mslam/slam/SE3.hh"
 
 #include <Eigen/Geometry>
@@ -22,51 +23,8 @@ Eigen::Vector3d angularVelocityOf(const msensor::IMUData &sample) {
   return {sample.gx, sample.gy, sample.gz};
 }
 
-/// Body-frame rotation accumulated while turning at @p omega for @p dt seconds.
-Eigen::Matrix3d rotationIncrement(const Eigen::Vector3d &omega, double dt) {
-  const double angle = omega.norm() * dt;
-  if (!(angle > 0.0) || !std::isfinite(angle)) {
-    return Eigen::Matrix3d::Identity();
-  }
-  return Eigen::AngleAxisd(angle, omega.normalized()).toRotationMatrix();
-}
-
-/// Memoizes rotationIncrement() for the current angular velocity. Between two
-/// IMU samples every point advances by the same time step (up to the
-/// quantization of nanosecond timestamps in a double, so only a few distinct
-/// steps occur), which makes the per-point axis-angle conversion redundant.
-/// Returns exactly what rotationIncrement() would, bit for bit.
-class RotationIncrementMemo {
-public:
-  const Eigen::Matrix3d &get(const Eigen::Vector3d &omega, double dt) {
-    for (std::size_t i = 0; i < count_; ++i) {
-      if (entries_[i].dt == dt) {
-        return entries_[i].rotation;
-      }
-    }
-    Entry &entry = entries_[next_];
-    entry.dt = dt;
-    entry.rotation = rotationIncrement(omega, dt);
-    next_ = (next_ + 1) % entries_.size();
-    count_ = std::min(count_ + 1, entries_.size());
-    return entry.rotation;
-  }
-
-  /// The angular velocity changed: forget everything.
-  void reset() {
-    count_ = 0;
-    next_ = 0;
-  }
-
-private:
-  struct Entry {
-    double dt = 0.0;
-    Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();
-  };
-  std::array<Entry, 4> entries_;
-  std::size_t count_ = 0;
-  std::size_t next_ = 0;
-};
+using deskew_detail::rotationIncrement;
+using deskew_detail::RotationIncrementMemo;
 
 } // namespace
 
@@ -263,6 +221,76 @@ bool deskewInto(const Scan &scan,
   }
 
   log_summary();
+  return true;
+}
+
+bool deskewIntervals(const Scan &scan,
+                     const std::vector<msensor::IMUData> &imu_samples,
+                     double delta_t, DeskewIntervals &out) {
+  if (!std::isfinite(delta_t) || delta_t <= 0.0) {
+    throw std::invalid_argument("deskew: delta_t must be finite and positive");
+  }
+  out.boundary_ns.clear();
+  out.omega.clear();
+  out.orientation.clear();
+  const std::size_t num_points = scan.points.size();
+  out.start_ns = static_cast<double>(scan.header.timestamp);
+  out.step_ns = delta_t * kNanosecondsPerSecond;
+  if (num_points == 0) {
+    return false;
+  }
+  const double start_time_ns = out.start_ns;
+  const double end_time_ns =
+      start_time_ns + static_cast<double>(num_points - 1) * out.step_ns;
+
+  // deskewInto()'s sample selection.
+  std::vector<msensor::IMUData> samples;
+  samples.reserve(imu_samples.size());
+  for (const auto &sample : imu_samples) {
+    const double sample_time_ns = static_cast<double>(sample.header.timestamp);
+    if (sample_time_ns + kTimestampToleranceNs >= start_time_ns &&
+        sample_time_ns - kTimestampToleranceNs <= end_time_ns) {
+      samples.push_back(sample);
+    }
+  }
+  std::sort(samples.begin(), samples.end(),
+            [](const msensor::IMUData &lhs, const msensor::IMUData &rhs) {
+              return lhs.header.timestamp < rhs.header.timestamp;
+            });
+  if (samples.empty()) {
+    return false;
+  }
+
+  // deskewInto()'s total rotation over the scan.
+  Eigen::Matrix3d total_rotation = Eigen::Matrix3d::Identity();
+  {
+    double time_ns = start_time_ns;
+    Eigen::Vector3d omega = angularVelocityOf(samples.front());
+    for (std::size_t k = 1; k < samples.size(); ++k) {
+      const double boundary_ns =
+          static_cast<double>(samples[k].header.timestamp);
+      total_rotation *= rotationIncrement(omega, (boundary_ns - time_ns) /
+                                                     kNanosecondsPerSecond);
+      time_ns = boundary_ns;
+      omega = angularVelocityOf(samples[k]);
+    }
+    total_rotation *= rotationIncrement(omega, (end_time_ns - time_ns) /
+                                                   kNanosecondsPerSecond);
+  }
+
+  out.boundary_ns.push_back(start_time_ns);
+  out.omega.push_back(angularVelocityOf(samples.front()));
+  out.orientation.push_back(total_rotation.transpose());
+  for (std::size_t k = 1; k < samples.size(); ++k) {
+    const double boundary_ns = static_cast<double>(samples[k].header.timestamp);
+    out.orientation.push_back(
+        out.orientation.back() *
+        rotationIncrement(out.omega.back(),
+                          (boundary_ns - out.boundary_ns.back()) /
+                              kNanosecondsPerSecond));
+    out.boundary_ns.push_back(boundary_ns);
+    out.omega.push_back(angularVelocityOf(samples[k]));
+  }
   return true;
 }
 

@@ -1,5 +1,9 @@
 #include "mslam/slam/Preprocessor.hh"
 #include "mslam/slam/Deskew.hh"
+#include "mslam/slam/DevicePreprocessor.hh"
+
+#include <cstdlib>
+#include <cstring>
 
 #include <Eigen/Geometry>
 #include <cmath>
@@ -133,7 +137,22 @@ std::shared_ptr<Scan> filterByIntensity(const Scan &input,
 
 Preprocessor::Preprocessor(const PreProcessor &config,
                            std::shared_ptr<spdlog::logger> logger)
-    : config_(config), logger_(std::move(logger)) {}
+    : config_(config), logger_(std::move(logger)) {
+  const char *host = std::getenv("MSLAM_HOST_PREPROCESS");
+  if (config_.downsample_filter == DownsampleFilter::VoxelHash &&
+      !(host != nullptr && std::strcmp(host, "1") == 0)) {
+    device_ = std::make_unique<DevicePreprocessor>();
+  }
+}
+
+Preprocessor::~Preprocessor() = default;
+Preprocessor::Preprocessor(Preprocessor &&) noexcept = default;
+
+void Preprocessor::setDeviceWidth(std::size_t width) {
+  if (device_) {
+    device_->setWidth(width);
+  }
+}
 
 std::shared_ptr<Scan> Preprocessor::filterNearCenter(const Scan &scan) const {
   return removePointsNearCenter(scan, config_.min_distance_to_center);
@@ -143,6 +162,31 @@ void Preprocessor::process(const Scan &scan,
                            const std::vector<msensor::IMUData> &imu_samples,
                            Scan &out) {
   const auto deskew_start = std::chrono::steady_clock::now();
+  if (device_) {
+    const bool deskew = config_.deskew && config_.points_per_second > 0;
+    const double delta_t =
+        deskew ? 1.0 / static_cast<double>(config_.points_per_second) : 0.0;
+    out.header = scan.header;
+    const bool filtered = device_->process(
+        scan, imu_samples, delta_t, config_.min_distance_to_center,
+        config_.voxel_size, config_.min_intensity, out.points);
+    if (deskew && !device_->lastScanDeskewed()) {
+      logger_->warn("Deskew: no IMU samples inside the lidar range, leaving "
+                    "the scan undistorted");
+    }
+    const auto filter_start = std::chrono::steady_clock::now();
+    timings_.deskew += filter_start - deskew_start;
+    if (!filtered) {
+      // Voxel coordinates beyond the device table: filter on the host.
+      deskewed_.assign(device_->deskewed(),
+                       device_->deskewed() + scan.points.size());
+      voxel_filter_.apply(deskewed_, config_.min_distance_to_center,
+                          config_.voxel_size, config_.downsample_filter,
+                          config_.min_intensity, out.points);
+      timings_.filter += std::chrono::steady_clock::now() - filter_start;
+    }
+    return;
+  }
   const PointCloud *source = &scan.points;
   if (config_.deskew && config_.points_per_second > 0) {
     const double delta_t = 1.0 / static_cast<double>(config_.points_per_second);

@@ -1,5 +1,6 @@
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
 #include "moptim/AnalyticalCost.hh"
+#include "moptim/DeviceLevenbergMarquardt.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
@@ -22,11 +23,12 @@ struct PointToPlaneRegistration::Solver {
             icp.planeInputs().front().data(), icp.planeOffsets().data(),
             icp.planeOffsets().size(), 6, 1, manifold,
             Point3PlaneDistance(pose_before), /*active_param_dim=*/6)),
-        lm(manifold) {
+        lm(manifold), device_lm(plane) {
     lm.addCost(plane);
   }
   std::shared_ptr<PlaneCost> plane;
-  moptim::LevenbergMarquardt<double> lm;
+  moptim::LevenbergMarquardt<double> lm; ///< Debug telemetry, comparisons.
+  moptim::DeviceLevenbergMarquardt<double, SE3Plus, PlaneCost> device_lm;
 };
 
 PointToPlaneRegistration::~PointToPlaneRegistration() = default;
@@ -74,10 +76,15 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
                               icp_.planeOffsets().size());
       solver_->plane->setModel(Point3PlaneDistance(pose_before));
     }
-    auto &lm = solver_->lm;
-    lm.setMaxIterations(parameters.optimizer_iterations);
-    icp_.attachObserver(lm);
-    lm.optimize(pose.data());
+    if (icp_.useDeviceOptimizer()) {
+      solver_->device_lm.setMaxIterations(parameters.optimizer_iterations);
+      solver_->device_lm.optimize(pose.data());
+    } else {
+      auto &lm = solver_->lm;
+      lm.setMaxIterations(parameters.optimizer_iterations);
+      icp_.attachObserver(lm);
+      lm.optimize(pose.data());
+    }
     icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 
     total_T = poseFromStorage(pose.data());

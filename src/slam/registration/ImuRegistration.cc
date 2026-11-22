@@ -1,6 +1,7 @@
 #include "mslam/slam/registration/ImuRegistration.hh"
 
 #include "moptim/AnalyticalCost.hh"
+#include "moptim/DeviceLevenbergMarquardt.hh"
 #include "moptim/FusedCost.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostCentral.hh"
@@ -21,8 +22,9 @@ using Fused = moptim::FusedCost<double, PlaneCost, ImuCost>;
 
 } // namespace
 
-/// One optimizer with one cost: the point-to-plane cost and the IMU factor fused,
-/// so that each evaluation of the problem is one SYCL launch. Built on the first
+/// The costs and two optimizers over them: the device optimizer (the whole
+/// solve in one SYCL launch) and the host one with the costs fused (one launch
+/// per evaluation), for debug telemetry and comparisons. Built on the first
 /// round and then only refreshed: the point-to-plane cost gets each round's
 /// constraints and pose (setData/setModel), the IMU factor each scan's
 /// preintegration and previous state. Results are those of costs built afresh
@@ -39,7 +41,7 @@ struct ImuRegistration::Solver {
         imu(std::make_shared<ImuCost>(previous_state.data(), zeros.data(), 1,
                                       Factor::kInputDim, Factor::kResidualDim,
                                       manifold, std::move(factor))),
-        lm(manifold) {
+        lm(manifold), device_lm(plane, imu) {
     lm.addCost(std::make_shared<Fused>(plane, imu));
   }
 
@@ -53,6 +55,8 @@ struct ImuRegistration::Solver {
   std::shared_ptr<PlaneCost> plane;
   std::shared_ptr<ImuCost> imu;
   moptim::LevenbergMarquardt<double> lm;
+  moptim::DeviceLevenbergMarquardt<double, ImuStatePlus, PlaneCost, ImuCost>
+      device_lm;
 };
 
 ImuRegistration::~ImuRegistration() = default;
@@ -143,11 +147,15 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
                             solver_->zeros.data(), 1);
       factor_is_current = true;
     }
-    auto &lm = solver_->lm;
-    lm.setMaxIterations(parameters.optimizer_iterations);
-    icp_.attachObserver(lm);
-
-    lm.optimize(state.data());
+    if (icp_.useDeviceOptimizer()) {
+      solver_->device_lm.setMaxIterations(parameters.optimizer_iterations);
+      solver_->device_lm.optimize(state.data());
+    } else {
+      auto &lm = solver_->lm;
+      lm.setMaxIterations(parameters.optimizer_iterations);
+      icp_.attachObserver(lm);
+      lm.optimize(state.data());
+    }
     icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 
     total_T = poseFromStorage(state.data());

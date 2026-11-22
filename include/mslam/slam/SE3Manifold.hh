@@ -9,6 +9,17 @@
 
 namespace mslam {
 
+/// plus(T, delta) = se3Exp(delta) * T on the 12-double storage: the one
+/// implementation of SE3Manifold::plus and SE3Plus::plus (inline, device-safe).
+inline void se3Plus(const double *x, const double *delta, double *x_plus) {
+  const Eigen::Affine3d step =
+      se3Exp(Eigen::Map<const Eigen::Matrix<double, 6, 1>>(delta));
+  const Eigen::Map<const Eigen::Matrix<double, 3, 4>> pose(x);
+  Eigen::Map<Eigen::Matrix<double, 3, 4>> result(x_plus);
+  result.leftCols<3>() = step.linear() * pose.leftCols<3>();
+  result.col(3) = step.linear() * pose.col(3) + step.translation();
+}
+
 /**
  * @brief The pose manifold SE(3) for the optimizer.
  *
@@ -36,12 +47,17 @@ public:
 
   void plus(const double *x, const double *delta,
             double *x_plus) const override {
-    const Eigen::Affine3d step =
-        se3Exp(Eigen::Map<const Eigen::Matrix<double, 6, 1>>(delta));
-    const Eigen::Map<const Eigen::Matrix<double, 3, 4>> pose(x);
-    Eigen::Map<Eigen::Matrix<double, 3, 4>> result(x_plus);
-    result.leftCols<3>() = step.linear() * pose.leftCols<3>();
-    result.col(3) = step.linear() * pose.col(3) + step.translation();
+    se3Plus(x, delta, x_plus);
+  }
+};
+
+/// SE3Manifold for moptim::DeviceLevenbergMarquardt (a compile-time manifold
+/// whose plus runs in the kernel).
+struct SE3Plus {
+  static constexpr std::size_t kAmbientDim = 12;
+  static constexpr std::size_t kTangentDim = 6;
+  static void plus(const double *x, const double *delta, double *x_plus) {
+    se3Plus(x, delta, x_plus);
   }
 };
 

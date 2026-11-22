@@ -145,6 +145,12 @@ public:
   /// the clock nor builds event payloads.
   void attachObserver(moptim::LevenbergMarquardt<double> &optimizer);
 
+  /// Whether the registrations run their solves with
+  /// moptim::DeviceLevenbergMarquardt (the whole optimize() in one launch).
+  /// False when debug logging wants the optimizer's telemetry (the device
+  /// optimizer has no observer) or MSLAM_HOST_LM=1 (comparisons).
+  bool useDeviceOptimizer() const;
+
   /// Time spent so far (findPlaneConstraints() fills search, normals and
   /// assembly; the registrations add their solve time).
   RegistrationTimings &timings() { return timings_; }

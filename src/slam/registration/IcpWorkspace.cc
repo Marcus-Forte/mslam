@@ -167,6 +167,14 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   return plane_offsets_.size();
 }
 
+bool IcpWorkspace::useDeviceOptimizer() const {
+  static const bool host_lm = [] {
+    const char *value = std::getenv("MSLAM_HOST_LM");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+  }();
+  return !host_lm && !logger_->should_log(spdlog::level::debug);
+}
+
 void IcpWorkspace::attachObserver(
     moptim::LevenbergMarquardt<double> &optimizer) {
   optimizer.setSpeculativeLinearSystems(speculativeLinearSystems());

@@ -44,6 +44,21 @@ struct ImuPriorSigma {
  * in for the history before state_i, which is not modelled.
  * Observation: unused (zeros, kResidualDim entries).
  */
+class ImuPreintegrationFactor;
+
+/// makeManifold() for moptim::DeviceLevenbergMarquardt: SE(3) then 18
+/// Euclidean entries, as ProductManifold steps them.
+struct ImuStatePlus {
+  static constexpr std::size_t kAmbientDim = 12 + 18;
+  static constexpr std::size_t kTangentDim = 6 + 18;
+  static void plus(const double *x, const double *delta, double *x_plus) {
+    se3Plus(x, delta, x_plus);
+    for (std::size_t i = 0; i < 18; ++i) {
+      x_plus[12 + i] = x[12 + i] + delta[6 + i];
+    }
+  }
+};
+
 class ImuPreintegrationFactor {
 public:
   static constexpr int kPoseStorageDim = SE3Manifold::kAmbientDim; // 12

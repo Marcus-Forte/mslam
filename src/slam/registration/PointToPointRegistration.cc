@@ -56,7 +56,8 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
                moptim::NumericalCostForwardEuler<Point3Distance, double>>(
         inputs_buffer_[0].data(), map_points_buffer_[0].data(),
         map_points_buffer_.size(), 3, 3, manifold_, Point3Distance(total_T)));
-    const auto result = lm.optimize(pose.data());
+    const Eigen::Affine3d pose_before = total_T;
+    lm.optimize(pose.data());
 
     total_T = poseFromStorage(pose.data());
     icp_.resetSource(total_T);
@@ -64,7 +65,7 @@ SlamState PointToPointRegistration::Align(const SlamState &state,
     icp_.logger().debug("Registration Iteration: {}/{}", i + 1,
                         parameters.registration_iterations);
 
-    if (result.status == moptim::Status::SMALL_DELTA) {
+    if (isNegligibleRoundStep(pose_before, total_T)) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {
         break;
       }

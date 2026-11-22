@@ -54,6 +54,7 @@
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/Transform.hh"
+#include "moptim/ExecutionContext.hh"
 
 #include <spdlog/spdlog.h>
 
@@ -238,6 +239,14 @@ int usage(const char *program) {
 } // namespace
 
 int main(int argc, char **argv) {
+  // Benchmark-only knob: MOPTIM_THREADS=<n> replaces moptim's default execution
+  // context by one with that many threads (0 = all compute units), before
+  // anything is built. Unset keeps moptim's default context untouched.
+  if (const char *env = std::getenv("MOPTIM_THREADS")) {
+    auto context = std::make_shared<moptim::ExecutionContext>();
+    context->setThreads(static_cast<std::size_t>(std::strtoul(env, nullptr, 10)));
+    moptim::setDefaultContext(std::move(context));
+  }
   std::vector<const char *> positional;
   std::string save_map_path;
   bool save_map = false;
@@ -361,6 +370,8 @@ int main(int argc, char **argv) {
   logger->set_level(log_level.value_or(spdlog::level::off));
 
   for (int run = 0; run < repeats; ++run) {
+    // Benchmark-only: launches of moptim's default context during this run.
+    const std::uint64_t launches_before = moptim::defaultContext()->launches();
     auto map = mslam::makeVoxelHashMap(config.map_parameters);
     mslam::Slam slam(logger, config, map);
     mslam::NullSlamOutput null_output;
@@ -432,6 +443,18 @@ int main(int argc, char **argv) {
                 "stale_dropped=%zu overflow_dropped=%zu\n",
                 sync.scans, sync.scans_uncovered, sync.splits,
                 sync.stale_dropped, sync.overflow_dropped);
+    // The register stage split by registration part; other = what Update()
+    // spends outside them (IMU-factor setup, state bookkeeping). Launches are
+    // those of moptim's default execution context during this run.
+    const auto split = slam.registrationTimings();
+    const auto split_other = timings.update - split.search - split.normals -
+                             split.assembly - split.solve;
+    std::printf("  register split: search=%.1f normals=%.1f assembly=%.1f "
+                "solve=%.1f other=%.1f ms | moptim_launches=%llu\n",
+                toMs(split.search), toMs(split.normals), toMs(split.assembly),
+                toMs(split.solve), toMs(split_other),
+                static_cast<unsigned long long>(
+                    moptim::defaultContext()->launches() - launches_before));
 
     if (const auto graph = pipeline.backendResult()) {
       printPoseGraph(*graph, pipeline, slam, timings,

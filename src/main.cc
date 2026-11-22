@@ -61,8 +61,12 @@ public:
 
 // Set from the signal handler, polled by the SLAM loop.
 std::atomic<bool> g_stop_requested{false};
+// Host-only check: this TU is also compiled by the SYCL device pass (it links
+// moptim through `slam`), whose target does not report lock-free atomics.
+#ifndef __SYCL_DEVICE_ONLY__
 static_assert(std::atomic<bool>::is_always_lock_free,
               "the stop flag is written from a signal handler");
+#endif
 
 void onTerminationSignal(int /*signal_number*/) {
   g_stop_requested.store(true);

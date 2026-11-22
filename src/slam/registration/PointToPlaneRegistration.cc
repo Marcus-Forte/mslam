@@ -44,6 +44,7 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
       break;
     }
 
+    const auto solve_start = std::chrono::steady_clock::now();
     lm.clearCosts();
     // The source cloud is the scan moved by the pose of the start of the round.
     lm.addCost(
@@ -52,7 +53,8 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
             icp_.planeOffsets().size(), 6, 1, manifold_,
             Point3PlaneDistance(total_T), /*active_param_dim=*/6));
     const Eigen::Affine3d pose_before = total_T;
-    const auto result = lm.optimize(pose.data());
+    lm.optimize(pose.data());
+    icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 
     total_T = poseFromStorage(pose.data());
     if (i == 0) {
@@ -65,7 +67,7 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
     icp_.logger().debug("Registration Iteration: {}/{}", i + 1,
                         parameters.registration_iterations);
 
-    if (result.status == moptim::Status::SMALL_DELTA) {
+    if (isNegligibleRoundStep(pose_before, total_T)) {
       if (++small_delta_hits > k_maxSmallDeltaHits) {
         break;
       }

@@ -23,6 +23,26 @@
       }
     },
     {
+      "name": "sycl",
+      "displayName": "DPC++, native_cpu",
+      "description": "moptim with the DPC++ clang and the host CPU as the only SYCL target (native_cpu)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "installDir": "${sourceDir}/build/${presetName}/install",
+      "cacheVariables": {
+          "CMAKE_C_COMPILER": "/opt/sycl/bin/clang",
+          "CMAKE_CXX_COMPILER": "/opt/sycl/bin/clang++",
+          "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+          "CMAKE_BUILD_TYPE": "Release",
+          "SYCL_TARGETS": "native_cpu",
+          "MSLAM_INSTALL_REPLAY_SERVER": "ON",
+          "MSLAM_INSTALL_REMOTE_RECORDER": "ON",
+          "MSLAM_INTEGRATION_TESTS": "ON",
+          "MSLAM_WITH_TBB": "ON",
+          "FORMATTER": "OFF"
+      }
+    },
+    {
       "name": "pi5",
       "displayName": "Raspberry Pi 5 (Cortex-A76)",
       "generator": "Ninja",
@@ -39,6 +59,11 @@
     {
       "name": "build-gcc",
       "configurePreset": "gcc",
+      "verbose": false
+    },
+    {
+      "name": "build-sycl",
+      "configurePreset": "sycl",
       "verbose": false
     },
     {

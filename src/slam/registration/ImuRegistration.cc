@@ -81,6 +81,7 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
       break;
     }
 
+    const auto solve_start = std::chrono::steady_clock::now();
     lm.clearCosts();
 
     // Scan-matching cost (point-to-plane, only the pose's 6 tangent
@@ -102,7 +103,8 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
         Factor::kResidualDim, manifold_,
         ImuPreintegrationFactor(preintegrator, kImuWeight)));
 
-    const auto result = lm.optimize(state.data());
+    lm.optimize(state.data());
+    icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 
     total_T = poseFromStorage(state.data());
     if (i == 0) {
@@ -115,7 +117,7 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
     // re-transforming from the original scan.
     icp_.resetSource(total_T);
 
-    if (result.status == moptim::Status::SMALL_DELTA) {
+    if (isNegligibleRoundStep(pose_before, total_T)) {
       if (++small_delta_hits > k_maxSmallDeltaHits)
         break;
     }

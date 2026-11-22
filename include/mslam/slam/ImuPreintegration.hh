@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
+#include <cmath>
 #include <vector>
 
 namespace mslam {
@@ -54,6 +56,112 @@ struct ImuNoiseParams {
 };
 
 /**
+ * @brief The preintegrated measurement between two states: what the
+ * preintegration residual needs, as a plain value.
+ *
+ * It is copied into the IMU factor (a moptim model, i.e. SYCL device code), so
+ * it holds no pointer or reference to host data, and everything that reads it
+ * (preintegrationResidual() and the SO(3) helpers below) is inline and
+ * device-safe: no Eigen::AngleAxis from a matrix (stableNorm() cannot be
+ * compiled into a kernel), no out-of-line call.
+ */
+struct PreintegratedImu {
+  Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();  ///< Linearization point.
+  Eigen::Vector3d bias_accel = Eigen::Vector3d::Zero(); ///< Linearization point.
+  Eigen::Matrix3d delta_R = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d delta_v = Eigen::Vector3d::Zero();
+  Eigen::Vector3d delta_p = Eigen::Vector3d::Zero();
+  double dt = 0.0;
+  Eigen::Matrix3d J_R_bg = Eigen::Matrix3d::Zero();
+  Eigen::Matrix3d J_v_bg = Eigen::Matrix3d::Zero();
+  Eigen::Matrix3d J_v_ba = Eigen::Matrix3d::Zero();
+  Eigen::Matrix3d J_p_bg = Eigen::Matrix3d::Zero();
+  Eigen::Matrix3d J_p_ba = Eigen::Matrix3d::Zero();
+};
+
+namespace imu_detail {
+
+/// exp: so(3) -> SO(3).
+inline Eigen::Matrix3d expSO3(const Eigen::Vector3d &omega) {
+  const double theta = omega.norm();
+  if (theta < 1e-10) {
+    return Eigen::Matrix3d::Identity();
+  }
+  const Eigen::Vector3d axis = omega / theta;
+  return Eigen::AngleAxisd(theta, axis).toRotationMatrix();
+}
+
+/// log: SO(3) -> so(3). Eigen::AngleAxisd(R) with its quaternion -> angle-axis
+/// step written out: that step calls stableNorm() when the vector part is tiny,
+/// and stableNorm()/maxCoeff() cannot be compiled into a SYCL kernel (a function
+/// pointer is called in the packet min/max). Same arithmetic otherwise; for a
+/// vector part below machine epsilon the plain norm replaces stableNorm().
+inline Eigen::Vector3d logSO3(const Eigen::Matrix3d &R) {
+  const Eigen::Quaterniond q(R);
+  double n = q.vec().norm();
+  if (n == 0.0) {
+    return Eigen::Vector3d::Zero();
+  }
+  const double angle = 2.0 * std::atan2(n, std::abs(q.w()));
+  if (q.w() < 0.0) {
+    n = -n;
+  }
+  const Eigen::Vector3d axis = q.vec() / n;
+  return axis * angle;
+}
+
+} // namespace imu_detail
+
+/// The 15-dimensional preintegration residual between two states:
+/// [delta_R_error(3), delta_v_error(3), delta_p_error(3), bias_gyro_error(3),
+///  bias_accel_error(3)]. Device-safe (see PreintegratedImu).
+inline Eigen::Matrix<double, 15, 1>
+preintegrationResidual(const PreintegratedImu &pre, const ImuState &state_i,
+                       const ImuState &state_j) {
+  constexpr double kGravity = 9.80665;
+  const Eigen::Vector3d gravity(0.0, 0.0, -kGravity);
+
+  const Eigen::Matrix3d R_i = state_i.rotation;
+  const Eigen::Matrix3d R_j = state_j.rotation;
+  const double dt = pre.dt;
+
+  // First-order bias correction from linearization point
+  const Eigen::Vector3d dbg = state_i.gyro_bias - pre.bias_gyro;
+  const Eigen::Vector3d dba = state_i.accel_bias - pre.bias_accel;
+
+  const Eigen::Matrix3d corrected_delta_R =
+      pre.delta_R * imu_detail::expSO3(pre.J_R_bg * dbg);
+  const Eigen::Vector3d corrected_delta_v =
+      pre.delta_v + pre.J_v_bg * dbg + pre.J_v_ba * dba;
+  const Eigen::Vector3d corrected_delta_p =
+      pre.delta_p + pre.J_p_bg * dbg + pre.J_p_ba * dba;
+
+  Eigen::Matrix<double, 15, 1> r;
+
+  // Rotation residual: Log(delta_R_corrected^T * R_i^T * R_j)
+  r.segment<3>(0) = imu_detail::logSO3(corrected_delta_R.transpose() *
+                                       R_i.transpose() * R_j);
+
+  // Velocity residual: R_i^T * (v_j - v_i - g*dt) - corrected_delta_v
+  r.segment<3>(3) =
+      R_i.transpose() * (state_j.velocity - state_i.velocity - gravity * dt) -
+      corrected_delta_v;
+
+  // Position residual: R_i^T * (p_j - p_i - v_i*dt - 0.5*g*dt²) -
+  // corrected_delta_p
+  r.segment<3>(6) =
+      R_i.transpose() * (state_j.position - state_i.position -
+                         state_i.velocity * dt - 0.5 * gravity * dt * dt) -
+      corrected_delta_p;
+
+  // Bias residuals (penalize drift from previous biases)
+  r.segment<3>(9) = state_j.gyro_bias - state_i.gyro_bias;
+  r.segment<3>(12) = state_j.accel_bias - state_i.accel_bias;
+
+  return r;
+}
+
+/**
  * @brief IMU preintegration accumulator.
  *
  * Accumulates raw IMU measurements between two keyframes and produces
@@ -82,7 +190,26 @@ public:
   /// residual = [delta_R_error(3), delta_v_error(3), delta_p_error(3),
   ///             bias_gyro_error(3), bias_accel_error(3)]
   Eigen::Matrix<double, 15, 1> residual(const ImuState &state_i,
-                                        const ImuState &state_j) const;
+                                        const ImuState &state_j) const {
+    return preintegrationResidual(preintegrated(), state_i, state_j);
+  }
+
+  /// The preintegrated measurement as a value (what residual() reads).
+  PreintegratedImu preintegrated() const {
+    PreintegratedImu pre;
+    pre.bias_gyro = bias_gyro_;
+    pre.bias_accel = bias_accel_;
+    pre.delta_R = delta_R_;
+    pre.delta_v = delta_v_;
+    pre.delta_p = delta_p_;
+    pre.dt = dt_sum_;
+    pre.J_R_bg = J_R_bg_;
+    pre.J_v_bg = J_v_bg_;
+    pre.J_v_ba = J_v_ba_;
+    pre.J_p_bg = J_p_bg_;
+    pre.J_p_ba = J_p_ba_;
+    return pre;
+  }
 
   /// Preintegrated rotation delta (bias-corrected at linearization point).
   const Eigen::Matrix3d &deltaRotation() const { return delta_R_; }
@@ -120,8 +247,6 @@ public:
   const Eigen::Matrix3d &jacobianPositionBiasAccel() const { return J_p_ba_; }
 
 private:
-  static Eigen::Matrix3d expSO3(const Eigen::Vector3d &omega);
-  static Eigen::Vector3d logSO3(const Eigen::Matrix3d &R);
   static Eigen::Matrix3d rightJacobianSO3(const Eigen::Vector3d &omega);
 
   ImuNoiseParams noise_;

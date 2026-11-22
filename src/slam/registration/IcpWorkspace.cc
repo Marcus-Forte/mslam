@@ -1,8 +1,35 @@
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
+#include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
 
+#include <cstdlib>
+#include <cstring>
+
 namespace mslam {
+
+namespace {
+// Benchmark-only knob (not part of the library API): MOPTIM_SPECULATIVE=1 turns on
+// moptim's speculative linear systems for every optimizer the registrations create.
+// All of them call attachObserver() right after construction.
+bool speculativeLinearSystemsFromEnv() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("MOPTIM_SPECULATIVE");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+  }();
+  return enabled;
+}
+} // namespace
+
+bool isNegligibleRoundStep(const Eigen::Affine3d &before,
+                           const Eigen::Affine3d &after) {
+  constexpr double kMaxTranslation = 1e-6; // m
+  constexpr double kMaxRotation = 1e-6;    // rad
+  const Eigen::Matrix<double, 6, 1> step =
+      se3Log(Eigen::Affine3d(after * before.inverse()));
+  return step.head<3>().norm() < kMaxTranslation &&
+         step.tail<3>().norm() < kMaxRotation;
+}
 
 IcpWorkspace::IcpWorkspace(
     const IcpParameters &parameters, std::shared_ptr<spdlog::logger> logger,
@@ -34,7 +61,11 @@ void IcpWorkspace::findCorrespondences(const IMap &map) {
 }
 
 std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
+  using Clock = std::chrono::steady_clock;
+  const auto search_start = Clock::now();
   findCorrespondences(map);
+  const auto normals_start = Clock::now();
+  timings_.search += normals_start - search_start;
 
   plane_inputs_.clear();
   plane_offsets_.clear();
@@ -42,6 +73,8 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   plane_offsets_.reserve(correspondences_.size());
   normal_estimator_.estimateAll(correspondences_, normal_slots_,
                                 executor_.get());
+  const auto assembly_start = Clock::now();
+  timings_.normals += assembly_start - normals_start;
   // Assembled sequentially in correspondence order, as before the normals
   // could be estimated in parallel.
   for (std::size_t i = 0; i < correspondences_.size(); ++i) {
@@ -56,6 +89,7 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
                              normal->y() * map_point.y +
                              normal->z() * map_point.z);
   }
+  timings_.assembly += Clock::now() - assembly_start;
   logger_->debug("Normal estimation. {} / {} points", plane_offsets_.size(),
                  correspondences_.size());
   return plane_offsets_.size();
@@ -63,6 +97,9 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
 
 void IcpWorkspace::attachObserver(
     moptim::LevenbergMarquardt<double> &optimizer) {
+  if (speculativeLinearSystemsFromEnv()) {
+    optimizer.setSpeculativeLinearSystems(true);
+  }
   if (!logger_->should_log(spdlog::level::debug)) {
     optimizer.setObserver(nullptr);
     return;

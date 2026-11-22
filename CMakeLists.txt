@@ -24,8 +24,17 @@ include(cmake/code_format.cmake)
 # msensor tools (replay server, recorder): options here, targets below.
 include(cmake/msensor_tools.cmake)
 
+# moptim compiles fixed-size Eigen members into SYCL device code and copies them between the host and
+# the device pass, so it fixes EIGEN_MAX_STATIC_ALIGN_BYTES=16 on everything that links it. Every other
+# library here (maps, config, msensor, the I/O library) must agree on Eigen's layout, so the same value
+# is set globally, before the subdirectories, like MSLAM_CPU.
+add_compile_definitions(EIGEN_MAX_STATIC_ALIGN_BYTES=16)
+
 add_subdirectory(third_party/robin-map)
-add_subdirectory(third_party/moptim EXCLUDE_FROM_ALL)
+# moptim source tree: the submodule by default. Point it at a standalone moptim checkout (e.g. the
+# devcontainer's /moptim bind mount) to build mslam against a moptim working tree.
+set(MSLAM_MOPTIM_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/moptim" CACHE PATH "moptim source tree")
+add_subdirectory(${MSLAM_MOPTIM_SOURCE_DIR} ${CMAKE_BINARY_DIR}/third_party/moptim EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 
 # mslam uses only the namespaced msensor:: names. Dropping the legacy global
@@ -55,7 +64,7 @@ add_subdirectory(src/slam)
 
 add_executable(mslam
 src/main.cc)
-target_link_libraries(mslam maps slam mslam::config msensor::server mid360 config)
+target_link_libraries(mslam maps slam slam_io mslam::config msensor::server mid360 config)
 
 
 # playback_publisher and remote_recorder next to mslam (cmake/msensor_tools.cmake).
@@ -65,11 +74,11 @@ mslam_add_msensor_tools()
 # Point-to-plane registration of whole clouds (not installed).
 add_executable(register_scans
 src/register_scans.cc)
-target_link_libraries(register_scans maps slam mslam::config)
+target_link_libraries(register_scans maps slam slam_io mslam::config)
 
 add_executable(register_scans2d EXCLUDE_FROM_ALL
 src/register_scans2d.cc)
-target_link_libraries(register_scans2d maps slam mslam::config)
+target_link_libraries(register_scans2d maps slam slam_io mslam::config)
 
 install(
 	TARGETS mslam

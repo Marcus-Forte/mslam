@@ -76,7 +76,7 @@ public:
   ImuPreintegrationFactor(const ImuPreintegrator &preintegrator,
                           double weight = 1.0,
                           const ImuPriorSigma &sigma = ImuPriorSigma{})
-      : preintegrator_(preintegrator),
+      : preintegrated_(preintegrator.preintegrated()),
         sqrt_info_(weight * preintegrator.sqrtInformation()) {
     prior_sqrt_info_ << Eigen::Vector3d::Constant(1.0 / sigma.velocity),
         Eigen::Vector3d::Constant(1.0 / sigma.gyro_bias),
@@ -93,7 +93,8 @@ public:
 
     Eigen::Map<Eigen::Matrix<double, kResidualDim, 1>> res_map(res);
     res_map.head<kPreintegrationResidualDim>() =
-        sqrt_info_ * preintegrator_.residual(state_i, state_j);
+        sqrt_info_.lazyProduct(
+            preintegrationResidual(preintegrated_, state_i, state_j));
 
     const Eigen::Map<const Eigen::Matrix<double, kExtrasDim, 1>> extras_i(
         x + kExtrasI);
@@ -118,7 +119,9 @@ private:
     return state;
   }
 
-  const ImuPreintegrator &preintegrator_;
+  // A copy, not a reference to the ImuPreintegrator: the model is copied into
+  // SYCL USM and runs in a kernel, so it must not point at host data.
+  PreintegratedImu preintegrated_;
   Eigen::Matrix<double, 15, 15> sqrt_info_;
   Eigen::Matrix<double, kExtrasDim, 1> prior_sqrt_info_;
 };

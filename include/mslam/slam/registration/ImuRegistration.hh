@@ -44,6 +44,9 @@ public:
 
   const FirstRoundIncrement &lastFirstRound() const { return first_round_; }
 
+  /// Time spent in the parts of every Align so far.
+  const RegistrationTimings &timings() const { return icp_.timings(); }
+
 private:
   IcpWorkspace icp_;
   /// SE3Manifold x Euclidean(18), shared with the optimizer and its costs.

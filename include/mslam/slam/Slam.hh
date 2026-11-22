@@ -67,6 +67,14 @@ public:
 
   const RegistrationStats &registrationStats() const { return stats_; }
 
+  /// Time spent in the parts of both registrations (search, normals,
+  /// constraint assembly, solve), summed over every Update().
+  RegistrationTimings registrationTimings() const {
+    RegistrationTimings total = registration_->timings();
+    total += imu_registration_->timings();
+    return total;
+  }
+
   /// The current state (pose, velocity, biases), as of the last Predict or
   /// Update.
   const SlamState &state() const { return state_; }

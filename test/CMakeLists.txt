@@ -17,7 +17,7 @@ gtest_discover_tests(test_deskew)
 
 add_executable(test_point_cloud_io
 test_point_cloud_io.cc)
-target_link_libraries(test_point_cloud_io slam scan_recorder GTest::gtest_main)
+target_link_libraries(test_point_cloud_io slam slam_io scan_recorder GTest::gtest_main)
 
 gtest_discover_tests(test_point_cloud_io)
 
@@ -112,7 +112,7 @@ gtest_discover_tests(test_slam_pipeline)
 
 add_executable(test_slam_server
 test_slam_server.cc)
-target_link_libraries(test_slam_server slam GTest::gtest_main)
+target_link_libraries(test_slam_server slam slam_io GTest::gtest_main)
 
 gtest_discover_tests(test_slam_server)
 
@@ -134,7 +134,7 @@ target_link_libraries(mslam_draft moptim maps slam ILidar)
 # Offline replay benchmark (not registered with CTest, built by default):
 #   cmake --build --preset build-gcc --target bench_slam
 add_executable(bench_slam bench_slam.cc)
-target_link_libraries(bench_slam slam maps mslam::config scan_recorder)
+target_link_libraries(bench_slam slam slam_io maps mslam::config scan_recorder)
 
 add_executable(test_pose_graph_optimizer
 test_pose_graph_optimizer.cc)
@@ -150,7 +150,7 @@ gtest_discover_tests(test_pose_graph_keyframes)
 
 add_executable(test_pose_graph_backend
 test_pose_graph_backend.cc)
-target_link_libraries(test_pose_graph_backend slam GTest::gtest_main)
+target_link_libraries(test_pose_graph_backend slam slam_io GTest::gtest_main)
 target_compile_definitions(test_pose_graph_backend
   PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 

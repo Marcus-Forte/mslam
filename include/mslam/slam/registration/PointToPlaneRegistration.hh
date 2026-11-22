@@ -27,6 +27,9 @@ public:
   /// that round found no correspondences).
   const FirstRoundIncrement &lastFirstRound() const { return first_round_; }
 
+  /// Time spent in the parts of every Align so far.
+  const RegistrationTimings &timings() const { return icp_.timings(); }
+
 private:
   IcpWorkspace icp_;
   /// Shared with the optimizer and its costs (they must use the same object).

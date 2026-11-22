@@ -10,6 +10,7 @@
 #include "moptim/LevenbergMarquardt.hh"
 
 #include <Eigen/Dense>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -25,6 +26,39 @@ struct IcpParameters {
   int optimizer_iterations = 5;    ///< Optimizer iterations per round.
   float max_correspondence_distance = 0.1F;
 };
+
+/// Wall time spent in the parts of the registrations, summed over every Align
+/// (bench_slam prints it). search: the 1-NN correspondence search; normals: the
+/// normal estimation of the matched map points; assembly: building the
+/// point-to-plane constraints; solve: building the costs and the optimizer
+/// runs. Reading the clock a few times per round costs nothing measurable.
+struct RegistrationTimings {
+  std::chrono::nanoseconds search{0};
+  std::chrono::nanoseconds normals{0};
+  std::chrono::nanoseconds assembly{0};
+  std::chrono::nanoseconds solve{0};
+
+  RegistrationTimings &operator+=(const RegistrationTimings &other) {
+    search += other.search;
+    normals += other.normals;
+    assembly += other.assembly;
+    solve += other.solve;
+    return *this;
+  }
+};
+
+/// Whether a registration round moved the pose from @p before to @p after by
+/// less than 1 micrometre and 1 microradian (se3Log of the relative pose):
+/// rounds that no longer move it are what ends an ICP loop early.
+///
+/// The registrations used to count rounds whose optimizer returned SMALL_DELTA
+/// instead. That status only says the round's own solve converged (its last
+/// tiny step was rejected on a rounding-level cost increase), not that the
+/// re-associated correspondences stopped moving the pose: point-to-point ICP
+/// on planar scenes converges every round while still sliding millimetres per
+/// round, and the old criterion stopped it after five rounds.
+bool isNegligibleRoundStep(const Eigen::Affine3d &before,
+                           const Eigen::Affine3d &after);
 
 /// Size of the pose change the first registration round of an Align() applied:
 /// the norms of the translation and rotation parts of
@@ -96,6 +130,11 @@ public:
   /// the clock nor builds event payloads.
   void attachObserver(moptim::LevenbergMarquardt<double> &optimizer);
 
+  /// Time spent so far (findPlaneConstraints() fills search, normals and
+  /// assembly; the registrations add their solve time).
+  RegistrationTimings &timings() { return timings_; }
+  const RegistrationTimings &timings() const { return timings_; }
+
 private:
   IcpParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
@@ -110,6 +149,7 @@ private:
   Correspondences correspondences_;
   std::vector<Eigen::Matrix<double, 6, 1>> plane_inputs_;
   std::vector<double> plane_offsets_;
+  RegistrationTimings timings_;
 };
 
 } // namespace mslam

@@ -72,8 +72,10 @@ struct PoseGraphResult {
 /// graph after flush() is identical.
 class PoseGraphBackend {
 public:
+  /// @param backend Where the loop verification runs (LoopCloser).
   PoseGraphBackend(const PoseGraphParameters &parameters,
-                   std::shared_ptr<spdlog::logger> logger);
+                   std::shared_ptr<spdlog::logger> logger,
+                   ComputeBackend backend = ComputeBackend::Host);
   ~PoseGraphBackend();
   PoseGraphBackend(const PoseGraphBackend &) = delete;
   PoseGraphBackend &operator=(const PoseGraphBackend &) = delete;

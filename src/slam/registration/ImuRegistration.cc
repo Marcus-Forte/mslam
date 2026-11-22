@@ -24,9 +24,10 @@ using Fused = moptim::FusedCost<double, PlaneCost, ImuCost>;
 
 } // namespace
 
-/// The costs and two optimizers over them: the device optimizer (the whole
-/// solve in one SYCL launch) and the host one with the costs fused (one launch
-/// per evaluation), for debug telemetry and comparisons. Built on the first
+/// The costs and two optimizers over them, on the backend's moptim context: the
+/// device optimizer (the whole solve in one launch; the sycl backend) and
+/// LevenbergMarquardt with the costs fused (one launch per evaluation; the host
+/// backend, and debug telemetry). Built on the first
 /// round and then only refreshed: the point-to-plane cost gets each round's
 /// constraints and pose (setData/setModel), the IMU factor each scan's
 /// preintegration and previous state. Results are those of costs built afresh
@@ -39,10 +40,11 @@ struct ImuRegistration::Solver {
             icp.planeInputs().front().data(), icp.planeOffsets().data(),
             icp.planeOffsets().size(), 6, 1, manifold,
             Point3PlaneDistance(pose_before),
-            /*active_param_dim=*/SE3Manifold::kTangentDim)),
+            /*active_param_dim=*/SE3Manifold::kTangentDim, icp.context())),
         imu(std::make_shared<ImuCost>(previous_state.data(), zeros.data(), 1,
                                       Factor::kInputDim, Factor::kResidualDim,
-                                      manifold, std::move(factor))),
+                                      manifold, std::move(factor), 0,
+                                      icp.context())),
         lm(manifold), device_lm(plane, imu) {
     lm.addCost(std::make_shared<Fused>(plane, imu));
   }
@@ -67,11 +69,11 @@ ImuRegistration::ImuRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
     float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    std::shared_ptr<const ParallelExecutor> executor)
+    std::shared_ptr<const ParallelExecutor> executor, ComputeBackend backend)
     : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
                          max_correspondence_distance},
            std::move(logger), std::move(correspondence_finder),
-           std::move(executor)),
+           std::move(executor), backend),
       manifold_(Factor::makeManifold()) {}
 
 SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,

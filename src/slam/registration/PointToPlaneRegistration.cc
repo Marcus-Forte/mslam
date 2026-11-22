@@ -22,7 +22,8 @@ struct PointToPlaneRegistration::Solver {
       : plane(std::make_shared<PlaneCost>(
             icp.planeInputs().front().data(), icp.planeOffsets().data(),
             icp.planeOffsets().size(), 6, 1, manifold,
-            Point3PlaneDistance(pose_before), /*active_param_dim=*/6)),
+            Point3PlaneDistance(pose_before), /*active_param_dim=*/6,
+            icp.context())),
         lm(manifold), device_lm(plane) {
     lm.addCost(plane);
   }
@@ -37,11 +38,11 @@ PointToPlaneRegistration::PointToPlaneRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
     float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    std::shared_ptr<const ParallelExecutor> executor)
+    std::shared_ptr<const ParallelExecutor> executor, ComputeBackend backend)
     : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
                          max_correspondence_distance},
            std::move(logger), std::move(correspondence_finder),
-           std::move(executor)) {}
+           std::move(executor), backend) {}
 
 SlamState PointToPlaneRegistration::Align(const SlamState &state,
                                           const IMap &map,

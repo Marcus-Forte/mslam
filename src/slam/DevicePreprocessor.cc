@@ -3,6 +3,7 @@
 #include "mslam/map/DeviceVoxelSearch.hh"
 #include "mslam/slam/DeskewMath.hh"
 
+#include "moptim/Atomic.hh"
 #include "moptim/ExecutionContext.hh"
 
 #include <Eigen/Dense>
@@ -11,7 +12,6 @@
 #include <cstring>
 #include <limits>
 #include <new>
-#include <sycl/sycl.hpp>
 
 namespace mslam {
 
@@ -75,9 +75,7 @@ void insert(const Args &args, std::size_t index,
                              voxel.z + kCoordinateOffset};
   for (const std::int32_t v : c) {
     if (v < 0 || v > 0xFFFF) {
-      sycl::atomic_ref<std::uint32_t, sycl::memory_order::relaxed,
-                       sycl::memory_scope::device>(*args.overflow)
-          .store(1);
+      moptim::atomicStore(*args.overflow, std::uint32_t{1});
       args.slots[index] = kNoSlot;
       return;
     }
@@ -90,13 +88,10 @@ void insert(const Args &args, std::size_t index,
       static_cast<std::uint32_t>(device::hashVoxel(voxel.x, voxel.y, voxel.z)) &
       args.mask;
   for (;;) {
-    sycl::atomic_ref<std::uint64_t, sycl::memory_order::relaxed,
-                     sycl::memory_scope::device>
-        stored(args.keys[slot]);
-    std::uint64_t current = stored.load();
+    std::uint64_t current = moptim::atomicLoad(args.keys[slot]);
     if ((current >> 48) != args.key_epoch) {
       // An empty slot (a key of an earlier scan): claim it, or see who did.
-      if (!stored.compare_exchange_strong(current, key)) {
+      if (!moptim::atomicCompareExchange(args.keys[slot], current, key)) {
         continue;
       }
       break;
@@ -106,9 +101,8 @@ void insert(const Args &args, std::size_t index,
     }
     slot = (slot + 1) & args.mask;
   }
-  sycl::atomic_ref<std::uint64_t, sycl::memory_order::relaxed,
-                   sycl::memory_scope::device>(args.values[slot])
-      .fetch_min((args.value_epoch << 32) | static_cast<std::uint64_t>(index));
+  moptim::atomicFetchMin(args.values[slot], (args.value_epoch << 32) |
+                                                static_cast<std::uint64_t>(index));
   args.slots[index] = slot;
 }
 
@@ -179,19 +173,17 @@ void processBlock(const Args &args, std::size_t block) {
   }
 }
 
-template <class T> T *allocate(sycl::queue &queue, std::size_t count) {
-  T *data = sycl::malloc_shared<T>(std::max<std::size_t>(count, 1), queue);
-  if (data == nullptr) {
-    throw std::bad_alloc();
-  }
-  return data;
+/// Memory the host and the kernels of @p context share.
+template <class T>
+T *allocate(moptim::ExecutionContext &context, std::size_t count) {
+  return static_cast<T *>(context.allocateShared(
+      std::max<std::size_t>(count, 1) * sizeof(T), alignof(T) < 64 ? 64 : alignof(T)));
 }
 
-template <class T> void release(sycl::queue &queue, T *&data) {
-  if (data != nullptr) {
-    sycl::free(data, queue);
-    data = nullptr;
-  }
+template <class T>
+void release(moptim::ExecutionContext &context, T *&data) {
+  context.deallocate(data);
+  data = nullptr;
 }
 
 } // namespace
@@ -203,11 +195,11 @@ std::uint64_t devicePreprocessLaunches() {
 DevicePreprocessor::DevicePreprocessor(
     std::shared_ptr<moptim::ExecutionContext> context)
     : context_(context ? std::move(context) : moptim::defaultContext()) {
-  overflow_ = allocate<std::uint32_t>(context_->queue(), 1);
+  overflow_ = allocate<std::uint32_t>(*context_, 1);
 }
 
 DevicePreprocessor::~DevicePreprocessor() {
-  sycl::queue &queue = context_->queue();
+  moptim::ExecutionContext &queue = *context_;
   release(queue, input_);
   release(queue, output_);
   release(queue, slots_);
@@ -224,7 +216,7 @@ const Point *DevicePreprocessor::deskewed() const {
 }
 
 void DevicePreprocessor::reserve(std::size_t points, std::size_t intervals) {
-  sycl::queue &queue = context_->queue();
+  moptim::ExecutionContext &queue = *context_;
   if (points > capacity_) {
     const std::size_t capacity = std::max(points, 2 * capacity_);
     release(queue, input_);
@@ -329,19 +321,16 @@ bool DevicePreprocessor::process(
   args.overflow = overflow_;
 
   g_launches.fetch_add(1, std::memory_order_relaxed);
-  context_->queue()
-      .parallel_for<PreprocessKernel>(
-          sycl::nd_range<1>{width, 1},
-          [args](sycl::nd_item<1> item) {
-            const std::size_t begin =
-                item.get_group_linear_id() * args.blocks_per_group;
-            const std::size_t end =
-                std::min(args.blocks, begin + args.blocks_per_group);
-            for (std::size_t block = begin; block < end; ++block) {
-              processBlock(args, block);
-            }
-          })
-      .wait_and_throw();
+  // A SYCL kernel or host work-groups, whichever the context runs on.
+  moptim::detail::launchNamed<PreprocessKernel>(
+      *context_, width, [args](std::size_t group) {
+        const std::size_t begin = group * args.blocks_per_group;
+        const std::size_t end =
+            std::min(args.blocks, begin + args.blocks_per_group);
+        for (std::size_t block = begin; block < end; ++block) {
+          processBlock(args, block);
+        }
+      });
 
   if (*overflow_ != 0) {
     return false;

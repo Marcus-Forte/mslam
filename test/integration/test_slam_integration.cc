@@ -80,7 +80,8 @@ struct ReplayResult {
 
 std::shared_ptr<mslam::VoxelHashMap>
 makeMap(const mslam::SlamConfiguration &config) {
-  return mslam::makeVoxelHashMap(config.map_parameters);
+  return mslam::makeVoxelHashMap(config.map_parameters,
+                                 config.parameters.backend);
 }
 
 ReplayResult resultOf(const mslam::Slam &slam,

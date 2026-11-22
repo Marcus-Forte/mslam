@@ -172,7 +172,8 @@ public:
 
 struct Fixture {
   explicit Fixture(mslam::SlamConfiguration config = testConfig())
-      : config(config), map(mslam::makeVoxelHashMap(config.map_parameters)),
+      : config(config), map(mslam::makeVoxelHashMap(config.map_parameters,
+                                      config.parameters.backend)),
         slam(silentLogger(), config, map),
         pipeline(slam, config, silentLogger(), output) {}
 

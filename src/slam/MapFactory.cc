@@ -1,9 +1,7 @@
 #include "mslam/slam/MapFactory.hh"
 
-#include "mslam/map/SyclVoxelHashMap.hh"
-
-#include <cstdlib>
-#include <cstring>
+#include "mslam/map/DeviceVoxelHashMap.hh"
+#include "mslam/slam/ComputeContext.hh"
 
 namespace mslam {
 
@@ -14,18 +12,22 @@ static_assert(MapParameters::kMaxSearchRadius ==
               "map.search_radius must accept exactly the radii the map does");
 
 std::shared_ptr<VoxelHashMap>
-makeVoxelHashMap(const MapParameters &parameters) {
-  // The SYCL map: the registrations search its device mirror in kernels.
-  // MSLAM_HOST_SEARCH=1 (comparisons only) builds the plain host map instead.
-  const char *host_search = std::getenv("MSLAM_HOST_SEARCH");
-  const bool host = host_search != nullptr && std::strcmp(host_search, "1") == 0;
-  std::shared_ptr<VoxelHashMap> map =
-      host ? std::make_shared<VoxelHashMap>(parameters.resolution,
-                                            parameters.max_points_per_voxel)
-           : std::make_shared<SyclVoxelHashMap>(
-                 parameters.resolution, parameters.max_points_per_voxel);
+makeVoxelHashMap(const MapParameters &parameters, ComputeBackend backend) {
+  std::shared_ptr<VoxelHashMap> map = makeVoxelHashMap(
+      parameters.resolution, parameters.max_points_per_voxel, backend);
   map->setNumAdjacentVoxelSearch(parameters.search_radius);
   return map;
+}
+
+std::unique_ptr<VoxelHashMap> makeVoxelHashMap(float resolution,
+                                               std::size_t max_points_per_voxel,
+                                               ComputeBackend backend) {
+  // sycl: the registrations search the map's device mirror in kernels.
+  if (backend == ComputeBackend::Sycl) {
+    return std::make_unique<DeviceVoxelHashMap>(
+        resolution, max_points_per_voxel, executionContextFor(backend));
+  }
+  return std::make_unique<VoxelHashMap>(resolution, max_points_per_voxel);
 }
 
 } // namespace mslam

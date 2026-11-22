@@ -10,7 +10,7 @@
 //   bench_slam <config.jsonc> <recording.pbscan> [repeats] [--save-map out.ply]
 //              [--imu-fusion <preintegration_factor|dead_reckoning>]
 //              [--trajectory out.csv] [--threads <n>]
-//              [--strategy <odometry|pose_graph>]
+//              [--strategy <odometry|pose_graph>] [--backend <host|sycl>]
 //
 // Prints one line per run: the scan count, the total and per-stage wall time
 // in milliseconds and the final pose. It is not registered with CTest.
@@ -55,6 +55,7 @@
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/Transform.hh"
 #include "moptim/ExecutionContext.hh"
+#include "mslam/slam/ComputeContext.hh"
 #include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
 
 #include <spdlog/spdlog.h>
@@ -222,7 +223,8 @@ int usage(const char *program) {
                "[--save-map out.ply] "
                "[--imu-fusion preintegration_factor|dead_reckoning] "
                "[--trajectory out.csv] [--threads n] "
-               "[--strategy odometry|pose_graph] [--log-level level]\n"
+               "[--strategy odometry|pose_graph] [--backend host|sycl] "
+               "[--log-level level]\n"
                "  --save-map writes the final map (all published increments) "
                "of the last run\n"
                "  --imu-fusion overrides slam.imu_fusion of the config\n"
@@ -231,6 +233,8 @@ int usage(const char *program) {
                "  --trajectory writes one CSV row per registered scan "
                "(last run)\n"
                "  --strategy overrides slam.strategy of the config\n"
+               "  --backend overrides slam.backend of the config (and "
+               "MSLAM_BACKEND)\n"
                "  --log-level trace|debug|info|warning|error shows the log "
                "(default: off)\n",
                program);
@@ -240,15 +244,8 @@ int usage(const char *program) {
 } // namespace
 
 int main(int argc, char **argv) {
-  // Benchmark-only knob: MOPTIM_THREADS=<n> replaces moptim's default execution
-  // context by one with that many threads (0 = all compute units), before
-  // anything is built. Unset keeps moptim's default context untouched.
-  if (const char *env = std::getenv("MOPTIM_THREADS")) {
-    auto context = std::make_shared<moptim::ExecutionContext>();
-    context->setThreads(static_cast<std::size_t>(std::strtoul(env, nullptr, 10)));
-    moptim::setDefaultContext(std::move(context));
-  }
   std::vector<const char *> positional;
+  std::optional<mslam::ComputeBackend> backend;
   std::string save_map_path;
   bool save_map = false;
   std::string trajectory_path;
@@ -282,6 +279,19 @@ int main(int argc, char **argv) {
         imu_fusion = mslam::ImuFusion::DeadReckoning;
       } else {
         std::fprintf(stderr, "error: invalid --imu-fusion %s\n", argv[i]);
+        return usage(argv[0]);
+      }
+    } else if (arg == "--backend") {
+      if (i + 1 >= argc) {
+        return usage(argv[0]);
+      }
+      const std::string_view value = argv[++i];
+      if (value == mslam::toString(mslam::ComputeBackend::Host)) {
+        backend = mslam::ComputeBackend::Host;
+      } else if (value == mslam::toString(mslam::ComputeBackend::Sycl)) {
+        backend = mslam::ComputeBackend::Sycl;
+      } else {
+        std::fprintf(stderr, "error: invalid --backend %s\n", argv[i]);
         return usage(argv[0]);
       }
     } else if (arg == "--strategy") {
@@ -366,16 +376,37 @@ int main(int argc, char **argv) {
   if (strategy.has_value()) {
     config.strategy = *strategy;
   }
+  if (backend.has_value()) {
+    config.parameters.backend = *backend;
+  }
+  if (config.parameters.backend == mslam::ComputeBackend::Sycl &&
+      !mslam::syclBackendAvailable()) {
+    std::fprintf(stderr,
+                 "error: the sycl backend needs a build with MSLAM_WITH_SYCL "
+                 "(e.g. the sycl preset)\n");
+    return 1;
+  }
+  const std::shared_ptr<moptim::ExecutionContext> context =
+      mslam::executionContextFor(config.parameters.backend);
+  // Benchmark-only knob: MOPTIM_THREADS=<n> bounds the work-groups of the
+  // backend's moptim launches (0 = all compute units). Results do not change.
+  if (const char *env = std::getenv("MOPTIM_THREADS")) {
+    context->setThreads(static_cast<std::size_t>(std::strtoul(env, nullptr, 10)));
+  }
+  std::printf("backend: %s (built with SYCL: %s)\n",
+              std::string(mslam::toString(config.parameters.backend)).c_str(),
+              mslam::syclBackendAvailable() ? "yes" : "no");
 
   auto logger = spdlog::default_logger();
   logger->set_level(log_level.value_or(spdlog::level::off));
 
   for (int run = 0; run < repeats; ++run) {
     // Benchmark-only: launches of moptim's default context during this run.
-    const std::uint64_t launches_before = moptim::defaultContext()->launches();
+    const std::uint64_t launches_before = context->launches();
     const std::uint64_t device_launches_before =
         mslam::deviceCorrespondenceLaunches();
-    auto map = mslam::makeVoxelHashMap(config.map_parameters);
+    auto map = mslam::makeVoxelHashMap(config.map_parameters,
+                                       config.parameters.backend);
     mslam::Slam slam(logger, config, map);
     mslam::NullSlamOutput null_output;
     MapCollector collector;
@@ -461,7 +492,7 @@ int main(int argc, char **argv) {
                 toMs(split.search), toMs(split.normals), toMs(split.assembly),
                 toMs(split.solve), toMs(split_other),
                 static_cast<unsigned long long>(
-                    moptim::defaultContext()->launches() - launches_before),
+                    context->launches() - launches_before),
                 static_cast<unsigned long long>(
                     mslam::deviceCorrespondenceLaunches() -
                     device_launches_before),

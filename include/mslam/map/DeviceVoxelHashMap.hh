@@ -15,7 +15,7 @@ class ExecutionContext;
 
 namespace mslam {
 
-/// The surface-normal cache of a SyclVoxelHashMap, one entry per pool slot (a
+/// The surface-normal cache of a DeviceVoxelHashMap, one entry per pool slot (a
 /// map point), as kernels see it. `state` is kUnknown (not computed since the
 /// point's neighbourhood last changed), kNormal or kNoNormal (fewer than 3
 /// neighbours, or degenerate).
@@ -47,22 +47,22 @@ struct DeviceNormalCache {
  * Not thread-safe; no kernel may read the mirror while it is modified (the
  * registrations wait for their kernels before returning).
  */
-class SyclVoxelHashMap : public VoxelHashMap {
+class DeviceVoxelHashMap : public VoxelHashMap {
 public:
   /// @param context Where the mirror is allocated (moptim's default context if
   /// null); kernels searching it run on its queue.
-  SyclVoxelHashMap(float voxel_size, size_t max_points_per_voxel,
+  DeviceVoxelHashMap(float voxel_size, size_t max_points_per_voxel,
                    std::shared_ptr<moptim::ExecutionContext> context = nullptr);
-  ~SyclVoxelHashMap() override;
+  ~DeviceVoxelHashMap() override;
 
-  SyclVoxelHashMap(const SyclVoxelHashMap &) = delete;
-  SyclVoxelHashMap &operator=(const SyclVoxelHashMap &) = delete;
+  DeviceVoxelHashMap(const DeviceVoxelHashMap &) = delete;
+  DeviceVoxelHashMap &operator=(const DeviceVoxelHashMap &) = delete;
 
   PointCloud addScan(const PointCloud &scan) override;
   void prune(const Point &center, float max_range, size_t max_voxels) override;
   void clear() override;
 
-  const SyclVoxelHashMap *deviceMap() const override { return this; }
+  const DeviceVoxelHashMap *deviceMap() const override { return this; }
 
   /// The mirror as kernels search it (valid until the map changes).
   device::MapView view() const;

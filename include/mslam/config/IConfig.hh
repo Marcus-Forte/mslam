@@ -20,6 +20,18 @@ enum class ImuFusion { PreintegrationFactor, DeadReckoning };
 /// closure; see `PoseGraphParameters`.
 enum class SlamStrategy { Odometry, PoseGraph };
 
+/// Where the SLAM computes (slam.backend):
+///  - Host: the CPU implementation: VoxelHashMap searches, CorrespondenceFinder
+///    and NormalEstimator (oneTBB threads), deskewInto() and VoxelFilter,
+///    moptim's LevenbergMarquardt on its host backend.
+///  - Sycl: the device implementation (DeviceVoxelHashMap with its normal
+///    cache, DeviceCorrespondenceSearch, DevicePreprocessor,
+///    moptim::DeviceLevenbergMarquardt) on moptim's SYCL backend. Needs a build
+///    with MSLAM_WITH_SYCL.
+/// Both give the same estimator up to rounding; slam.num_threads applies to
+/// both.
+enum class ComputeBackend { Host, Sycl };
+
 inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   switch (level) {
   case spdlog::level::trace:
@@ -92,6 +104,17 @@ inline constexpr std::string_view toString(ImuFusion fusion) {
   throw std::runtime_error("Invalid IMU fusion");
 }
 
+inline constexpr std::string_view toString(ComputeBackend backend) {
+  switch (backend) {
+  case ComputeBackend::Host:
+    return "host";
+  case ComputeBackend::Sycl:
+    return "sycl";
+  }
+
+  throw std::runtime_error("Invalid compute backend");
+}
+
 inline constexpr std::string_view toString(SlamStrategy strategy) {
   switch (strategy) {
   case SlamStrategy::Odometry:
@@ -115,6 +138,7 @@ struct SlamParameters {
   // Threads for the correspondence search and normal estimation: 1 runs
   // sequentially, 0 uses every hardware thread. Results do not depend on it.
   unsigned int num_threads = 1;
+  ComputeBackend backend = ComputeBackend::Host;
 };
 
 /**
@@ -255,6 +279,7 @@ struct SlamConfiguration {
        << config.parameters.max_correspondence_distance << "\n"
        << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n"
        << "Threads: " << config.parameters.num_threads << "\n"
+       << "Backend: " << toString(config.parameters.backend) << "\n"
        << "Strategy: " << toString(config.strategy) << "\n";
     if (config.strategy == SlamStrategy::PoseGraph) {
       const auto &pg = config.pose_graph;

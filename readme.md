@@ -46,6 +46,37 @@ found, or with `-DMSLAM_WITH_TBB=OFF`, mslam is built sequential and a
 }
 ```
 
+### Compute backend
+
+`slam.backend` (optional, default `"host"`) selects where the registration and
+the scan preprocessing run:
+
+- `"host"`: the CPU code: the `VoxelHashMap` correspondence search and normals
+  (on oneTBB with `num_threads`), the host preprocessing, and moptim's
+  Levenberg-Marquardt with its costs on moptim's host backend (the calling
+  thread, or a thread pool for large costs). Every build has it.
+- `"sycl"`: SYCL kernels on moptim's SYCL device (`native_cpu`, the host CPU,
+  for now). A device mirror of the voxel map keeps a normal cache across scans.
+  Each ICP round runs one kernel for the correspondence search and normals,
+  each scan one kernel for its preprocessing, and each round's whole
+  Levenberg-Marquardt solve is one launch (with `debug` logging it uses the host
+  solver, whose telemetry needs an observer). It needs a build with
+  `-DMSLAM_WITH_SYCL=ON` (the `sycl` preset, DPC++); a build without SYCL
+  refuses `"sycl"` at startup.
+
+The environment variable `MSLAM_BACKEND=host|sycl` overrides the config file,
+and `bench_slam` and `register_scans` take `--backend host|sycl`. Both backends
+give the same pose at any thread count. The two backends' poses agree to a
+fraction of a millimetre: the device kernels evaluate the normals with scalar
+Eigen. `test/bench_backends.py` compares builds and backends (see
+[Benchmark](#benchmark)).
+
+```json
+{
+  "slam": { "backend": "sycl" }
+}
+```
+
 ### Strategy
 
 `slam.strategy` (optional) selects the estimator: `"odometry"` (default, the
@@ -81,6 +112,10 @@ docker run -it --rm -v ./config/:/config/ mslam mslam -c /config/mslam.json
 
 If you want a custom configuration, mount your JSON file into the container and
 pass that path with `-c`.
+
+The image is built with the `pi5` preset: GCC for the Cortex-A76, host backend
+only. `--build-arg PRESET=pi5-sycl` builds it with DPC++ and both backends
+(`slam.backend` then selects one).
 
 For the Python viewer client.
 ```bash
@@ -347,6 +382,42 @@ also a check of the parallel code:
 ```bash
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5 --threads 4
 ```
+
+`--backend host|sycl` overrides `slam.backend` (see
+[Compute backend](#compute-backend)). The first line of the output names the
+backend and whether the build has SYCL.
+
+### Comparing builds and backends
+
+`test/bench_backends.py` (Python 3, no dependencies) runs `bench_slam`
+binaries side by side. It runs them interleaved, in a rotated order every
+round. For each recording and thread count it prints each label's minimum
+total, register, search and solve times, the ratio to a reference label, the
+moptim launches, the final pose, and that pose's distance from the
+reference's. Each `--run` is `LABEL=BINARY[:BACKEND]`, so one SYCL build can
+be listed twice, once per backend:
+
+```bash
+test/bench_backends.py --run host=build/gcc/test/bench_slam \
+    --run sycl=build/sycl/test/bench_slam:sycl --run sycl-host=build/sycl/test/bench_slam:host \
+    --threads 1 4 --rounds 5 test/data/living_room_garden.pbscan test/data/rooms.pbscan
+```
+
+It exits with status 1 in any of these cases:
+
+- a run fails;
+- a label's pose changes between rounds or thread counts;
+- a pose is further from the reference's than `--tolerance-mm` /
+  `--tolerance-mrad` (defaults 0.5 mm and 0.15 mrad).
+
+Other options:
+
+- `--ref` names the reference label (the first `--run` by default).
+- `--strategy` overrides `slam.strategy`.
+- `--out <dir>` keeps every raw output.
+- `--history <file.jsonl>` appends one JSON line per label, recording and
+  thread count (date, commit, minimum times, launches, pose), to follow the
+  backends from one change to the next.
 
 `--strategy <odometry|pose_graph>` overrides `slam.strategy`. With
 `pose_graph` each run ends with `SlamPipeline::finish()` (the open keyframe

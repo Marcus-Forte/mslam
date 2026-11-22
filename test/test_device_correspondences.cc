@@ -1,10 +1,10 @@
-// The SYCL device path of the registrations: SyclVoxelHashMap's mirror, the
+// The SYCL device path of the registrations: DeviceVoxelHashMap's mirror, the
 // device searches and the correspondence kernel, against the host VoxelHashMap,
 // CorrespondenceFinder and NormalEstimator they replace.
 #include "SyntheticScene.hh"
 
 #include "mslam/map/DeviceVoxelSearch.hh"
-#include "mslam/map/SyclVoxelHashMap.hh"
+#include "mslam/map/DeviceVoxelHashMap.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/CorrespondenceFinder.hh"
 #include "mslam/slam/NormalEstimator.hh"
@@ -62,7 +62,7 @@ mslam::PointCloud queriesNear(const mslam::PointCloud &cloud, unsigned seed,
 }
 
 // The device searches on the mirror against the host queries, bit for bit.
-void expectSameSearches(const mslam::SyclVoxelHashMap &map,
+void expectSameSearches(const mslam::DeviceVoxelHashMap &map,
                         const mslam::PointCloud &queries) {
   const mslam::device::MapView view = map.view();
   for (const auto &q : queries) {
@@ -94,10 +94,10 @@ void expectSameSearches(const mslam::SyclVoxelHashMap &map,
 
 } // namespace
 
-TEST(SyclVoxelHashMap, DeviceSearchesEqualTheHostQueriesAsScansAreAdded) {
+TEST(DeviceVoxelHashMap, DeviceSearchesEqualTheHostQueriesAsScansAreAdded) {
   for (const int radius : {1, 2}) {
     SCOPED_TRACE(testing::Message() << "radius=" << radius);
-    mslam::SyclVoxelHashMap map(0.1F, 5);
+    mslam::DeviceVoxelHashMap map(0.1F, 5);
     map.setNumAdjacentVoxelSearch(radius);
     const auto scans = roomScans(6);
     for (std::size_t i = 0; i < scans.size(); ++i) {
@@ -107,8 +107,8 @@ TEST(SyclVoxelHashMap, DeviceSearchesEqualTheHostQueriesAsScansAreAdded) {
   }
 }
 
-TEST(SyclVoxelHashMap, PruneAndClearRebuildTheMirror) {
-  mslam::SyclVoxelHashMap map(0.1F, 5);
+TEST(DeviceVoxelHashMap, PruneAndClearRebuildTheMirror) {
+  mslam::DeviceVoxelHashMap map(0.1F, 5);
   for (const auto &scan : roomScans(4)) {
     map.addScan(scan);
   }
@@ -123,7 +123,7 @@ TEST(SyclVoxelHashMap, PruneAndClearRebuildTheMirror) {
 }
 
 TEST(DeviceCorrespondenceSearch, MatchesTheHostFinderAndNormalEstimator) {
-  mslam::SyclVoxelHashMap map(0.1F, 5);
+  mslam::DeviceVoxelHashMap map(0.1F, 5);
   mslam::VoxelHashMap host_map(0.1F, 5);
   for (const auto &scan : roomScans(3)) {
     map.addScan(scan);
@@ -163,7 +163,7 @@ TEST(DeviceCorrespondenceSearch, MatchesTheHostFinderAndNormalEstimator) {
 }
 
 TEST(DeviceCorrespondenceSearch, ResultsDoNotDependOnTheWidth) {
-  mslam::SyclVoxelHashMap map(0.1F, 5);
+  mslam::DeviceVoxelHashMap map(0.1F, 5);
   for (const auto &scan : roomScans(3)) {
     map.addScan(scan);
   }
@@ -191,7 +191,7 @@ TEST(DeviceCorrespondenceSearch, ResultsDoNotDependOnTheWidth) {
 // never cached anything computes for the same point.
 TEST(DeviceCorrespondenceSearch, CachedNormalsEqualFreshOnesAfterTheMapChanges) {
   const auto scans = roomScans(6);
-  mslam::SyclVoxelHashMap cached(0.1F, 5);
+  mslam::DeviceVoxelHashMap cached(0.1F, 5);
   mslam::IcpWorkspace workspace(mslam::IcpParameters{1, 1, 0.2F},
                                 silentLogger(),
                                 std::make_shared<mslam::CorrespondenceFinder>());
@@ -204,7 +204,7 @@ TEST(DeviceCorrespondenceSearch, CachedNormalsEqualFreshOnesAfterTheMapChanges) 
   }
   ASSERT_GT(cached.cachedNormals(), 0U);
 
-  mslam::SyclVoxelHashMap fresh(0.1F, 5);
+  mslam::DeviceVoxelHashMap fresh(0.1F, 5);
   for (const auto &scan : scans) {
     fresh.addScan(scan);
   }
@@ -230,7 +230,7 @@ TEST(DeviceCorrespondenceSearch, CachedNormalsEqualFreshOnesAfterTheMapChanges) 
 }
 
 TEST(IcpWorkspace, DevicePathAssemblesTheHostPathsConstraints) {
-  mslam::SyclVoxelHashMap device_map(0.1F, 5);
+  mslam::DeviceVoxelHashMap device_map(0.1F, 5);
   mslam::VoxelHashMap host_map(0.1F, 5);
   for (const auto &scan : roomScans(3)) {
     device_map.addScan(scan);

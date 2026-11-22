@@ -2,7 +2,7 @@
 
 #include "mslam/common/Points.hh"
 #include "mslam/common/State.hh"
-#include "mslam/map/SyclVoxelHashMap.hh"
+#include "mslam/map/DeviceVoxelHashMap.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Preprocessor.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
@@ -23,6 +23,8 @@ struct ScanSequenceParameters {
   /// Threads for the correspondence search and normal estimation (1:
   /// sequential, 0: every hardware thread). Results do not depend on it.
   unsigned num_threads = 1;
+  /// Where the map is searched and the solves run (see ComputeBackend).
+  ComputeBackend backend = ComputeBackend::Host;
 };
 
 /// What add() did with one cloud.
@@ -62,15 +64,16 @@ public:
   /// Pose of the last cloud added (identity before the first).
   const SlamState &currentPose() const { return pose_; }
   /// Occupied voxels of the map.
-  std::size_t mapVoxels() const { return map_.size(); }
+  std::size_t mapVoxels() const { return map_->size(); }
   /// Neighbour search radius set on the map, in voxels.
   int searchRadiusVoxels() const { return search_radius_; }
 
 private:
   ScanSequenceParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
-  /// The registrations search its device mirror in kernels (IcpWorkspace).
-  SyclVoxelHashMap map_;
+  /// A VoxelHashMap, or on the sycl backend a DeviceVoxelHashMap whose mirror
+  /// the registrations search in kernels (IcpWorkspace).
+  std::unique_ptr<VoxelHashMap> map_;
   /// Shared by registration_ and fit_ (declared first: built before them).
   std::shared_ptr<const ParallelExecutor> executor_;
   PointToPlaneRegistration registration_;

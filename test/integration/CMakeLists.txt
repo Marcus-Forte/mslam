@@ -30,6 +30,12 @@ target_compile_definitions(test_slam_integration
 if(MSLAM_INTEGRATION_TESTS)
   add_test(NAME SlamIntegration COMMAND test_slam_integration)
   set_tests_properties(SlamIntegration PROPERTIES LABELS integration)
+  if(MSLAM_WITH_SYCL)
+    # The same replays on the sycl backend (MSLAM_BACKEND overrides the config).
+    add_test(NAME SlamIntegration.sycl COMMAND test_slam_integration)
+    set_tests_properties(SlamIntegration.sycl PROPERTIES LABELS integration
+      ENVIRONMENT MSLAM_BACKEND=sycl)
+  endif()
 endif()
 
 # Build and run directly, without going through CTest.

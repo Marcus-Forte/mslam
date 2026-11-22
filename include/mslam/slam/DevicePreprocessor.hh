@@ -19,8 +19,10 @@ namespace mslam {
 std::uint64_t devicePreprocessLaunches();
 
 /**
- * @brief Deskew, range filter and voxel-hash downsampling of a scan in one SYCL
- * kernel (Preprocessor::process with the voxel_hash filter).
+ * @brief Deskew, range filter and voxel-hash downsampling of a scan in one
+ * kernel (Preprocessor::process with the voxel_hash filter on the sycl
+ * backend), on a moptim execution context: a SYCL kernel, or host work-groups
+ * on moptim's host backend.
  *
  * - Deskew: the scan is cut into blocks of kBlock points, whose boundaries do
  *   not depend on the number of work-groups. A block starts from the sensor

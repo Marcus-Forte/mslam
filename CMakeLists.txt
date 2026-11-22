@@ -24,11 +24,19 @@ include(cmake/code_format.cmake)
 # msensor tools (replay server, recorder): options here, targets below.
 include(cmake/msensor_tools.cmake)
 
-# moptim compiles fixed-size Eigen members into SYCL device code and copies them between the host and
-# the device pass, so it fixes EIGEN_MAX_STATIC_ALIGN_BYTES=16 on everything that links it. Every other
-# library here (maps, config, msensor, the I/O library) must agree on Eigen's layout, so the same value
-# is set globally, before the subdirectories, like MSLAM_CPU.
-add_compile_definitions(EIGEN_MAX_STATIC_ALIGN_BYTES=16)
+# SYCL is opt-in. Without it mslam (and moptim) are plain C++ built by GCC, and slam.backend can only be
+# host. With it, everything that links moptim is compiled by DPC++ and slam.backend selects host or sycl at
+# run time (MSLAM_BACKEND overrides the config).
+option(MSLAM_WITH_SYCL "Build the SYCL backend (needs a DPC++ clang++)" OFF)
+set(MOPTIM_WITH_SYCL ${MSLAM_WITH_SYCL})
+message(STATUS "mslam: SYCL backend ${MSLAM_WITH_SYCL}")
+if(MSLAM_WITH_SYCL)
+  # moptim compiles fixed-size Eigen members into SYCL device code and copies them between the host and
+  # the device pass, so it fixes EIGEN_MAX_STATIC_ALIGN_BYTES=16 on everything that links it. Every
+  # other library here (maps, config, msensor, the I/O library) must agree on Eigen's layout, so the
+  # same value is set globally, before the subdirectories, like MSLAM_CPU.
+  add_compile_definitions(EIGEN_MAX_STATIC_ALIGN_BYTES=16)
+endif()
 
 add_subdirectory(third_party/robin-map)
 # moptim source tree: the submodule by default. Point it at a standalone moptim checkout (e.g. the

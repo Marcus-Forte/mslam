@@ -114,7 +114,8 @@ int main(int argc, char **argv) {
 
   // Create Map interface.
   std::shared_ptr<mslam::IMap> map;
-  map = mslam::makeVoxelHashMap(config.map_parameters);
+  map = mslam::makeVoxelHashMap(config.map_parameters,
+                                config.parameters.backend);
 
   mslam::SlamServer slam_server(logger);
   slam_server.start();

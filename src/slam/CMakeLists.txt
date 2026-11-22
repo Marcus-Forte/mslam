@@ -4,8 +4,9 @@ registration/PointToPlaneRegistration.cc
 registration/ImuRegistration.cc
 registration/IcpWorkspace.cc
 registration/DeviceCorrespondenceSearch.cc
-SyclVoxelHashMap.cc
+DeviceVoxelHashMap.cc
 DevicePreprocessor.cc
+ComputeContext.cc
 CorrespondenceFinder.cc
 CorrespondenceFinderLogger.cc
 NormalEstimator.cc

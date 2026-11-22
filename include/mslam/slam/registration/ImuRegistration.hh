@@ -28,7 +28,8 @@ public:
                   float max_correspondence_distance,
                   std::shared_ptr<spdlog::logger> logger,
                   std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-                  std::shared_ptr<const ParallelExecutor> executor = nullptr);
+                  std::shared_ptr<const ParallelExecutor> executor = nullptr,
+                  ComputeBackend backend = ComputeBackend::Host);
 
   /// Joint Align: optimizes pose, velocity, and biases of the new state, plus
   /// velocity and biases of the previous state (its pose stays fixed).

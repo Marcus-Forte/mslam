@@ -24,8 +24,8 @@
     },
     {
       "name": "sycl",
-      "displayName": "DPC++, native_cpu",
-      "description": "moptim with the DPC++ clang and the host CPU as the only SYCL target (native_cpu)",
+      "displayName": "DPC++, native_cpu (host and SYCL backends)",
+      "description": "MSLAM_WITH_SYCL: moptim with the DPC++ clang and the host CPU as SYCL target (native_cpu); slam.backend (or MSLAM_BACKEND) selects host or sycl at run time",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "installDir": "${sourceDir}/build/${presetName}/install",
@@ -34,6 +34,7 @@
           "CMAKE_CXX_COMPILER": "/opt/sycl/bin/clang++",
           "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
           "CMAKE_BUILD_TYPE": "Release",
+          "MSLAM_WITH_SYCL": "ON",
           "SYCL_TARGETS": "native_cpu",
           "MSLAM_INSTALL_REPLAY_SERVER": "ON",
           "MSLAM_INSTALL_REMOTE_RECORDER": "ON",
@@ -45,18 +46,28 @@
     {
       "name": "pi5",
       "displayName": "Raspberry Pi 5 (Cortex-A76)",
-      "description": "DPC++ (moptim is a SYCL library), native_cpu, host and device code for the Cortex-A76",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "installDir": "${sourceDir}/build/${presetName}/install",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "/opt/sycl/bin/clang",
-        "CMAKE_CXX_COMPILER": "/opt/sycl/bin/clang++",
+        "CMAKE_C_COMPILER": "/usr/bin/gcc-16",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++-16",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_TYPE": "Release",
-        "SYCL_TARGETS": "native_cpu",
-        "MOPTIM_NATIVE_CPU_ARCH": "cortex-a76",
         "MSLAM_CPU": "cortex-a76"
+      }
+    },
+    {
+      "name": "pi5-sycl",
+      "displayName": "Raspberry Pi 5 (Cortex-A76), with SYCL",
+      "description": "pi5 with MSLAM_WITH_SYCL: DPC++, native_cpu, host and device code for the Cortex-A76",
+      "inherits": "pi5",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/opt/sycl/bin/clang",
+        "CMAKE_CXX_COMPILER": "/opt/sycl/bin/clang++",
+        "MSLAM_WITH_SYCL": "ON",
+        "SYCL_TARGETS": "native_cpu",
+        "MOPTIM_NATIVE_CPU_ARCH": "cortex-a76"
       }
     }
   ],
@@ -74,6 +85,11 @@
     {
       "name": "build-pi5",
       "configurePreset": "pi5",
+      "verbose": false
+    },
+    {
+      "name": "build-pi5-sycl",
+      "configurePreset": "pi5-sycl",
       "verbose": false
     }
   ]

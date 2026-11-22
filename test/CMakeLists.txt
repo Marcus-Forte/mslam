@@ -127,12 +127,21 @@ test_device_preprocessor.cc)
 target_link_libraries(test_device_preprocessor slam GTest::gtest_main)
 
 gtest_discover_tests(test_device_preprocessor)
+if(MSLAM_WITH_SYCL)
+  gtest_discover_tests(test_device_preprocessor TEST_SUFFIX .host
+    PROPERTIES ENVIRONMENT MOPTIM_BACKEND=host)
+endif()
 
 add_executable(test_device_correspondences
 test_device_correspondences.cc)
 target_link_libraries(test_device_correspondences slam maps GTest::gtest_main)
 
 gtest_discover_tests(test_device_correspondences)
+if(MSLAM_WITH_SYCL)
+  # The device components on moptim's host backend too (their default context).
+  gtest_discover_tests(test_device_correspondences TEST_SUFFIX .host
+    PROPERTIES ENVIRONMENT MOPTIM_BACKEND=host)
+endif()
 
 add_executable(test_parallel
 test_parallel.cc)

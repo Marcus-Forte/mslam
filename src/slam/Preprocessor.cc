@@ -1,9 +1,7 @@
 #include "mslam/slam/Preprocessor.hh"
 #include "mslam/slam/Deskew.hh"
+#include "mslam/slam/ComputeContext.hh"
 #include "mslam/slam/DevicePreprocessor.hh"
-
-#include <cstdlib>
-#include <cstring>
 
 #include <Eigen/Geometry>
 #include <cmath>
@@ -136,12 +134,13 @@ std::shared_ptr<Scan> filterByIntensity(const Scan &input,
 }
 
 Preprocessor::Preprocessor(const PreProcessor &config,
-                           std::shared_ptr<spdlog::logger> logger)
+                           std::shared_ptr<spdlog::logger> logger,
+                           ComputeBackend backend)
     : config_(config), logger_(std::move(logger)) {
-  const char *host = std::getenv("MSLAM_HOST_PREPROCESS");
-  if (config_.downsample_filter == DownsampleFilter::VoxelHash &&
-      !(host != nullptr && std::strcmp(host, "1") == 0)) {
-    device_ = std::make_unique<DevicePreprocessor>();
+  if (backend == ComputeBackend::Sycl &&
+      config_.downsample_filter == DownsampleFilter::VoxelHash) {
+    device_ =
+        std::make_unique<DevicePreprocessor>(executionContextFor(backend));
   }
 }
 

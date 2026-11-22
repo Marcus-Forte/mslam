@@ -7,7 +7,7 @@
 
 namespace mslam {
 
-class SyclVoxelHashMap;
+class DeviceVoxelHashMap;
 
 /// What the correspondence kernel found for one source point. Written by that
 /// point's work-item only.
@@ -25,7 +25,8 @@ std::uint64_t deviceCorrespondenceLaunches();
 
 /**
  * @brief The correspondence search and normal estimation of a registration
- * round, in one SYCL kernel over the source points.
+ * round, in one kernel over the source points, on the map's execution context
+ * (a SYCL kernel, or host work-groups on moptim's host backend).
  *
  * For every source point: the nearest map point (device::closestNeighbor() on
  * the map's mirror, the same search as VoxelHashMap::getClosestNeighbor()), the
@@ -49,16 +50,17 @@ public:
 
   /// Runs the kernel for @p source (map coordinates) on @p width work-groups
   /// and waits; returns source.size() results, valid until the next run().
-  const DeviceCorrespondence *run(const SyclVoxelHashMap &map,
+  const DeviceCorrespondence *run(const DeviceVoxelHashMap &map,
                                   const PointCloud &source,
                                   float max_correspondence_distance,
                                   std::size_t width);
 
 private:
-  void reserve(const SyclVoxelHashMap &map, std::size_t points);
+  void reserve(const DeviceVoxelHashMap &map, std::size_t points);
+  void release();
 
   int num_neighbors_;
-  const SyclVoxelHashMap *allocated_for_ = nullptr; ///< Owner of the buffers' queue.
+  const DeviceVoxelHashMap *allocated_for_ = nullptr; ///< Owner of the buffers' queue.
   DeviceCorrespondence *results_ = nullptr;
   Point *source_copy_ = nullptr; ///< For devices that cannot read host memory.
   std::size_t *next_chunk_ = nullptr; ///< Claim counter of the work-groups.

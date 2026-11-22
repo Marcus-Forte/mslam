@@ -9,9 +9,10 @@
 namespace mslam {
 
 PoseGraphBackend::PoseGraphBackend(const PoseGraphParameters &parameters,
-                                   std::shared_ptr<spdlog::logger> logger)
+                                   std::shared_ptr<spdlog::logger> logger,
+                                   ComputeBackend backend)
     : parameters_(parameters), logger_(logger), builder_(parameters),
-      loop_closer_(parameters, logger),
+      loop_closer_(parameters, logger, backend),
       result_(std::make_shared<const PoseGraphResult>()) {
   if (!parameters_.synchronous) {
     worker_ = std::thread([this] { workerLoop(); });

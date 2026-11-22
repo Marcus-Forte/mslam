@@ -67,10 +67,12 @@ class DevicePreprocessor;
 
 class Preprocessor {
 public:
-  /// Uses the SYCL DevicePreprocessor for the voxel_hash filter (deskew, range
-  /// test and downsampling in one kernel) unless MSLAM_HOST_PREPROCESS=1.
+  /// On the sycl @p backend the voxel_hash filter runs in the DevicePreprocessor
+  /// (deskew, range test and downsampling in one kernel); on the host, and for
+  /// voxel_grid, deskewInto() and VoxelFilter.
   Preprocessor(const PreProcessor &config,
-               std::shared_ptr<spdlog::logger> logger);
+               std::shared_ptr<spdlog::logger> logger,
+               ComputeBackend backend = ComputeBackend::Host);
   ~Preprocessor();
   Preprocessor(Preprocessor &&) noexcept;
 

@@ -1,6 +1,7 @@
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
-#include "mslam/map/SyclVoxelHashMap.hh"
+#include "mslam/map/DeviceVoxelHashMap.hh"
+#include "mslam/slam/ComputeContext.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
 
@@ -36,10 +37,11 @@ bool isNegligibleRoundStep(const Eigen::Affine3d &before,
 IcpWorkspace::IcpWorkspace(
     const IcpParameters &parameters, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    std::shared_ptr<const ParallelExecutor> executor)
+    std::shared_ptr<const ParallelExecutor> executor, ComputeBackend backend)
     : parameters_(parameters), logger_(std::move(logger)),
       correspondence_finder_(std::move(correspondence_finder)),
-      executor_(std::move(executor)) {}
+      executor_(std::move(executor)), backend_(backend),
+      context_(executionContextFor(backend)) {}
 
 void IcpWorkspace::begin(const IMap &map, const PointCloud &scan,
                          const Eigen::Affine3d &initial_guess) {
@@ -67,7 +69,7 @@ std::size_t deviceWidth(const ParallelExecutor *executor) {
 } // namespace
 
 void IcpWorkspace::findCorrespondences(const IMap &map) {
-  if (const SyclVoxelHashMap *device_map = map.deviceMap()) {
+  if (const DeviceVoxelHashMap *device_map = map.deviceMap()) {
     const DeviceCorrespondence *found =
         device_search_.run(*device_map, source_,
                            parameters_.max_correspondence_distance,
@@ -88,7 +90,7 @@ void IcpWorkspace::findCorrespondences(const IMap &map) {
 
 std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   using Clock = std::chrono::steady_clock;
-  if (const SyclVoxelHashMap *device_map = map.deviceMap()) {
+  if (const DeviceVoxelHashMap *device_map = map.deviceMap()) {
     const auto search_start = Clock::now();
     const DeviceCorrespondence *found =
         device_search_.run(*device_map, source_,
@@ -168,11 +170,8 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
 }
 
 bool IcpWorkspace::useDeviceOptimizer() const {
-  static const bool host_lm = [] {
-    const char *value = std::getenv("MSLAM_HOST_LM");
-    return value != nullptr && std::strcmp(value, "1") == 0;
-  }();
-  return !host_lm && !logger_->should_log(spdlog::level::debug);
+  return backend_ == ComputeBackend::Sycl &&
+         !logger_->should_log(spdlog::level::debug);
 }
 
 void IcpWorkspace::attachObserver(

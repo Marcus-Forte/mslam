@@ -1,15 +1,15 @@
 #include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
 
-#include "mslam/map/SyclVoxelHashMap.hh"
+#include "mslam/map/DeviceVoxelHashMap.hh"
 #include "mslam/slam/NormalMath.hh"
 
+#include "moptim/Atomic.hh"
 #include "moptim/ExecutionContext.hh"
 
 #include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <new>
-#include <sycl/sycl.hpp>
 
 namespace mslam {
 
@@ -96,54 +96,45 @@ std::uint64_t deviceCorrespondenceLaunches() {
 DeviceCorrespondenceSearch::DeviceCorrespondenceSearch(int num_neighbors)
     : num_neighbors_(std::clamp(num_neighbors, 0, device::kMaxNeighbors)) {}
 
-DeviceCorrespondenceSearch::~DeviceCorrespondenceSearch() {
-  if (allocated_for_ != nullptr) {
-    sycl::queue &queue = allocated_for_->context()->queue();
-    sycl::free(results_, queue);
-    if (source_copy_ != nullptr) {
-      sycl::free(source_copy_, queue);
-    }
-    if (next_chunk_ != nullptr) {
-      sycl::free(next_chunk_, queue);
-    }
+DeviceCorrespondenceSearch::~DeviceCorrespondenceSearch() { release(); }
+
+void DeviceCorrespondenceSearch::release() {
+  if (allocated_for_ == nullptr) {
+    return;
   }
+  moptim::ExecutionContext &context = *allocated_for_->context();
+  context.deallocate(results_);
+  context.deallocate(source_copy_);
+  context.deallocate(next_chunk_);
+  results_ = nullptr;
+  source_copy_ = nullptr;
+  next_chunk_ = nullptr;
+  capacity_ = 0;
+  allocated_for_ = nullptr;
 }
 
-void DeviceCorrespondenceSearch::reserve(const SyclVoxelHashMap &map,
+void DeviceCorrespondenceSearch::reserve(const DeviceVoxelHashMap &map,
                                          std::size_t points) {
   if (points <= capacity_ && allocated_for_ == &map) {
     return;
   }
-  if (allocated_for_ != nullptr) {
-    sycl::queue &old_queue = allocated_for_->context()->queue();
-    sycl::free(results_, old_queue);
-    if (source_copy_ != nullptr) {
-      sycl::free(source_copy_, old_queue);
-    }
-    if (next_chunk_ != nullptr) {
-      sycl::free(next_chunk_, old_queue);
-      next_chunk_ = nullptr;
-    }
-  }
-  sycl::queue &queue = map.context()->queue();
   const std::size_t capacity = std::max<std::size_t>(points, 2 * capacity_);
-  results_ = sycl::malloc_shared<DeviceCorrespondence>(capacity, queue);
-  if (next_chunk_ == nullptr) {
-    next_chunk_ = sycl::malloc_shared<std::size_t>(1, queue);
-  }
-  source_copy_ = map.context()->hostAccessible()
-                     ? nullptr
-                     : sycl::malloc_shared<Point>(capacity, queue);
-  if (results_ == nullptr ||
-      (!map.context()->hostAccessible() && source_copy_ == nullptr)) {
-    throw std::bad_alloc();
+  release();
+  moptim::ExecutionContext &context = *map.context();
+  allocated_for_ = &map;
+  results_ = static_cast<DeviceCorrespondence *>(context.allocateShared(
+      capacity * sizeof(DeviceCorrespondence), 64));
+  next_chunk_ = static_cast<std::size_t *>(
+      context.allocateShared(sizeof(std::size_t), 64));
+  if (!context.hostAccessible()) {
+    source_copy_ = static_cast<Point *>(
+        context.allocateShared(capacity * sizeof(Point), 64));
   }
   capacity_ = capacity;
-  allocated_for_ = &map;
 }
 
 const DeviceCorrespondence *
-DeviceCorrespondenceSearch::run(const SyclVoxelHashMap &map,
+DeviceCorrespondenceSearch::run(const DeviceVoxelHashMap &map,
                                 const PointCloud &source,
                                 float max_correspondence_distance,
                                 std::size_t width) {
@@ -172,26 +163,21 @@ DeviceCorrespondenceSearch::run(const SyclVoxelHashMap &map,
   args.results = results_;
 
   g_launches.fetch_add(1, std::memory_order_relaxed);
-  map.context()
-      ->queue()
-      .parallel_for<CorrespondenceKernel>(
-          sycl::nd_range<1>{width, 1},
-          [args](sycl::nd_item<1>) {
-            // Each point writes only its own result, so the results do not
-            // depend on which work-group claimed it.
-            sycl::atomic_ref<std::size_t, sycl::memory_order::relaxed,
-                             sycl::memory_scope::device>
-                next(*args.next_chunk);
-            for (std::size_t chunk = next.fetch_add(1); chunk < args.chunks;
-                 chunk = next.fetch_add(1)) {
-              const std::size_t end =
-                  std::min(args.count, (chunk + 1) * kChunk);
-              for (std::size_t i = chunk * kChunk; i < end; ++i) {
-                processPoint(args, i);
-              }
-            }
-          })
-      .wait_and_throw();
+  // A SYCL kernel or host work-groups, whichever the map's context runs on.
+  moptim::detail::launchNamed<CorrespondenceKernel>(
+      *map.context(), width, [args](std::size_t) {
+        // Each point writes only its own result, so the results do not depend
+        // on which work-group claimed it.
+        for (std::size_t chunk = moptim::atomicFetchAdd(*args.next_chunk,
+                                                        std::size_t{1});
+             chunk < args.chunks;
+             chunk = moptim::atomicFetchAdd(*args.next_chunk, std::size_t{1})) {
+          const std::size_t end = std::min(args.count, (chunk + 1) * kChunk);
+          for (std::size_t i = chunk * kChunk; i < end; ++i) {
+            processPoint(args, i);
+          }
+        }
+      });
   return results_;
 }
 

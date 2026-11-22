@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mslam/OptimizerObserver.hh"
+#include "mslam/config/IConfig.hh"
 #include "mslam/common/Points.hh"
 #include "mslam/map/IMap.hh"
 #include "mslam/slam/ICorrespondenceFinder.hh"
@@ -8,6 +9,7 @@
 #include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
 #include "mslam/utils/Parallel.hh"
 
+#include "moptim/ExecutionContext.hh"
 #include "moptim/LevenbergMarquardt.hh"
 
 #include <Eigen/Dense>
@@ -33,7 +35,7 @@ struct IcpParameters {
 /// normal estimation of the matched map points; assembly: building the
 /// point-to-plane constraints; solve: building the costs and the optimizer
 /// runs. Reading the clock a few times per round costs nothing measurable. On a
-/// map with a device mirror (SyclVoxelHashMap) the search and the normals are
+/// map with a device mirror (DeviceVoxelHashMap) the search and the normals are
 /// one kernel, counted as search, and normals stays zero.
 struct RegistrationTimings {
   std::chrono::nanoseconds search{0};
@@ -93,10 +95,14 @@ public:
   /// @param executor Runs the normal estimation of new map points (nullptr:
   /// sequential). The correspondence search runs on whatever executor
   /// @p correspondence_finder was given.
+  /// @param backend Where the registrations' solves run (their costs and
+  /// optimizer, see useDeviceOptimizer()); the search follows the map (a
+  /// DeviceVoxelHashMap is searched in kernels on its own context).
   IcpWorkspace(const IcpParameters &parameters,
                std::shared_ptr<spdlog::logger> logger,
                std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-               std::shared_ptr<const ParallelExecutor> executor = nullptr);
+               std::shared_ptr<const ParallelExecutor> executor = nullptr,
+               ComputeBackend backend = ComputeBackend::Host);
 
   const IcpParameters &parameters() const { return parameters_; }
   spdlog::logger &logger() const { return *logger_; }
@@ -146,10 +152,17 @@ public:
   void attachObserver(moptim::LevenbergMarquardt<double> &optimizer);
 
   /// Whether the registrations run their solves with
-  /// moptim::DeviceLevenbergMarquardt (the whole optimize() in one launch).
-  /// False when debug logging wants the optimizer's telemetry (the device
-  /// optimizer has no observer) or MSLAM_HOST_LM=1 (comparisons).
+  /// moptim::DeviceLevenbergMarquardt (the whole optimize() in one launch): on
+  /// the sycl backend, unless debug logging wants the optimizer's telemetry
+  /// (the device optimizer has no observer). Otherwise moptim's
+  /// LevenbergMarquardt.
   bool useDeviceOptimizer() const;
+
+  ComputeBackend backend() const { return backend_; }
+  /// The moptim context the registrations' costs run on (executionContextFor()).
+  const std::shared_ptr<moptim::ExecutionContext> &context() const {
+    return context_;
+  }
 
   /// Time spent so far (findPlaneConstraints() fills search, normals and
   /// assembly; the registrations add their solve time).
@@ -161,6 +174,8 @@ private:
   std::shared_ptr<spdlog::logger> logger_;
   std::shared_ptr<ICorrespondenceFinder> correspondence_finder_;
   std::shared_ptr<const ParallelExecutor> executor_;
+  ComputeBackend backend_;
+  std::shared_ptr<moptim::ExecutionContext> context_;
   NormalEstimator normal_estimator_;
   std::vector<std::uint32_t> normal_slots_; ///< One per correspondence.
   std::optional<OptimizerObserver<double>> observer_;

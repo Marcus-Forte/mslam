@@ -37,7 +37,7 @@ SlamPipeline::SlamPipeline(Slam &slam, const SlamConfiguration &config,
                            std::shared_ptr<spdlog::logger> logger,
                            ISlamOutput &output)
     : slam_(slam), config_(config), logger_(std::move(logger)), output_(output),
-      map_(slam.map()), preprocessor_(config.preprocessor, logger_),
+      map_(slam.map()), preprocessor_(config.preprocessor, logger_, config.parameters.backend),
       sync_(config.with_imu, config.preprocessor.points_per_second, logger_) {
   {
     // The preprocessing kernel runs on as many work-groups as the
@@ -51,7 +51,8 @@ SlamPipeline::SlamPipeline(Slam &slam, const SlamConfiguration &config,
                                                 kDenseMapVoxelBucketSize);
   }
   if (config_.strategy == SlamStrategy::PoseGraph) {
-    backend_ = std::make_unique<PoseGraphBackend>(config_.pose_graph, logger_);
+    backend_ = std::make_unique<PoseGraphBackend>(config_.pose_graph, logger_,
+                                                  config_.parameters.backend);
     applied_result_ = backend_->latestResult();
     GraphStatus status;
     status.strategy = SlamStrategy::PoseGraph;

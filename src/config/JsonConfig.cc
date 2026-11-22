@@ -1,4 +1,6 @@
 #include "mslam/config/JsonConfig.hh"
+
+#include <cstdlib>
 #include "jsoncpp/json/reader.h"
 #include "mslam/config/Validation.hh"
 
@@ -32,6 +34,17 @@ mslam::ImuFusion parseImuFusion(const std::string &fusion) {
   }
 
   throw std::runtime_error("Invalid slam imu_fusion: " + fusion);
+}
+
+mslam::ComputeBackend parseComputeBackend(const std::string &backend) {
+  if (backend == "host") {
+    return mslam::ComputeBackend::Host;
+  }
+  if (backend == "sycl") {
+    return mslam::ComputeBackend::Sycl;
+  }
+  throw std::runtime_error("Invalid slam backend: " + backend +
+                           " (expected host or sycl)");
 }
 
 mslam::SlamStrategy parseSlamStrategy(const std::string &strategy) {
@@ -316,6 +329,19 @@ void JsonConfig::load() {
                                std::to_string(kMaxThreads) + "]");
     }
     config_.parameters.num_threads = num_threads.asUInt();
+  }
+
+  if (!root["slam"]["backend"].empty()) {
+    if (!root["slam"]["backend"].isString()) {
+      throw std::runtime_error("Invalid slam backend: expected a string");
+    }
+    config_.parameters.backend =
+        parseComputeBackend(root["slam"]["backend"].asString());
+  }
+  // MSLAM_BACKEND=host|sycl overrides the file, so one config (and one test
+  // or benchmark) runs on either backend.
+  if (const char *backend = std::getenv("MSLAM_BACKEND")) {
+    config_.parameters.backend = parseComputeBackend(backend);
   }
 
   if (config_.parameters.opt_iterations <= 0) {

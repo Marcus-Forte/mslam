@@ -1,11 +1,10 @@
-#include "mslam/map/SyclVoxelHashMap.hh"
+#include "mslam/map/DeviceVoxelHashMap.hh"
 
 #include "moptim/ExecutionContext.hh"
 
 #include <algorithm>
 #include <cassert>
 #include <cstring>
-#include <sycl/sycl.hpp>
 
 namespace mslam {
 
@@ -17,19 +16,18 @@ namespace {
 
 constexpr std::uint32_t kInitialCapacity = 1U << 12;
 
-template <class T> T *allocate(sycl::queue &queue, std::size_t count) {
-  T *data = sycl::malloc_shared<T>(std::max<std::size_t>(count, 1), queue);
-  if (data == nullptr) {
-    throw std::bad_alloc();
-  }
-  return data;
+/// Memory the host and the kernels of @p context share (shared USM on SYCL,
+/// plain memory on the host backend).
+template <class T>
+T *allocate(moptim::ExecutionContext &context, std::size_t count) {
+  return static_cast<T *>(context.allocateShared(
+      std::max<std::size_t>(count, 1) * sizeof(T), alignof(T) < 64 ? 64 : alignof(T)));
 }
 
-template <class T> void release(sycl::queue &queue, T *&data) {
-  if (data != nullptr) {
-    sycl::free(data, queue);
-    data = nullptr;
-  }
+template <class T>
+void release(moptim::ExecutionContext &context, T *&data) {
+  context.deallocate(data);
+  data = nullptr;
 }
 
 bool sameKey(const device::VoxelKey &a, const device::VoxelKey &b) {
@@ -38,7 +36,7 @@ bool sameKey(const device::VoxelKey &a, const device::VoxelKey &b) {
 
 } // namespace
 
-SyclVoxelHashMap::SyclVoxelHashMap(
+DeviceVoxelHashMap::DeviceVoxelHashMap(
     float voxel_size, size_t max_points_per_voxel,
     std::shared_ptr<moptim::ExecutionContext> context)
     : VoxelHashMap(voxel_size, max_points_per_voxel),
@@ -46,8 +44,8 @@ SyclVoxelHashMap::SyclVoxelHashMap(
   growTable(kInitialCapacity);
 }
 
-SyclVoxelHashMap::~SyclVoxelHashMap() {
-  sycl::queue &queue = context_->queue();
+DeviceVoxelHashMap::~DeviceVoxelHashMap() {
+  moptim::ExecutionContext &queue = *context_;
   release(queue, keys_);
   release(queue, buckets_);
   release(queue, pool_mirror_);
@@ -56,7 +54,7 @@ SyclVoxelHashMap::~SyclVoxelHashMap() {
   release(queue, shifts_);
 }
 
-PointCloud SyclVoxelHashMap::addScan(const PointCloud &scan) {
+PointCloud DeviceVoxelHashMap::addScan(const PointCloud &scan) {
   PointCloud added = VoxelHashMap::addScan(scan);
   const float inverse_voxel_size = 1.0F / voxelSize();
   changed_.clear();
@@ -85,7 +83,7 @@ PointCloud SyclVoxelHashMap::addScan(const PointCloud &scan) {
   return added;
 }
 
-void SyclVoxelHashMap::prune(const Point &center, float max_range,
+void DeviceVoxelHashMap::prune(const Point &center, float max_range,
                              size_t max_voxels) {
   // prune() only removes voxels, so an unchanged count means nothing changed.
   const size_t before = size();
@@ -95,12 +93,12 @@ void SyclVoxelHashMap::prune(const Point &center, float max_range,
   }
 }
 
-void SyclVoxelHashMap::clear() {
+void DeviceVoxelHashMap::clear() {
   VoxelHashMap::clear();
   rebuild();
 }
 
-device::MapView SyclVoxelHashMap::view() const {
+device::MapView DeviceVoxelHashMap::view() const {
   updateShifts();
   device::MapView view;
   view.keys = keys_;
@@ -116,7 +114,7 @@ device::MapView SyclVoxelHashMap::view() const {
   return view;
 }
 
-void SyclVoxelHashMap::storeNormal(std::uint32_t slot,
+void DeviceVoxelHashMap::storeNormal(std::uint32_t slot,
                                    const double *normal) const {
   if (normal_state_[slot] == DeviceNormalCache::kUnknown) {
     ++known_normals_;
@@ -130,14 +128,14 @@ void SyclVoxelHashMap::storeNormal(std::uint32_t slot,
   normal_state_[slot] = DeviceNormalCache::kNormal;
 }
 
-std::size_t SyclVoxelHashMap::cachedNormals() const {
+std::size_t DeviceVoxelHashMap::cachedNormals() const {
   return static_cast<std::size_t>(std::count_if(
       normal_state_, normal_state_ + pool_used_, [](std::uint8_t state) {
         return state != DeviceNormalCache::kUnknown;
       }));
 }
 
-bool SyclVoxelHashMap::mirrorInsert(const device::VoxelKey &key,
+bool DeviceVoxelHashMap::mirrorInsert(const device::VoxelKey &key,
                                     const Point &point) {
   const std::uint32_t slot = findOrInsertSlot(key);
   device::Bucket &bucket = buckets_[slot];
@@ -152,7 +150,7 @@ bool SyclVoxelHashMap::mirrorInsert(const device::VoxelKey &key,
 }
 
 std::uint32_t
-SyclVoxelHashMap::findOrInsertSlot(const device::VoxelKey &key) {
+DeviceVoxelHashMap::findOrInsertSlot(const device::VoxelKey &key) {
   if (2 * (static_cast<std::uint64_t>(occupied_) + 1) > capacity_) {
     growTable(2 * capacity_);
   }
@@ -176,8 +174,8 @@ SyclVoxelHashMap::findOrInsertSlot(const device::VoxelKey &key) {
   return slot;
 }
 
-void SyclVoxelHashMap::growTable(std::uint32_t capacity) {
-  sycl::queue &queue = context_->queue();
+void DeviceVoxelHashMap::growTable(std::uint32_t capacity) {
+  moptim::ExecutionContext &queue = *context_;
   auto *keys = allocate<device::VoxelKey>(queue, capacity);
   auto *buckets = allocate<device::Bucket>(queue, capacity);
   for (std::uint32_t i = 0; i < capacity; ++i) {
@@ -205,8 +203,8 @@ void SyclVoxelHashMap::growTable(std::uint32_t capacity) {
   capacity_ = capacity;
 }
 
-void SyclVoxelHashMap::growPool(std::size_t slots) {
-  sycl::queue &queue = context_->queue();
+void DeviceVoxelHashMap::growPool(std::size_t slots) {
+  moptim::ExecutionContext &queue = *context_;
   const std::size_t capacity = std::max(slots, 2 * pool_capacity_);
   auto *pool = allocate<device::PointXYZI>(queue, capacity);
   auto *state = allocate<std::uint8_t>(queue, capacity);
@@ -226,7 +224,7 @@ void SyclVoxelHashMap::growPool(std::size_t slots) {
   pool_capacity_ = capacity;
 }
 
-void SyclVoxelHashMap::invalidateAround(
+void DeviceVoxelHashMap::invalidateAround(
     const std::vector<device::VoxelKey> &changed) {
   // The normal of a point in voxel u reads the voxels within the search radius
   // of u, so a change in a voxel invalidates the points of every voxel within
@@ -267,7 +265,7 @@ void SyclVoxelHashMap::invalidateAround(
   }
 }
 
-void SyclVoxelHashMap::rebuild() {
+void DeviceVoxelHashMap::rebuild() {
   for (std::uint32_t i = 0; i < capacity_; ++i) {
     keys_[i].x = device::kEmptyKey;
   }
@@ -284,12 +282,12 @@ void SyclVoxelHashMap::rebuild() {
   known_normals_ = 0;
 }
 
-void SyclVoxelHashMap::updateShifts() const {
+void DeviceVoxelHashMap::updateShifts() const {
   const int radius = numAdjacentVoxelSearch();
   if (radius == shifts_radius_) {
     return;
   }
-  sycl::queue &queue = context_->queue();
+  moptim::ExecutionContext &queue = *context_;
   const std::uint32_t side = static_cast<std::uint32_t>(2 * radius + 1);
   release(queue, shifts_);
   shifts_ = allocate<device::VoxelKey>(queue, side * side * side);

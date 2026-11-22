@@ -5,6 +5,7 @@
 #include "mslam/map/IMap.hh"
 #include "mslam/slam/ICorrespondenceFinder.hh"
 #include "mslam/slam/NormalEstimator.hh"
+#include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
 #include "mslam/utils/Parallel.hh"
 
 #include "moptim/LevenbergMarquardt.hh"
@@ -31,18 +32,26 @@ struct IcpParameters {
 /// (bench_slam prints it). search: the 1-NN correspondence search; normals: the
 /// normal estimation of the matched map points; assembly: building the
 /// point-to-plane constraints; solve: building the costs and the optimizer
-/// runs. Reading the clock a few times per round costs nothing measurable.
+/// runs. Reading the clock a few times per round costs nothing measurable. On a
+/// map with a device mirror (SyclVoxelHashMap) the search and the normals are
+/// one kernel, counted as search, and normals stays zero.
 struct RegistrationTimings {
   std::chrono::nanoseconds search{0};
   std::chrono::nanoseconds normals{0};
   std::chrono::nanoseconds assembly{0};
   std::chrono::nanoseconds solve{0};
+  /// Device path: matched map points whose normal was computed / read from the
+  /// map's cache.
+  std::size_t normals_computed = 0;
+  std::size_t normals_cached = 0;
 
   RegistrationTimings &operator+=(const RegistrationTimings &other) {
     search += other.search;
     normals += other.normals;
     assembly += other.assembly;
     solve += other.solve;
+    normals_computed += other.normals_computed;
+    normals_cached += other.normals_cached;
     return *this;
   }
 };
@@ -115,6 +124,12 @@ public:
   /// which the point-to-plane constraints are assembled (points without a
   /// normal are dropped). Returns the number of constraints.
   ///
+  /// On a map with a device mirror (IMap::deviceMap()) the search and the
+  /// normals run in one SYCL kernel (DeviceCorrespondenceSearch) on as many
+  /// work-groups as the executor has threads, with the normals cached in the
+  /// map across scans; the constraints are assembled in the same order and with
+  /// the same arithmetic as on the host path.
+  ///
   /// Constraint i is the pair (planeInputs()[i], planeOffsets()[i]) =
   /// ([source_xyz, normal_xyz], normal . map_point), the layout of
   /// Point3PlaneDistance.
@@ -150,6 +165,7 @@ private:
   std::vector<Eigen::Matrix<double, 6, 1>> plane_inputs_;
   std::vector<double> plane_offsets_;
   RegistrationTimings timings_;
+  DeviceCorrespondenceSearch device_search_;
 };
 
 } // namespace mslam

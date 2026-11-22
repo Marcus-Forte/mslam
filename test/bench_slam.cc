@@ -55,6 +55,7 @@
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/Transform.hh"
 #include "moptim/ExecutionContext.hh"
+#include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
 
 #include <spdlog/spdlog.h>
 
@@ -372,6 +373,8 @@ int main(int argc, char **argv) {
   for (int run = 0; run < repeats; ++run) {
     // Benchmark-only: launches of moptim's default context during this run.
     const std::uint64_t launches_before = moptim::defaultContext()->launches();
+    const std::uint64_t device_launches_before =
+        mslam::deviceCorrespondenceLaunches();
     auto map = mslam::makeVoxelHashMap(config.map_parameters);
     mslam::Slam slam(logger, config, map);
     mslam::NullSlamOutput null_output;
@@ -450,11 +453,16 @@ int main(int argc, char **argv) {
     const auto split_other = timings.update - split.search - split.normals -
                              split.assembly - split.solve;
     std::printf("  register split: search=%.1f normals=%.1f assembly=%.1f "
-                "solve=%.1f other=%.1f ms | moptim_launches=%llu\n",
+                "solve=%.1f other=%.1f ms | moptim_launches=%llu "
+                "device_search_launches=%llu normals computed=%zu cached=%zu\n",
                 toMs(split.search), toMs(split.normals), toMs(split.assembly),
                 toMs(split.solve), toMs(split_other),
                 static_cast<unsigned long long>(
-                    moptim::defaultContext()->launches() - launches_before));
+                    moptim::defaultContext()->launches() - launches_before),
+                static_cast<unsigned long long>(
+                    mslam::deviceCorrespondenceLaunches() -
+                    device_launches_before),
+                split.normals_computed, split.normals_cached);
 
     if (const auto graph = pipeline.backendResult()) {
       printPoseGraph(*graph, pipeline, slam, timings,

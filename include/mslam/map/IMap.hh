@@ -6,6 +6,8 @@
 #include <vector>
 
 namespace mslam {
+class SyclVoxelHashMap;
+
 /**
  * @brief A map of points that scans are registered against.
  *
@@ -18,6 +20,11 @@ namespace mslam {
 class IMap {
 public:
   virtual ~IMap() = default;
+
+  /// The map's SYCL device mirror, if it has one (SyclVoxelHashMap): the
+  /// registrations then search it in kernels instead of calling the queries
+  /// below point by point.
+  virtual const SyclVoxelHashMap *deviceMap() const { return nullptr; }
   /**
    * @brief A neighbor in the map.
    *

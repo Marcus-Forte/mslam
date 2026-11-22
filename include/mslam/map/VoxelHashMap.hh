@@ -51,6 +51,17 @@ public:
   /// Number of occupied voxels (used for diagnostics / tests).
   size_t size() const { return map_.size(); }
 
+  /// Most points a voxel holds.
+  size_t maxPointsPerVoxel() const { return max_points_per_voxel_; }
+
+  /// Calls visit(voxel, points, count) for every occupied voxel, in no
+  /// particular order; `points` are the voxel's points in insertion order.
+  template <class Visit> void forEachVoxel(Visit &&visit) const {
+    for (const auto &[voxel, bucket] : map_) {
+      visit(voxel, pool_.data() + bucket.offset, bucket.count);
+    }
+  }
+
 private:
   struct Bucket {
     std::uint32_t offset; ///< First point of the chunk in `pool_`.

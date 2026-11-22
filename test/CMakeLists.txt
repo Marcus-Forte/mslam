@@ -122,6 +122,12 @@ target_link_libraries(test_timing slam GTest::gtest_main)
 
 gtest_discover_tests(test_timing)
 
+add_executable(test_device_correspondences
+test_device_correspondences.cc)
+target_link_libraries(test_device_correspondences slam maps GTest::gtest_main)
+
+gtest_discover_tests(test_device_correspondences)
+
 add_executable(test_parallel
 test_parallel.cc)
 target_link_libraries(test_parallel slam GTest::gtest_main)

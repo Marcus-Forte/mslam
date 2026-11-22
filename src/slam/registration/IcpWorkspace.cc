@@ -1,5 +1,6 @@
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
+#include "mslam/map/SyclVoxelHashMap.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
 
@@ -56,13 +57,83 @@ void IcpWorkspace::resetSource(const Eigen::Affine3d &total) {
   transformCloud(total, source_);
 }
 
+namespace {
+
+/// Work-groups of the device kernels: the executor's threads (1 without one).
+std::size_t deviceWidth(const ParallelExecutor *executor) {
+  return executor != nullptr ? executor->concurrency() : 1;
+}
+
+} // namespace
+
 void IcpWorkspace::findCorrespondences(const IMap &map) {
+  if (const SyclVoxelHashMap *device_map = map.deviceMap()) {
+    const DeviceCorrespondence *found =
+        device_search_.run(*device_map, source_,
+                           parameters_.max_correspondence_distance,
+                           deviceWidth(executor_.get()));
+    correspondences_.clear();
+    for (std::size_t i = 0; i < source_.size(); ++i) {
+      if (found[i].matched != 0) {
+        correspondences_.emplace_back(
+            source_[i], Point{found[i].map_point[0], found[i].map_point[1],
+                              found[i].map_point[2]});
+      }
+    }
+    return;
+  }
   correspondence_finder_->find(
       map, source_, parameters_.max_correspondence_distance, correspondences_);
 }
 
 std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   using Clock = std::chrono::steady_clock;
+  if (const SyclVoxelHashMap *device_map = map.deviceMap()) {
+    const auto search_start = Clock::now();
+    const DeviceCorrespondence *found =
+        device_search_.run(*device_map, source_,
+                           parameters_.max_correspondence_distance,
+                           deviceWidth(executor_.get()));
+    const auto assembly_start = Clock::now();
+    timings_.search += assembly_start - search_start;
+
+    // The host path's order and arithmetic: correspondences in source order,
+    // constraints for those whose map point has a normal. Normals computed by
+    // this launch go into the map's cache (several points may share a map
+    // point; they computed the same value from the same map).
+    correspondences_.clear();
+    plane_inputs_.clear();
+    plane_offsets_.clear();
+    for (std::size_t i = 0; i < source_.size(); ++i) {
+      const DeviceCorrespondence &c = found[i];
+      if (c.matched == 0) {
+        continue;
+      }
+      const Point &scan_point = source_[i];
+      const Point map_point{c.map_point[0], c.map_point[1], c.map_point[2]};
+      correspondences_.emplace_back(scan_point, map_point);
+      if (c.computed != 0) {
+        device_map->storeNormal(c.slot,
+                                c.has_normal != 0 ? c.normal : nullptr);
+        ++timings_.normals_computed;
+      } else {
+        ++timings_.normals_cached;
+      }
+      if (c.has_normal == 0) {
+        continue;
+      }
+      plane_inputs_.emplace_back(scan_point.x, scan_point.y, scan_point.z,
+                                 c.normal[0], c.normal[1], c.normal[2]);
+      plane_offsets_.push_back(c.normal[0] * map_point.x +
+                               c.normal[1] * map_point.y +
+                               c.normal[2] * map_point.z);
+    }
+    timings_.assembly += Clock::now() - assembly_start;
+    logger_->debug("Normal estimation. {} / {} points", plane_offsets_.size(),
+                   correspondences_.size());
+    return plane_offsets_.size();
+  }
+
   const auto search_start = Clock::now();
   findCorrespondences(map);
   const auto normals_start = Clock::now();

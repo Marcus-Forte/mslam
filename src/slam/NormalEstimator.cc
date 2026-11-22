@@ -1,4 +1,5 @@
 #include "mslam/slam/NormalEstimator.hh"
+#include "mslam/slam/NormalMath.hh"
 #include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <bit>
@@ -84,36 +85,14 @@ void NormalEstimator::estimateAll(const Correspondences &correspondences,
 
 std::optional<Eigen::Vector3d>
 NormalEstimator::fromNeighbors(std::span<const IMap::Neighbor> neighbors) {
-  if (neighbors.size() < 3) {
+  Eigen::Vector3d normal;
+  if (!normalFromPoints(
+          neighbors.size(),
+          [&](std::size_t i) -> const Point & { return neighbors[i].first; },
+          normal)) {
     return std::nullopt;
   }
-
-  Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
-  for (const auto &[point, _] : neighbors) {
-    centroid += Eigen::Vector3d{point.x, point.y, point.z};
-  }
-  centroid /= static_cast<double>(neighbors.size());
-
-  Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
-  for (const auto &[point, _] : neighbors) {
-    const Eigen::Vector3d centered =
-        Eigen::Vector3d{point.x, point.y, point.z} - centroid;
-    covariance.noalias() += centered * centered.transpose();
-  }
-
-  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver;
-  solver.computeDirect(covariance, Eigen::ComputeEigenvectors);
-  if (solver.info() != Eigen::Success) {
-    return std::nullopt;
-  }
-
-  const Eigen::Vector3d normal = solver.eigenvectors().col(0);
-  const double norm = normal.norm();
-  if (norm <= std::numeric_limits<double>::epsilon()) {
-    return std::nullopt;
-  }
-
-  return normal / norm;
+  return normal;
 }
 
 } // namespace mslam

@@ -20,16 +20,15 @@ enum class ImuFusion { PreintegrationFactor, DeadReckoning };
 /// closure; see `PoseGraphParameters`.
 enum class SlamStrategy { Odometry, PoseGraph };
 
-/// Where the SLAM computes (slam.backend):
-///  - Host: the CPU implementation: VoxelHashMap searches, CorrespondenceFinder
-///    and NormalEstimator (oneTBB threads), deskewInto() and VoxelFilter,
-///    moptim's LevenbergMarquardt on its host backend.
+/// Where the SLAM computes (`sycl.enabled`; the enum is derived from it):
+///  - Host: the sequential CPU implementation: VoxelHashMap searches,
+///    CorrespondenceFinder and NormalEstimator, deskewInto() and VoxelFilter,
+///    moptim's LevenbergMarquardt on its host backend (no host threads).
 ///  - Sycl: the device implementation (DeviceVoxelHashMap with its normal
 ///    cache, DeviceCorrespondenceSearch, DevicePreprocessor,
-///    moptim::DeviceLevenbergMarquardt) on moptim's SYCL backend. Needs a build
-///    with MSLAM_WITH_SYCL.
-/// Both give the same estimator up to rounding; slam.num_threads applies to
-/// both.
+///    moptim::DeviceLevenbergMarquardt) on moptim's SYCL backend, the only
+///    parallel path. Needs a build with MSLAM_WITH_SYCL.
+/// Both give the same estimator up to rounding.
 enum class ComputeBackend { Host, Sycl };
 
 inline constexpr std::string_view toString(spdlog::level::level_enum level) {
@@ -135,10 +134,12 @@ struct SlamParameters {
   unsigned int reg_iterations = 5;
   float max_correspondence_distance = 0.1;
   ImuFusion imu_fusion = ImuFusion::PreintegrationFactor; // only with_imu
-  // Threads for the correspondence search and normal estimation: 1 runs
-  // sequentially, 0 uses every hardware thread. Results do not depend on it.
-  unsigned int num_threads = 1;
+  /// Sycl when `sycl.enabled`, else Host.
   ComputeBackend backend = ComputeBackend::Host;
+  /// `sycl.threads`: work-groups of mslam's SYCL kernels (correspondence
+  /// search, preprocessing); 0: every compute unit. Results do not depend on
+  /// it; it has no effect on the host backend.
+  unsigned int sycl_threads = 0;
 };
 
 /**
@@ -278,8 +279,11 @@ struct SlamConfiguration {
        << "Max Corr. Distance: "
        << config.parameters.max_correspondence_distance << "\n"
        << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n"
-       << "Threads: " << config.parameters.num_threads << "\n"
-       << "Backend: " << toString(config.parameters.backend) << "\n"
+       << "SYCL: "
+       << (config.parameters.backend == ComputeBackend::Sycl
+               ? "enabled, threads " + std::to_string(config.parameters.sycl_threads)
+               : std::string("disabled"))
+       << "\n"
        << "Strategy: " << toString(config.strategy) << "\n";
     if (config.strategy == SlamStrategy::PoseGraph) {
       const auto &pg = config.pose_graph;

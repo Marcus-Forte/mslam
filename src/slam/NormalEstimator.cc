@@ -10,17 +10,6 @@ namespace mslam {
 NormalEstimator::NormalEstimator(int num_neighbors)
     : num_neighbors_(std::clamp(num_neighbors, 0, kMaxNeighbors)) {}
 
-namespace {
-
-// Minimum new map points per task in estimateAll() (each costs a 5-NN search
-// and a 3x3 eigen-solve). Lists shorter than twice this run inline. 16 beat 32
-// and 64 on living_room_garden at 4 threads, because the short lists of the
-// later registration rounds then still run in parallel; 8 was no better (sweep
-// in improvement_tbb.md).
-constexpr std::size_t kNormalGrain = 16;
-
-} // namespace
-
 void NormalEstimator::reset(const IMap &map) {
   map_ = &map;
   cache_.clear();
@@ -52,10 +41,9 @@ std::optional<Eigen::Vector3d> NormalEstimator::estimate(const Point &query) {
 }
 
 void NormalEstimator::estimateAll(const Correspondences &correspondences,
-                                  std::vector<std::uint32_t> &slots,
-                                  const ParallelExecutor *executor) {
-  // Phase 1, sequential: resolve every slot and allocate the new ones, so
-  // normals_ is not resized while phase 2 writes into it.
+                                  std::vector<std::uint32_t> &slots) {
+  // Phase 1: resolve every slot and allocate the new ones, so normals_ is not
+  // resized while phase 2 writes into it.
   slots.resize(correspondences.size());
   pending_.clear();
   for (std::size_t i = 0; i < correspondences.size(); ++i) {
@@ -69,17 +57,9 @@ void NormalEstimator::estimateAll(const Correspondences &correspondences,
     slots[i] = it->second;
   }
 
-  // Phase 2: each new slot is written by exactly one index.
-  const auto fill = [this](std::size_t begin, std::size_t end) {
-    for (std::size_t i = begin; i < end; ++i) {
-      const auto &[point, slot] = pending_[i];
-      normals_[slot] = compute(point);
-    }
-  };
-  if (executor == nullptr) {
-    fill(0, pending_.size());
-  } else {
-    executor->forRange(pending_.size(), kNormalGrain, fill);
+  // Phase 2: each new slot is written by exactly one pending entry.
+  for (const auto &[point, slot] : pending_) {
+    normals_[slot] = compute(point);
   }
 }
 

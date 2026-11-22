@@ -10,7 +10,7 @@
 //   bench_slam <config.jsonc> <recording.pbscan> [repeats] [--save-map out.ply]
 //              [--imu-fusion <preintegration_factor|dead_reckoning>]
 //              [--trajectory out.csv] [--threads <n>]
-//              [--strategy <odometry|pose_graph>] [--backend <host|sycl>]
+//              [--strategy <odometry|pose_graph>] [--sycl|--no-sycl]
 //
 // Prints one line per run: the scan count, the total and per-stage wall time
 // in milliseconds and the final pose. It is not registered with CTest.
@@ -31,8 +31,12 @@
 // scan, and the first registration round's correction in mm and mrad (empty
 // when that round found no correspondences). tools: test/plot_imu_fusion.py.
 //
-// --threads overrides slam.num_threads of the config (1 sequential, 0 every
-// hardware thread). The pose must not depend on it.
+// --sycl / --no-sycl override sycl.enabled of the config (and MSLAM_SYCL):
+// the SYCL kernels or the sequential host code.
+//
+// --threads overrides sycl.threads of the config (work-groups of mslam's SYCL
+// kernels, 0 every compute unit). It has no effect on the host path. The pose
+// must not depend on it.
 //
 // --log-level shows the log at that level (the run is silent otherwise); with
 // the pose graph each optimization logs its error in physical units at info.
@@ -64,6 +68,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <exception>
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
@@ -223,18 +228,19 @@ int usage(const char *program) {
                "[--save-map out.ply] "
                "[--imu-fusion preintegration_factor|dead_reckoning] "
                "[--trajectory out.csv] [--threads n] "
-               "[--strategy odometry|pose_graph] [--backend host|sycl] "
+               "[--strategy odometry|pose_graph] [--sycl|--no-sycl] "
                "[--log-level level]\n"
                "  --save-map writes the final map (all published increments) "
                "of the last run\n"
                "  --imu-fusion overrides slam.imu_fusion of the config\n"
-               "  --threads overrides slam.num_threads of the config "
-               "(1 sequential, 0 all hardware threads)\n"
+               "  --threads overrides sycl.threads of the config (work-groups "
+               "of the SYCL kernels, 0 every compute unit); no effect on "
+               "the host path\n"
                "  --trajectory writes one CSV row per registered scan "
                "(last run)\n"
                "  --strategy overrides slam.strategy of the config\n"
-               "  --backend overrides slam.backend of the config (and "
-               "MSLAM_BACKEND)\n"
+               "  --sycl / --no-sycl override sycl.enabled of the config (and "
+               "MSLAM_SYCL)\n"
                "  --log-level trace|debug|info|warning|error shows the log "
                "(default: off)\n",
                program);
@@ -251,7 +257,7 @@ int main(int argc, char **argv) {
   std::string trajectory_path;
   bool save_trajectory = false;
   std::optional<mslam::ImuFusion> imu_fusion;
-  std::optional<unsigned> num_threads;
+  std::optional<unsigned> sycl_threads;
   std::optional<mslam::SlamStrategy> strategy;
   std::optional<spdlog::level::level_enum> log_level;
   for (int i = 1; i < argc; ++i) {
@@ -281,19 +287,10 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: invalid --imu-fusion %s\n", argv[i]);
         return usage(argv[0]);
       }
-    } else if (arg == "--backend") {
-      if (i + 1 >= argc) {
-        return usage(argv[0]);
-      }
-      const std::string_view value = argv[++i];
-      if (value == mslam::toString(mslam::ComputeBackend::Host)) {
-        backend = mslam::ComputeBackend::Host;
-      } else if (value == mslam::toString(mslam::ComputeBackend::Sycl)) {
-        backend = mslam::ComputeBackend::Sycl;
-      } else {
-        std::fprintf(stderr, "error: invalid --backend %s\n", argv[i]);
-        return usage(argv[0]);
-      }
+    } else if (arg == "--sycl") {
+      backend = mslam::ComputeBackend::Sycl;
+    } else if (arg == "--no-sycl") {
+      backend = mslam::ComputeBackend::Host;
     } else if (arg == "--strategy") {
       if (i + 1 >= argc) {
         return usage(argv[0]);
@@ -329,7 +326,7 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: invalid --threads %s\n", argv[i]);
         return usage(argv[0]);
       }
-      num_threads = parsed;
+      sycl_threads = parsed;
     } else if (arg.size() > 1 && arg[0] == '-' && arg != "-") {
       // Unknown option (a negative repeat count is not meaningful either).
       return usage(argv[0]);
@@ -365,13 +362,18 @@ int main(int argc, char **argv) {
   }
 
   mslam::JsonConfig json_config(positional[0]);
-  json_config.load();
+  try {
+    json_config.load();
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "error: %s\n", error.what());
+    return 1;
+  }
   auto config = json_config.getConfig();
   if (imu_fusion.has_value()) {
     config.parameters.imu_fusion = *imu_fusion;
   }
-  if (num_threads.has_value()) {
-    config.parameters.num_threads = *num_threads;
+  if (sycl_threads.has_value()) {
+    config.parameters.sycl_threads = *sycl_threads;
   }
   if (strategy.has_value()) {
     config.strategy = *strategy;
@@ -382,17 +384,12 @@ int main(int argc, char **argv) {
   if (config.parameters.backend == mslam::ComputeBackend::Sycl &&
       !mslam::syclBackendAvailable()) {
     std::fprintf(stderr,
-                 "error: the sycl backend needs a build with MSLAM_WITH_SYCL "
+                 "error: SYCL needs a build with MSLAM_WITH_SYCL "
                  "(e.g. the sycl preset)\n");
     return 1;
   }
   const std::shared_ptr<moptim::ExecutionContext> context =
       mslam::executionContextFor(config.parameters.backend);
-  // Benchmark-only knob: MOPTIM_THREADS=<n> bounds the work-groups of the
-  // backend's moptim launches (0 = all compute units). Results do not change.
-  if (const char *env = std::getenv("MOPTIM_THREADS")) {
-    context->setThreads(static_cast<std::size_t>(std::strtoul(env, nullptr, 10)));
-  }
   std::printf("backend: %s (built with SYCL: %s)\n",
               std::string(mslam::toString(config.parameters.backend)).c_str(),
               mslam::syclBackendAvailable() ? "yes" : "no");

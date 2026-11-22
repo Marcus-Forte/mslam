@@ -11,9 +11,6 @@
 namespace mslam {
 
 namespace {
-// Upper bound of slam.num_threads, only to reject nonsense.
-constexpr unsigned kMaxThreads = 256;
-
 mslam::DownsampleFilter parseDownsampleFilter(const std::string &filter) {
   if (filter == "voxel_grid") {
     return mslam::DownsampleFilter::VoxelGrid;
@@ -34,17 +31,6 @@ mslam::ImuFusion parseImuFusion(const std::string &fusion) {
   }
 
   throw std::runtime_error("Invalid slam imu_fusion: " + fusion);
-}
-
-mslam::ComputeBackend parseComputeBackend(const std::string &backend) {
-  if (backend == "host") {
-    return mslam::ComputeBackend::Host;
-  }
-  if (backend == "sycl") {
-    return mslam::ComputeBackend::Sycl;
-  }
-  throw std::runtime_error("Invalid slam backend: " + backend +
-                           " (expected host or sycl)");
 }
 
 mslam::SlamStrategy parseSlamStrategy(const std::string &strategy) {
@@ -320,28 +306,29 @@ void JsonConfig::load() {
   }
   config_.pose_graph = parsePoseGraph(root["pose_graph"]);
 
-  if (!root["slam"]["num_threads"].empty()) {
-    const auto &num_threads = root["slam"]["num_threads"];
-    if (!num_threads.isIntegral() || num_threads.asDouble() < 0.0 ||
-        num_threads.asDouble() > kMaxThreads) {
-      throw std::runtime_error("Invalid slam num_threads: expected an integer "
-                               "in [0, " +
-                               std::to_string(kMaxThreads) + "]");
+  // Parallelism is SYCL only: say so for the keys of the host thread era.
+  for (const char *key : {"num_threads", "backend"}) {
+    if (root["slam"].isMember(key)) {
+      throw std::runtime_error(
+          std::string("slam.") + key +
+          " was removed: SYCL is the only parallel path, use sycl.enabled and "
+          "sycl.threads (top-level \"sycl\" block)");
     }
-    config_.parameters.num_threads = num_threads.asUInt();
   }
-
-  if (!root["slam"]["backend"].empty()) {
-    if (!root["slam"]["backend"].isString()) {
-      throw std::runtime_error("Invalid slam backend: expected a string");
+  const SyclSettings sycl = parseSyclSettings(root["sycl"], "config");
+  config_.parameters.backend =
+      sycl.enabled ? ComputeBackend::Sycl : ComputeBackend::Host;
+  config_.parameters.sycl_threads = sycl.threads;
+  // MSLAM_SYCL=0|1 overrides sycl.enabled, so one config (and one test or
+  // benchmark) runs on either path.
+  if (const char *override_enabled = std::getenv("MSLAM_SYCL")) {
+    const std::string_view value(override_enabled);
+    if (value != "0" && value != "1") {
+      throw std::runtime_error("Invalid MSLAM_SYCL: " + std::string(value) +
+                               " (expected 0 or 1)");
     }
     config_.parameters.backend =
-        parseComputeBackend(root["slam"]["backend"].asString());
-  }
-  // MSLAM_BACKEND=host|sycl overrides the file, so one config (and one test
-  // or benchmark) runs on either backend.
-  if (const char *backend = std::getenv("MSLAM_BACKEND")) {
-    config_.parameters.backend = parseComputeBackend(backend);
+        value == "1" ? ComputeBackend::Sycl : ComputeBackend::Host;
   }
 
   if (config_.parameters.opt_iterations <= 0) {

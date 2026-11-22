@@ -22,9 +22,8 @@ private:
 } // namespace
 
 std::shared_ptr<CorrespondenceFinder> createLoggingCorrespondenceFinder(
-    const std::shared_ptr<spdlog::logger> &logger,
-    std::shared_ptr<const ParallelExecutor> executor) {
-  auto finder = std::make_shared<CorrespondenceFinder>(std::move(executor));
+    const std::shared_ptr<spdlog::logger> &logger) {
+  auto finder = std::make_shared<CorrespondenceFinder>();
   finder->setObserver(std::make_shared<CorrespondenceSearchLogger>(logger));
   return finder;
 }

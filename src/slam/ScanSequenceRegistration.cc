@@ -26,15 +26,13 @@ ScanSequenceRegistration::ScanSequenceRegistration(
     : parameters_(parameters), logger_(logger),
       map_(makeVoxelHashMap(parameters.map_resolution,
                             parameters.max_points_per_voxel, parameters.backend)),
-      executor_(makeParallelExecutor(parameters.num_threads, *logger)),
       registration_(parameters.icp.registration_iterations,
                     parameters.icp.optimizer_iterations,
                     parameters.icp.max_correspondence_distance, logger,
-                    createLoggingCorrespondenceFinder(logger, executor_),
-                    executor_, parameters.backend),
-      fit_(parameters.icp, logger,
-           createLoggingCorrespondenceFinder(logger, executor_), executor_,
-           parameters.backend) {
+                    createLoggingCorrespondenceFinder(logger),
+                    parameters.backend, parameters.sycl_threads),
+      fit_(parameters.icp, logger, createLoggingCorrespondenceFinder(logger),
+           parameters.backend, parameters.sycl_threads) {
   // The tolerance keeps a float quotient such as 0.3F / 0.1F (3.00000004) from
   // costing an extra ring of voxels.
   const double wanted = std::ceil(

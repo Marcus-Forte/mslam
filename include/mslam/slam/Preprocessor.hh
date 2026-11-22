@@ -76,7 +76,7 @@ public:
   ~Preprocessor();
   Preprocessor(Preprocessor &&) noexcept;
 
-  /// Work-groups of the device kernel (slam.num_threads).
+  /// Work-groups of the device kernel (sycl.threads, resolved by deviceWidth()).
   void setDeviceWidth(std::size_t width);
 
   /// Range filter only — used during map initialisation.

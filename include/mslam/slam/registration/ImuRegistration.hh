@@ -22,14 +22,14 @@ class ImuRegistration {
 public:
   using FirstRoundIncrement = mslam::FirstRoundIncrement;
 
-  /// @param executor Runs the normal estimation (nullptr: sequential); give
-  /// @p correspondence_finder the same one to parallelize the search too.
+  /// @param sycl_threads Work-groups of the device search kernel (0: every
+  /// compute unit).
   ImuRegistration(int num_registration_iterations, int num_optimizer_iterations,
                   float max_correspondence_distance,
                   std::shared_ptr<spdlog::logger> logger,
                   std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-                  std::shared_ptr<const ParallelExecutor> executor = nullptr,
-                  ComputeBackend backend = ComputeBackend::Host);
+                  ComputeBackend backend = ComputeBackend::Host,
+                  unsigned sycl_threads = 0);
 
   /// Joint Align: optimizes pose, velocity, and biases of the new state, plus
   /// velocity and biases of the previous state (its pose stays fixed).

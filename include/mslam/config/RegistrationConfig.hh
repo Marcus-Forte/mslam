@@ -26,14 +26,16 @@ struct RegistrationConfig {
   int reg_iterations = 30;
   int optimizer_iterations = 5;
   float max_correspondence_distance = 0.3F; ///< m.
-  /// Threads for the correspondence search and normal estimation (1:
-  /// sequential, 0: every hardware thread). Results do not depend on it.
-  unsigned num_threads = 1;
+  /// The top-level "sycl" block: run on SYCL (a build with MSLAM_WITH_SYCL)
+  /// with `sycl_threads` work-groups in the kernels (0: every compute unit).
+  /// Results do not depend on the threads.
+  bool sycl_enabled = false;
+  unsigned sycl_threads = 0;
 };
 
 /// Reads a registration config (JSON with comments). Every key is optional.
 /// \throws std::runtime_error if the file cannot be read or parsed, on an
-/// unknown key (top level, "map" or "registration") and on an invalid value;
+/// unknown key (top level, "map", "registration" or "sycl") and on an invalid value;
 /// the message names the key.
 RegistrationConfig loadRegistrationConfig(const std::filesystem::path &path);
 

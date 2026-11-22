@@ -69,11 +69,11 @@ ImuRegistration::ImuRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
     float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    std::shared_ptr<const ParallelExecutor> executor, ComputeBackend backend)
+    ComputeBackend backend, unsigned sycl_threads)
     : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
                          max_correspondence_distance},
            std::move(logger), std::move(correspondence_finder),
-           std::move(executor), backend),
+           backend, sycl_threads),
       manifold_(Factor::makeManifold()) {}
 
 SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,

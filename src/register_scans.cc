@@ -43,7 +43,7 @@ int usage(const char *program) {
   std::fprintf(
       stderr,
       "usage: %s [-c registration.jsonc] [--poses poses.jsonc] "
-      "[-o merged.ply] [--save-poses out.jsonc] [--backend host|sycl] "
+      "[-o merged.ply] [--save-poses out.jsonc] [--sycl|--no-sycl] "
       "<a.ply|a.pbscan> <b> [<c> ...]\n"
       "  Registers every cloud against all clouds before it (point to "
       "plane) and prints its pose in the frame of the first.\n"
@@ -53,7 +53,9 @@ int usage(const char *program) {
       "  -o            writes all clouds, full resolution, in the common "
       "frame\n"
       "  --save-poses  writes the poses in the --poses format\n"
-      "  --backend     host (default) or sycl (a build with MSLAM_WITH_SYCL)\n",
+      "  --sycl        run on SYCL (a build with MSLAM_WITH_SYCL); overrides "
+      "sycl.enabled of the config\n"
+      "  --no-sycl     run the sequential host code; overrides sycl.enabled\n",
       program);
   return 1;
 }
@@ -63,7 +65,7 @@ struct Arguments {
   std::string poses_path;
   std::string merged_path;
   std::string save_poses_path;
-  std::string backend = "host";
+  std::optional<bool> sycl; ///< --sycl / --no-sycl: overrides sycl.enabled.
   std::vector<std::string> inputs;
 };
 
@@ -81,8 +83,9 @@ bool parseArguments(int argc, char **argv, Arguments &arguments) {
       target = &arguments.merged_path;
     } else if (arg == "--save-poses") {
       target = &arguments.save_poses_path;
-    } else if (arg == "--backend") {
-      target = &arguments.backend;
+    } else if (arg == "--sycl" || arg == "--no-sycl") {
+      arguments.sycl = arg == "--sycl";
+      continue;
     } else if (arg.size() > 1 && arg[0] == '-') {
       std::fprintf(stderr, "error: unknown option %s\n", argv[i]);
       return false;
@@ -96,12 +99,8 @@ bool parseArguments(int argc, char **argv, Arguments &arguments) {
     }
     *target = argv[++i];
   }
-  if (arguments.backend != "host" && arguments.backend != "sycl") {
-    std::fprintf(stderr, "error: --backend must be host or sycl\n");
-    return false;
-  }
-  if (arguments.backend == "sycl" && !mslam::syclBackendAvailable()) {
-    std::fprintf(stderr, "error: --backend sycl needs a build with "
+  if (arguments.sycl == true && !mslam::syclBackendAvailable()) {
+    std::fprintf(stderr, "error: --sycl needs a build with "
                          "MSLAM_WITH_SYCL (e.g. the sycl preset)\n");
     return false;
   }
@@ -193,9 +192,14 @@ int run(const Arguments &arguments) {
   parameters.max_points_per_voxel = config.max_points_per_voxel;
   parameters.icp = {config.reg_iterations, config.optimizer_iterations,
                     config.max_correspondence_distance};
-  parameters.num_threads = config.num_threads;
-  parameters.backend = arguments.backend == "sycl" ? mslam::ComputeBackend::Sycl
-                                                   : mslam::ComputeBackend::Host;
+  const bool sycl = arguments.sycl.value_or(config.sycl_enabled);
+  if (sycl && !mslam::syclBackendAvailable()) {
+    throw std::runtime_error("sycl.enabled is true, but this build has no "
+                             "SYCL (MSLAM_WITH_SYCL, e.g. the sycl preset)");
+  }
+  parameters.backend =
+      sycl ? mslam::ComputeBackend::Sycl : mslam::ComputeBackend::Host;
+  parameters.sycl_threads = config.sycl_threads;
   mslam::ScanSequenceRegistration sequence(parameters, logger);
 
   // Full-resolution clouds are only kept when they are written out.

@@ -1,3 +1,5 @@
+> Historical study: TBB was removed on 2026-11-22; the executor now runs on moptim's host thread pool.
+
 # oneTBB in mslam: parallel correspondence search and normal estimation
 
 Status (2026-11-16): implemented for the two per-point loops that read a map

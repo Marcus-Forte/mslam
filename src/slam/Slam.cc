@@ -54,17 +54,16 @@ namespace mslam {
 Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
            const SlamConfiguration &config, const std::shared_ptr<IMap> &map)
     : logger_(logger), config_(config),
-      executor_(makeParallelExecutor(config.parameters.num_threads, *logger)),
       registration_(std::make_unique<PointToPlaneRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          createLoggingCorrespondenceFinder(logger, executor_), executor_,
-          config.parameters.backend)),
+          createLoggingCorrespondenceFinder(logger), config.parameters.backend,
+          config.parameters.sycl_threads)),
       imu_registration_(std::make_unique<ImuRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          createLoggingCorrespondenceFinder(logger, executor_), executor_,
-          config.parameters.backend)),
+          createLoggingCorrespondenceFinder(logger), config.parameters.backend,
+          config.parameters.sycl_threads)),
       map_(map) {
   if (const auto *voxel_map = dynamic_cast<const VoxelHashMap *>(map_.get())) {
     warnIfGateExceedsMapReach(

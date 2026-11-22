@@ -2,7 +2,6 @@
 
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/NormalEstimator.hh"
-#include "mslam/utils/Parallel.hh"
 
 #include <Eigen/Eigenvalues>
 #include <gtest/gtest.h>
@@ -221,13 +220,12 @@ TEST(NormalEstimator, EstimateAllMatchesPerPointEstimates) {
   reference.reset(map);
   NormalEstimator parallel;
   parallel.reset(map);
-  const mslam::ParallelExecutor executor(4);
   std::vector<std::uint32_t> slots;
 
   std::size_t without_normal = 0;
   for (const auto *batch : {&first, &second}) {
     const auto correspondences = withDuplicates(*batch);
-    parallel.estimateAll(correspondences, slots, &executor);
+    parallel.estimateAll(correspondences, slots);
     ASSERT_EQ(slots.size(), correspondences.size());
     for (std::size_t i = 0; i < correspondences.size(); ++i) {
       const auto expected = reference.estimate(correspondences[i].second);
@@ -246,7 +244,7 @@ TEST(NormalEstimator, EstimateAllMatchesPerPointEstimates) {
   EXPECT_TRUE(sameNormal(again, reference.estimate(map_points.front())));
 }
 
-TEST(NormalEstimator, EstimateAllWithoutExecutorAndAfterReset) {
+TEST(NormalEstimator, EstimateAllAfterResetAndOnEmptyInput) {
   VoxelHashMap map(0.1F, 5);
   map.addScan(flatGrid(0.25F));
   NormalEstimator estimator;

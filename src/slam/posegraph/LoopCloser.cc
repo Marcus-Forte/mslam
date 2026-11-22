@@ -29,8 +29,8 @@ LoopCloser::verificationParameters(const PoseGraphParameters &parameters,
   out.map_resolution = 0.1F;
   out.max_points_per_voxel = 8;
   out.icp = IcpParameters{20, 5, 0.2F};
-  out.num_threads = 1;
   out.backend = backend;
+  out.sycl_threads = 1; // verification stays one work-group wide
   return out;
 }
 

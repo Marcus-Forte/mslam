@@ -31,10 +31,10 @@ if(MSLAM_INTEGRATION_TESTS)
   add_test(NAME SlamIntegration COMMAND test_slam_integration)
   set_tests_properties(SlamIntegration PROPERTIES LABELS integration)
   if(MSLAM_WITH_SYCL)
-    # The same replays on the sycl backend (MSLAM_BACKEND overrides the config).
+    # The same replays with SYCL on (MSLAM_SYCL=1 overrides sycl.enabled).
     add_test(NAME SlamIntegration.sycl COMMAND test_slam_integration)
     set_tests_properties(SlamIntegration.sycl PROPERTIES LABELS integration
-      ENVIRONMENT MSLAM_BACKEND=sycl)
+      ENVIRONMENT MSLAM_SYCL=1)
   endif()
 endif()
 

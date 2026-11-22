@@ -18,14 +18,13 @@
         "CMAKE_BUILD_TYPE": "Release",
         "MSLAM_INSTALL_REPLAY_SERVER": "ON",
         "MSLAM_INSTALL_REMOTE_RECORDER": "ON",
-        "MSLAM_INTEGRATION_TESTS": "ON",
-        "MSLAM_WITH_TBB": "ON"
+        "MSLAM_INTEGRATION_TESTS": "ON"
       }
     },
     {
       "name": "sycl",
       "displayName": "DPC++, native_cpu (host and SYCL backends)",
-      "description": "MSLAM_WITH_SYCL: moptim with the DPC++ clang and the host CPU as SYCL target (native_cpu); slam.backend (or MSLAM_BACKEND) selects host or sycl at run time",
+      "description": "MSLAM_WITH_SYCL: moptim with the DPC++ clang and the host CPU as SYCL target (native_cpu); sycl.enabled (or MSLAM_SYCL) selects the SYCL kernels or the sequential host code at run time",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "installDir": "${sourceDir}/build/${presetName}/install",
@@ -39,7 +38,6 @@
           "MSLAM_INSTALL_REPLAY_SERVER": "ON",
           "MSLAM_INSTALL_REMOTE_RECORDER": "ON",
           "MSLAM_INTEGRATION_TESTS": "ON",
-          "MSLAM_WITH_TBB": "ON",
           "FORMATTER": "OFF"
       }
     },

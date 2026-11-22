@@ -37,11 +37,11 @@ bool isNegligibleRoundStep(const Eigen::Affine3d &before,
 IcpWorkspace::IcpWorkspace(
     const IcpParameters &parameters, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    std::shared_ptr<const ParallelExecutor> executor, ComputeBackend backend)
+    ComputeBackend backend, unsigned sycl_threads)
     : parameters_(parameters), logger_(std::move(logger)),
       correspondence_finder_(std::move(correspondence_finder)),
-      executor_(std::move(executor)), backend_(backend),
-      context_(executionContextFor(backend)) {}
+      backend_(backend), context_(executionContextFor(backend)),
+      device_width_(deviceWidth(backend, sycl_threads)) {}
 
 void IcpWorkspace::begin(const IMap &map, const PointCloud &scan,
                          const Eigen::Affine3d &initial_guess) {
@@ -59,21 +59,12 @@ void IcpWorkspace::resetSource(const Eigen::Affine3d &total) {
   transformCloud(total, source_);
 }
 
-namespace {
-
-/// Work-groups of the device kernels: the executor's threads (1 without one).
-std::size_t deviceWidth(const ParallelExecutor *executor) {
-  return executor != nullptr ? executor->concurrency() : 1;
-}
-
-} // namespace
-
 void IcpWorkspace::findCorrespondences(const IMap &map) {
   if (const DeviceVoxelHashMap *device_map = map.deviceMap()) {
     const DeviceCorrespondence *found =
         device_search_.run(*device_map, source_,
                            parameters_.max_correspondence_distance,
-                           deviceWidth(executor_.get()));
+                           device_width_);
     correspondences_.clear();
     for (std::size_t i = 0; i < source_.size(); ++i) {
       if (found[i].matched != 0) {
@@ -95,7 +86,7 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
     const DeviceCorrespondence *found =
         device_search_.run(*device_map, source_,
                            parameters_.max_correspondence_distance,
-                           deviceWidth(executor_.get()));
+                           device_width_);
     const auto assembly_start = Clock::now();
     timings_.search += assembly_start - search_start;
 
@@ -145,12 +136,10 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   plane_offsets_.clear();
   plane_inputs_.reserve(correspondences_.size());
   plane_offsets_.reserve(correspondences_.size());
-  normal_estimator_.estimateAll(correspondences_, normal_slots_,
-                                executor_.get());
+  normal_estimator_.estimateAll(correspondences_, normal_slots_);
   const auto assembly_start = Clock::now();
   timings_.normals += assembly_start - normals_start;
-  // Assembled sequentially in correspondence order, as before the normals
-  // could be estimated in parallel.
+  // Assembled in correspondence order.
   for (std::size_t i = 0; i < correspondences_.size(); ++i) {
     const auto &[scan_point, map_point] = correspondences_[i];
     const auto &normal = normal_estimator_.normal(normal_slots_[i]);

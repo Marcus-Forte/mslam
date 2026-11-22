@@ -27,13 +27,25 @@ executionContextFor(ComputeBackend backend) {
   }
   if (!moptim::syclAvailable()) {
     throw std::runtime_error(
-        "slam.backend is sycl, but this mslam was built without SYCL "
+        "sycl.enabled is true, but this mslam was built without SYCL "
         "(configure with -DMSLAM_WITH_SYCL=ON, e.g. the sycl preset)");
   }
   if (!g_sycl) {
     g_sycl = std::make_shared<moptim::ExecutionContext>(moptim::Backend::Sycl);
   }
   return g_sycl;
+}
+
+std::size_t deviceWidth(ComputeBackend backend, unsigned sycl_threads) {
+  if (backend == ComputeBackend::Host) {
+    return 1;
+  }
+  if (sycl_threads != 0) {
+    return sycl_threads;
+  }
+  // launchWidth() is min(compute units, partitions): ask for more partitions
+  // than any device has units.
+  return executionContextFor(backend)->launchWidth(std::size_t{1} << 20);
 }
 
 } // namespace mslam

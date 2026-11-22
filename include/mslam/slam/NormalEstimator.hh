@@ -2,7 +2,6 @@
 
 #include "mslam/common/Points.hh"
 #include "mslam/map/IMap.hh"
-#include "mslam/utils/Parallel.hh"
 #include <Eigen/Dense>
 #include <array>
 #include <cstdint>
@@ -39,13 +38,10 @@ public:
   /// Normals of the map points of all @p correspondences at once: on return
   /// slots[i] identifies the normal of correspondences[i].second, read with
   /// normal(). The same values as estimate() per point. Points not cached yet
-  /// are estimated on @p executor (sequentially when it is null); cache
-  /// insertion stays sequential and in correspondence order, so neither the
-  /// normals nor the slots depend on the thread count. The map must not change
-  /// during the call.
+  /// are estimated in correspondence order. The map must not change during the
+  /// call.
   void estimateAll(const Correspondences &correspondences,
-                   std::vector<std::uint32_t> &slots,
-                   const ParallelExecutor *executor = nullptr);
+                   std::vector<std::uint32_t> &slots);
 
   /// The normal stored in @p slot (from estimateAll(), valid until reset()).
   const std::optional<Eigen::Vector3d> &normal(std::uint32_t slot) const {

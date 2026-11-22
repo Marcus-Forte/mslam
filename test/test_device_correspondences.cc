@@ -11,7 +11,6 @@
 #include "mslam/slam/Transform.hh"
 #include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
-#include "mslam/utils/Parallel.hh"
 
 #include <array>
 #include <bit>

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Compare bench_slam on several builds and backends: interleaved runs, minima, pose agreement.
+"""Compare bench_slam on several builds and paths: interleaved runs, minima, pose agreement.
 
-Each --run is LABEL=BINARY[:BACKEND], a bench_slam binary run with `--backend BACKEND` (host when
-omitted; `none` passes no --backend, for a bench_slam older than the option). One build with SYCL can
-appear twice (its host and its sycl backend), next to a host-only build or an older reference binary:
+Each --run is LABEL=BINARY[:host|sycl|none], a bench_slam binary run with `--no-sycl` (host, the
+default when omitted), `--sycl` (sycl) or neither (`none`, for a bench_slam older than those options).
+--threads is passed as `--threads N`: the work-groups of the SYCL kernels in a current binary (no
+effect on the host path), the thread count of an older binary. One build with SYCL can appear twice
+(its host and its sycl path), next to a host-only build or an older reference binary:
 
   test/bench_backends.py \\
       --run host=build/gcc/test/bench_slam:host \\
@@ -48,7 +50,7 @@ BACKEND = re.compile(r"^backend: (?P<backend>\S+) \(built with SYCL: (?P<sycl>\w
 def parse_run_spec(text):
     label, sep, rest = text.partition("=")
     if not sep or not label or not rest:
-        raise argparse.ArgumentTypeError(f"--run wants LABEL=BINARY[:BACKEND], got {text!r}")
+        raise argparse.ArgumentTypeError(f"--run wants LABEL=BINARY[:host|sycl|none], got {text!r}")
     binary, _, backend = rest.rpartition(":") if rest.endswith((":host", ":sycl", ":none")) else (rest, "", "host")
     return label, Path(binary), backend
 
@@ -93,7 +95,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("recordings", nargs="+", type=Path, help=".pbscan recordings")
     parser.add_argument("--run", dest="runs", action="append", type=parse_run_spec, required=True,
-                        metavar="LABEL=BINARY[:BACKEND]", help="a bench_slam binary and the backend it runs")
+                        metavar="LABEL=BINARY[:host|sycl|none]", help="a bench_slam binary and the path it runs")
     parser.add_argument("--config", type=Path, default=Path(__file__).parent / "integration" / "mslam.jsonc")
     parser.add_argument("--threads", nargs="+", type=int, default=[1], help="--threads values (default 1)")
     parser.add_argument("--rounds", type=int, default=3, help="interleaved rounds (default 3)")
@@ -133,7 +135,7 @@ def main():
                     command = [str(binary), str(args.config), str(recording), str(args.repeats), "--threads",
                                str(threads)]
                     if backend != "none":
-                        command += ["--backend", backend]
+                        command += ["--sycl" if backend == "sycl" else "--no-sycl"]
                     if args.strategy:
                         command += ["--strategy", args.strategy]
                     done = subprocess.run(command, capture_output=True, text=True)

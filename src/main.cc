@@ -5,6 +5,7 @@
 #include "msensor/config/config.hh"
 #include "msensor/lidar/mid360.hh"
 #include "mslam/map/VoxelHashMap.hh"
+#include "mslam/slam/ComputeContext.hh"
 #include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/SensorStatus.hh"
 #include "mslam/slam/Slam.hh"
@@ -15,6 +16,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <getopt.h>
 #include <iostream>
@@ -89,7 +91,12 @@ int main(int argc, char **argv) {
       std::cout << "Using config: " << optarg << std::endl;
       slam_config_path = optarg;
       mslam::JsonConfig json_config(optarg);
-      json_config.load();
+      try {
+        json_config.load();
+      } catch (const std::exception &error) {
+        std::cerr << "error: " << error.what() << "\n";
+        return 1;
+      }
       config = json_config.getConfig();
       break;
     }
@@ -105,6 +112,13 @@ int main(int argc, char **argv) {
   }
 
   std::cout << config << std::endl;
+  if (config.parameters.backend == mslam::ComputeBackend::Sycl &&
+      !mslam::syclBackendAvailable()) {
+    std::cerr << "error: sycl.enabled is true, but this mslam was built "
+                 "without SYCL (configure with -DMSLAM_WITH_SYCL=ON, e.g. the "
+                 "sycl preset)\n";
+    return 1;
+  }
 
   // Create logger.
   const auto spdlog_logger = std::make_shared<spdlog::logger>(

@@ -19,7 +19,6 @@ ImuMath.cc
 SensorInput.cc
 ImuScanSync.cc
 ../utils/Timing.cc
-../utils/Parallel.cc
 SlamPipeline.cc
 SlamRunner.cc
 Slam.cc
@@ -32,10 +31,6 @@ target_link_libraries(slam
   PUBLIC spdlog::spdlog maps moptim
   PRIVATE msensor)
 target_include_directories(slam PUBLIC ${CMAKE_SOURCE_DIR}/include)
-if(MSLAM_WITH_TBB AND TBB_FOUND)
-  target_link_libraries(slam PRIVATE TBB::tbb)
-  target_compile_definitions(slam PRIVATE MSLAM_HAS_TBB=1)
-endif()
 
 # gRPC server, protobuf conversions and point-cloud files. Kept out of `slam`: they don't link moptim,
 # so they are not compiled with -fsycl (no SYCL device pass over the protobuf/abseil/gRPC headers).

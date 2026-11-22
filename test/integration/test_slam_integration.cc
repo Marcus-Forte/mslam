@@ -4,7 +4,7 @@
 //    reference: no threads, no clock);
 //  - through the live loop (SlamRunner + SensorInput) fed by the playback
 //    driver on its own thread;
-//  - and, in a build with TBB, synchronously again with slam.num_threads = 4,
+//  - and, with SYCL enabled, synchronously again with sycl.threads = 4,
 //    which must give the same pose as the first replay to the last bit.
 //
 // The live run is deterministic: the sensor input blocks the playback thread
@@ -26,7 +26,6 @@
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
 #include "mslam/slam/Transform.hh"
-#include "mslam/utils/Parallel.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
@@ -324,9 +323,9 @@ protected:
     pose_graph_ =
         replaySynchronously(graph_json.getConfig(), logger, recording);
     live_ = replayThroughTheLiveLoop(config, logger, recording);
-    if (mslam::ParallelExecutor::available()) {
+    if (config.parameters.backend == mslam::ComputeBackend::Sycl) {
       auto parallel_config = config;
-      parallel_config.parameters.num_threads = 4;
+      parallel_config.parameters.sycl_threads = 4;
       four_threads_ = replaySynchronously(parallel_config, logger, recording);
     }
 
@@ -365,7 +364,7 @@ protected:
 
   static std::optional<ReplayResult> synchronous_;
   static std::optional<LiveRun> live_;
-  /// The synchronous replay with slam.num_threads = 4 (absent without TBB).
+  /// The synchronous replay with sycl.threads = 4 (only with SYCL enabled).
   static std::optional<ReplayResult> four_threads_;
   /// The synchronous replay with strategy = pose_graph.
   static std::optional<ReplayResult> pose_graph_;
@@ -427,13 +426,14 @@ TEST_F(SlamIntegration, LiveLoopMatchesTheSynchronousReplay) {
   }
 }
 
-// The parallel correspondence search and normal estimation write each result
-// into its own slot and keep every order-dependent step sequential, so the
-// thread count cannot change the result. A difference here is a bug in that
-// code, not floating-point noise.
+// The SYCL kernels write each result into its own slot and keep every
+// order-dependent step sequential, so sycl.threads cannot change the result. A
+// difference here is a bug in that code, not floating-point noise. Only with
+// SYCL enabled: the host path has no threads.
 TEST_F(SlamIntegration, FourThreadsMatchTheSynchronousReplay) {
   if (!four_threads_.has_value()) {
-    GTEST_SKIP() << "built without TBB";
+    GTEST_SKIP() << "sycl.threads only applies with SYCL enabled "
+                    "(sycl.enabled or MSLAM_SYCL=1 in a SYCL build)";
   }
   const auto &parallel = *four_threads_;
   const auto &sync = *synchronous_;

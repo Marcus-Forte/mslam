@@ -26,56 +26,47 @@ the field to `"info"` to show informational messages and more severe messages:
 
 Restart `mslam` after changing the value for the new level to take effect.
 
-### Threads
+### SYCL
 
-`slam.num_threads` (optional, default 1) sets how many threads run the
-correspondence search and the surface normal estimation during registration:
-1 runs sequentially, 0 uses every hardware thread, n uses at most n (the SLAM
-thread included). The pose does not depend on it: the result is the same bit for
-bit at any thread count. `register_scans` reads the same setting from
-`registration.num_threads` in its own config.
+SYCL is the only parallel path. The optional top-level `sycl` block selects it
+and sizes it:
 
-The parallel code uses oneTBB (`libtbb-dev` to build, `libtbb12` at run time).
-CMake looks for it when `MSLAM_WITH_TBB` is ON (the default); if it is not
-found, or with `-DMSLAM_WITH_TBB=OFF`, mslam is built sequential and a
-`num_threads` other than 1 logs a warning and runs sequentially.
-
-```json
-{
-  "slam": { "num_threads": 4 }
+```jsonc
+"sycl": {
+    "enabled": false, // true: registration and preprocessing run as SYCL kernels (needs a build with MSLAM_WITH_SYCL); false (default): the sequential host code
+    "threads": 0      // work-groups of mslam's SYCL kernels (correspondence search, preprocessing); 0 (default) = every compute unit; the pose does not depend on it
 }
 ```
 
-### Compute backend
+Without the block SYCL is disabled. What runs where:
 
-`slam.backend` (optional, default `"host"`) selects where the registration and
-the scan preprocessing run:
+- `enabled: false`: the sequential host code, on one thread: the `VoxelHashMap`
+  correspondence search and normals, the host preprocessing, and moptim's
+  Levenberg-Marquardt with its costs on moptim's host backend (also on the
+  calling thread). Every build has it, and `sycl.threads` has no effect on it.
+- `enabled: true`: SYCL kernels on moptim's SYCL device (`native_cpu`, the host
+  CPU, for now). A device mirror of the voxel map keeps a normal cache across
+  scans. Each ICP round runs one kernel for the correspondence search and
+  normals (`sycl.threads` work-groups), each scan one kernel for its
+  preprocessing (also `sycl.threads` work-groups), and each round's whole
+  Levenberg-Marquardt solve is one launch (with `debug` logging it uses the
+  host solver, whose telemetry needs an observer; moptim sizes its own
+  launches). It needs a build with `-DMSLAM_WITH_SYCL=ON` (the `sycl` preset,
+  DPC++); a build without SYCL refuses `enabled: true` at startup. Loop-closure
+  verification in the pose-graph strategy always runs one work-group wide.
 
-- `"host"`: the CPU code: the `VoxelHashMap` correspondence search and normals
-  (on oneTBB with `num_threads`), the host preprocessing, and moptim's
-  Levenberg-Marquardt with its costs on moptim's host backend (the calling
-  thread, or a thread pool for large costs). Every build has it.
-- `"sycl"`: SYCL kernels on moptim's SYCL device (`native_cpu`, the host CPU,
-  for now). A device mirror of the voxel map keeps a normal cache across scans.
-  Each ICP round runs one kernel for the correspondence search and normals,
-  each scan one kernel for its preprocessing, and each round's whole
-  Levenberg-Marquardt solve is one launch (with `debug` logging it uses the host
-  solver, whose telemetry needs an observer). It needs a build with
-  `-DMSLAM_WITH_SYCL=ON` (the `sycl` preset, DPC++); a build without SYCL
-  refuses `"sycl"` at startup.
+The pose does not depend on `sycl.threads`: the result is the same bit for bit
+at any value. The two paths' poses agree to a fraction of a millimetre (the
+device kernels evaluate the normals with scalar Eigen).
 
-The environment variable `MSLAM_BACKEND=host|sycl` overrides the config file,
-and `bench_slam` and `register_scans` take `--backend host|sycl`. Both backends
-give the same pose at any thread count. The two backends' poses agree to a
-fraction of a millimetre: the device kernels evaluate the normals with scalar
-Eigen. `test/bench_backends.py` compares builds and backends (see
+The environment variable `MSLAM_SYCL=0|1` overrides `sycl.enabled`.
+`bench_slam` and `register_scans` take `--sycl` / `--no-sycl` for the same;
+`bench_slam --threads n` overrides `sycl.threads`. `register_scans` reads the
+same `sycl` block from its own config (`config/registration.jsonc`). The old
+keys `slam.num_threads`, `slam.backend` and `registration.num_threads` were
+removed and are rejected with an error naming the new ones.
+`test/bench_backends.py` compares builds and paths (see
 [Benchmark](#benchmark)).
-
-```json
-{
-  "slam": { "backend": "sycl" }
-}
-```
 
 ### Strategy
 
@@ -113,9 +104,9 @@ docker run -it --rm -v ./config/:/config/ mslam mslam -c /config/mslam.json
 If you want a custom configuration, mount your JSON file into the container and
 pass that path with `-c`.
 
-The image is built with the `pi5` preset: GCC for the Cortex-A76, host backend
-only. `--build-arg PRESET=pi5-sycl` builds it with DPC++ and both backends
-(`slam.backend` then selects one).
+The image is built with the `pi5` preset: GCC for the Cortex-A76, host-only
+(sequential). `--build-arg PRESET=pi5-sycl` builds it with DPC++, so
+`sycl.enabled` can select the SYCL kernels.
 
 For the Python viewer client.
 ```bash
@@ -277,9 +268,9 @@ optional, unknown keys and invalid values are rejected):
     "registration": {
         "reg_iterations": 30,
         "optimizer_iterations": 5,
-        "max_correspondence_distance": 0.3,
-        "num_threads": 1             // 0 = all hardware threads; same poses at any value
-    }
+        "max_correspondence_distance": 0.3
+    },
+    "sycl": { "enabled": false, "threads": 0 }   // see "SYCL"
 }
 ```
 
@@ -375,16 +366,15 @@ default run, without the option, is unchanged.
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 1 --save-map map.ply
 ```
 
-`--threads <n>` overrides `slam.num_threads` of the config (1 sequential, 0
-every hardware thread). The pose must be the same at every value, so it is
-also a check of the parallel code:
+`--threads <n>` overrides `sycl.threads` of the config (work-groups of the SYCL
+kernels, 0 every compute unit; no effect on the host path). The pose must be
+the same at every value, so it is also a check of the parallel code:
 
 ```bash
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5 --threads 4
 ```
 
-`--backend host|sycl` overrides `slam.backend` (see
-[Compute backend](#compute-backend)). The first line of the output names the
+`--sycl` / `--no-sycl` override `sycl.enabled` (see [SYCL](#sycl)). The first line of the output names the
 backend and whether the build has SYCL.
 
 ### Comparing builds and backends
@@ -394,8 +384,9 @@ binaries side by side. It runs them interleaved, in a rotated order every
 round. For each recording and thread count it prints each label's minimum
 total, register, search and solve times, the ratio to a reference label, the
 moptim launches, the final pose, and that pose's distance from the
-reference's. Each `--run` is `LABEL=BINARY[:BACKEND]`, so one SYCL build can
-be listed twice, once per backend:
+reference's. Each `--run` is `LABEL=BINARY[:host|sycl|none]` (`sycl` passes
+`--sycl`, `host` passes `--no-sycl`, `none` passes nothing, for an older
+`bench_slam`), so one SYCL build can be listed twice, once per path:
 
 ```bash
 test/bench_backends.py --run host=build/gcc/test/bench_slam \

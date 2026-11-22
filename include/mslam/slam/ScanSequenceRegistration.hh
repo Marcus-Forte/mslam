@@ -20,11 +20,11 @@ struct ScanSequenceParameters {
   float map_resolution = 0.1F; ///< Voxel size of the target map.
   std::size_t max_points_per_voxel = 8;
   IcpParameters icp{30, 5, 0.3F};
-  /// Threads for the correspondence search and normal estimation (1:
-  /// sequential, 0: every hardware thread). Results do not depend on it.
-  unsigned num_threads = 1;
   /// Where the map is searched and the solves run (see ComputeBackend).
   ComputeBackend backend = ComputeBackend::Host;
+  /// Work-groups of the device search kernel (0: every compute unit); only on
+  /// the sycl backend. Results do not depend on it.
+  unsigned sycl_threads = 0;
 };
 
 /// What add() did with one cloud.
@@ -74,8 +74,6 @@ private:
   /// A VoxelHashMap, or on the sycl backend a DeviceVoxelHashMap whose mirror
   /// the registrations search in kernels (IcpWorkspace).
   std::unique_ptr<VoxelHashMap> map_;
-  /// Shared by registration_ and fit_ (declared first: built before them).
-  std::shared_ptr<const ParallelExecutor> executor_;
   PointToPlaneRegistration registration_;
   IcpWorkspace fit_; ///< Only measures the fit of a result.
   VoxelFilter filter_;

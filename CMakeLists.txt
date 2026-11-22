@@ -24,9 +24,10 @@ include(cmake/code_format.cmake)
 # msensor tools (replay server, recorder): options here, targets below.
 include(cmake/msensor_tools.cmake)
 
-# SYCL is opt-in. Without it mslam (and moptim) are plain C++ built by GCC, and slam.backend can only be
-# host. With it, everything that links moptim is compiled by DPC++ and slam.backend selects host or sycl at
-# run time (MSLAM_BACKEND overrides the config).
+# SYCL is opt-in and the only parallel path. Without it mslam (and moptim) are sequential plain C++ built by
+# GCC, and sycl.enabled can only be false. With it, everything that links moptim is compiled by DPC++ and
+# sycl.enabled selects the SYCL kernels or the sequential host code at run time (MSLAM_SYCL=0|1 overrides
+# the config).
 option(MSLAM_WITH_SYCL "Build the SYCL backend (needs a DPC++ clang++)" OFF)
 set(MOPTIM_WITH_SYCL ${MSLAM_WITH_SYCL})
 message(STATUS "mslam: SYCL backend ${MSLAM_WITH_SYCL}")
@@ -51,20 +52,6 @@ add_subdirectory(third_party/msensor EXCLUDE_FROM_ALL)
 add_compile_definitions(MSENSOR_NO_LEGACY_NAMES)
 add_subdirectory(grpc)
 link_libraries(msensor::msensor)
-
-# oneTBB runs the correspondence search and normal estimation in parallel when
-# slam.num_threads (registration.num_threads for register_scans) is not 1.
-# Without it the build is sequential and such a setting only logs a warning.
-option(MSLAM_WITH_TBB "Use oneTBB for the parallel registration search" ON)
-if(MSLAM_WITH_TBB)
-  find_package(TBB QUIET)
-  if(NOT TBB_FOUND)
-    message(WARNING "MSLAM_WITH_TBB is ON but oneTBB was not found "
-                    "(install libtbb-dev); building the sequential version")
-  else()
-    message(STATUS "MSLAM_WITH_TBB is ON and oneTBB was found; building the parallel version")
-  endif()
-endif()
 
 add_subdirectory(src/map)
 add_subdirectory(src/config)

@@ -7,7 +7,6 @@
 #include "mslam/slam/ICorrespondenceFinder.hh"
 #include "mslam/slam/NormalEstimator.hh"
 #include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
-#include "mslam/utils/Parallel.hh"
 
 #include "moptim/ExecutionContext.hh"
 #include "moptim/LevenbergMarquardt.hh"
@@ -92,17 +91,17 @@ struct FirstRoundIncrement {
  */
 class IcpWorkspace {
 public:
-  /// @param executor Runs the normal estimation of new map points (nullptr:
-  /// sequential). The correspondence search runs on whatever executor
-  /// @p correspondence_finder was given.
+  /// @param correspondence_finder The host path's search (sequential).
   /// @param backend Where the registrations' solves run (their costs and
   /// optimizer, see useDeviceOptimizer()); the search follows the map (a
   /// DeviceVoxelHashMap is searched in kernels on its own context).
+  /// @param sycl_threads Work-groups of the device search kernel (0: every
+  /// compute unit); see deviceWidth().
   IcpWorkspace(const IcpParameters &parameters,
                std::shared_ptr<spdlog::logger> logger,
                std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-               std::shared_ptr<const ParallelExecutor> executor = nullptr,
-               ComputeBackend backend = ComputeBackend::Host);
+               ComputeBackend backend = ComputeBackend::Host,
+               unsigned sycl_threads = 0);
 
   const IcpParameters &parameters() const { return parameters_; }
   spdlog::logger &logger() const { return *logger_; }
@@ -132,7 +131,7 @@ public:
   ///
   /// On a map with a device mirror (IMap::deviceMap()) the search and the
   /// normals run in one SYCL kernel (DeviceCorrespondenceSearch) on as many
-  /// work-groups as the executor has threads, with the normals cached in the
+  /// work-groups (deviceWidth()), with the normals cached in the
   /// map across scans; the constraints are assembled in the same order and with
   /// the same arithmetic as on the host path.
   ///
@@ -173,9 +172,9 @@ private:
   IcpParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
   std::shared_ptr<ICorrespondenceFinder> correspondence_finder_;
-  std::shared_ptr<const ParallelExecutor> executor_;
   ComputeBackend backend_;
   std::shared_ptr<moptim::ExecutionContext> context_;
+  std::size_t device_width_; ///< Work-groups of the search kernel.
   NormalEstimator normal_estimator_;
   std::vector<std::uint32_t> normal_slots_; ///< One per correspondence.
   std::optional<OptimizerObserver<double>> observer_;

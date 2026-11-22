@@ -47,8 +47,17 @@ public:
   /// Time spent in the parts of every Align so far.
   const RegistrationTimings &timings() const { return icp_.timings(); }
 
+  ImuRegistration(const ImuRegistration &) = delete;
+  ImuRegistration &operator=(const ImuRegistration &) = delete;
+  ~ImuRegistration();
+
 private:
+  /// The optimizer and its costs, kept from one round and scan to the next
+  /// (ImuRegistration.cc).
+  struct Solver;
+
   IcpWorkspace icp_;
+  std::unique_ptr<Solver> solver_;
   /// SE3Manifold x Euclidean(18), shared with the optimizer and its costs.
   std::shared_ptr<const moptim::IManifold<double>> manifold_;
   FirstRoundIncrement first_round_;

@@ -1,6 +1,7 @@
 #include "mslam/slam/registration/ImuRegistration.hh"
 
 #include "moptim/AnalyticalCost.hh"
+#include "moptim/FusedCost.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "moptim/NumericalCostCentral.hh"
 #include "mslam/slam/SE3.hh"
@@ -14,8 +15,47 @@ namespace mslam {
 namespace {
 
 using Factor = ImuPreintegrationFactor;
+using PlaneCost = moptim::AnalyticalCost<Point3PlaneDistance, double>;
+using ImuCost = moptim::NumericalCostCentral<ImuPreintegrationFactor, double>;
+using Fused = moptim::FusedCost<double, PlaneCost, ImuCost>;
 
 } // namespace
+
+/// One optimizer with one cost: the point-to-plane cost and the IMU factor fused,
+/// so that each evaluation of the problem is one SYCL launch. Built on the first
+/// round and then only refreshed: the point-to-plane cost gets each round's
+/// constraints and pose (setData/setModel), the IMU factor each scan's
+/// preintegration and previous state. Results are those of costs built afresh
+/// every round, bit for bit.
+struct ImuRegistration::Solver {
+  Solver(std::shared_ptr<const moptim::IManifold<double>> manifold,
+         const IcpWorkspace &icp, const Eigen::Affine3d &pose_before,
+         ImuPreintegrationFactor factor)
+      : plane(std::make_shared<PlaneCost>(
+            icp.planeInputs().front().data(), icp.planeOffsets().data(),
+            icp.planeOffsets().size(), 6, 1, manifold,
+            Point3PlaneDistance(pose_before),
+            /*active_param_dim=*/SE3Manifold::kTangentDim)),
+        imu(std::make_shared<ImuCost>(previous_state.data(), zeros.data(), 1,
+                                      Factor::kInputDim, Factor::kResidualDim,
+                                      manifold, std::move(factor))),
+        lm(manifold) {
+    lm.addCost(std::make_shared<Fused>(plane, imu));
+  }
+
+  /// The constant input of the IMU factor: the previous state as
+  /// [pose_i(12) | v(3) | bg(3) | ba(3)].
+  Eigen::Matrix<double, Factor::kInputDim, 1> previous_state =
+      Eigen::Matrix<double, Factor::kInputDim, 1>::Zero();
+  /// Observation placeholder (unused by ImuPreintegrationFactor).
+  Eigen::Matrix<double, Factor::kResidualDim, 1> zeros =
+      Eigen::Matrix<double, Factor::kResidualDim, 1>::Zero();
+  std::shared_ptr<PlaneCost> plane;
+  std::shared_ptr<ImuCost> imu;
+  moptim::LevenbergMarquardt<double> lm;
+};
+
+ImuRegistration::~ImuRegistration() = default;
 
 ImuRegistration::ImuRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
@@ -64,16 +104,9 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
   prev_state_vec.segment<3>(Factor::kPoseStorageDim + 3) = prev_state.gyro_bias;
   prev_state_vec.segment<3>(Factor::kPoseStorageDim + 6) =
       prev_state.accel_bias;
-
-  // Observation placeholder (unused by ImuPreintegrationFactor)
-  const Eigen::Matrix<double, Factor::kResidualDim, 1> zeros =
-      Eigen::Matrix<double, Factor::kResidualDim, 1>::Zero();
+  bool factor_is_current = false;
 
   int small_delta_hits = 0;
-
-  moptim::LevenbergMarquardt<double> lm(manifold_);
-  lm.setMaxIterations(parameters.optimizer_iterations);
-  icp_.attachObserver(lm);
 
   for (int i = 0; i < parameters.registration_iterations; ++i) {
     if (icp_.findPlaneConstraints(map) == 0) {
@@ -82,26 +115,37 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
     }
 
     const auto solve_start = std::chrono::steady_clock::now();
-    lm.clearCosts();
 
     // Scan-matching cost (point-to-plane, only the pose's 6 tangent
-    // dimensions). The source cloud is the scan moved by the pose at the start
-    // of the round.
+    // dimensions): this round's constraints, whose source cloud is the scan
+    // moved by the pose at the start of the round. IMU preintegration factor
+    // between the fixed previous pose and the estimated state_j, with state_i's
+    // velocity/biases estimated as well: this scan's preintegration.
     const Eigen::Affine3d pose_before = total_T;
-    lm.addCost(
-        std::make_shared<moptim::AnalyticalCost<Point3PlaneDistance, double>>(
-            icp_.planeInputs().front().data(), icp_.planeOffsets().data(),
-            icp_.planeOffsets().size(), 6, 1, manifold_,
-            Point3PlaneDistance(pose_before),
-            /*active_param_dim=*/SE3Manifold::kTangentDim));
-
-    // IMU preintegration factor between the fixed previous pose and the
-    // estimated state_j, with state_i's velocity/biases estimated as well.
-    lm.addCost(std::make_shared<
-               moptim::NumericalCostCentral<ImuPreintegrationFactor, double>>(
-        prev_state_vec.data(), zeros.data(), 1, Factor::kInputDim,
-        Factor::kResidualDim, manifold_,
-        ImuPreintegrationFactor(preintegrator, kImuWeight)));
+    if (!solver_) {
+      solver_ = std::make_unique<Solver>(
+          manifold_, icp_, pose_before,
+          ImuPreintegrationFactor(preintegrator, kImuWeight));
+    } else {
+      solver_->plane->setData(icp_.planeInputs().front().data(),
+                              icp_.planeOffsets().data(),
+                              icp_.planeOffsets().size());
+      solver_->plane->setModel(Point3PlaneDistance(pose_before));
+      if (!factor_is_current) {
+        solver_->imu->setModel(
+            ImuPreintegrationFactor(preintegrator, kImuWeight));
+      }
+    }
+    if (!factor_is_current) {
+      // setData() so that a device without access to host memory gets a copy.
+      solver_->previous_state = prev_state_vec;
+      solver_->imu->setData(solver_->previous_state.data(),
+                            solver_->zeros.data(), 1);
+      factor_is_current = true;
+    }
+    auto &lm = solver_->lm;
+    lm.setMaxIterations(parameters.optimizer_iterations);
+    icp_.attachObserver(lm);
 
     lm.optimize(state.data());
     icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;

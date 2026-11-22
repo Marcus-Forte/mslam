@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -12,17 +13,23 @@
 #include <iterator>
 #include <memory>
 #include <sstream>
+#include <unistd.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
+// Unique per process and per call: ctest runs the tests of this binary as
+// parallel processes, and a clock reading alone can collide between them.
 std::filesystem::path makeTemporaryPlyPath() {
+  static std::atomic<unsigned> counter{0};
   const auto timestamp =
       std::chrono::steady_clock::now().time_since_epoch().count();
   return std::filesystem::temp_directory_path() /
-         ("mslam_point_cloud_" + std::to_string(timestamp) + ".ply");
+         ("mslam_point_cloud_" + std::to_string(::getpid()) + "_" +
+          std::to_string(counter++) + "_" + std::to_string(timestamp) +
+          ".ply");
 }
 
 TEST(PointCloudIO, ReadsAsciiVerticesAndSkipsFollowingListElements) {

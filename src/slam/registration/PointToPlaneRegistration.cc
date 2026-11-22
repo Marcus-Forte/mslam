@@ -8,6 +8,29 @@
 
 namespace mslam {
 
+namespace {
+using PlaneCost = moptim::AnalyticalCost<Point3PlaneDistance, double>;
+} // namespace
+
+/// The point-to-plane cost and its optimizer, built on the first round and then
+/// refreshed with each round's constraints and pose (setData/setModel): the
+/// results of a cost built afresh every round, bit for bit, without rebuilding.
+struct PointToPlaneRegistration::Solver {
+  Solver(const std::shared_ptr<const SE3Manifold> &manifold,
+         const IcpWorkspace &icp, const Eigen::Affine3d &pose_before)
+      : plane(std::make_shared<PlaneCost>(
+            icp.planeInputs().front().data(), icp.planeOffsets().data(),
+            icp.planeOffsets().size(), 6, 1, manifold,
+            Point3PlaneDistance(pose_before), /*active_param_dim=*/6)),
+        lm(manifold) {
+    lm.addCost(plane);
+  }
+  std::shared_ptr<PlaneCost> plane;
+  moptim::LevenbergMarquardt<double> lm;
+};
+
+PointToPlaneRegistration::~PointToPlaneRegistration() = default;
+
 PointToPlaneRegistration::PointToPlaneRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
     float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
@@ -32,10 +55,6 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
   Eigen::Matrix<double, SE3Manifold::kAmbientDim, 1> pose;
   poseToStorage(total_T, pose.data());
 
-  moptim::LevenbergMarquardt<double> lm(manifold_);
-  lm.setMaxIterations(parameters.optimizer_iterations);
-  icp_.attachObserver(lm);
-
   int small_delta_hits = 0;
   for (int i = 0; i < parameters.registration_iterations; ++i) {
     if (icp_.findPlaneConstraints(map) == 0) {
@@ -45,14 +64,19 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
     }
 
     const auto solve_start = std::chrono::steady_clock::now();
-    lm.clearCosts();
     // The source cloud is the scan moved by the pose of the start of the round.
-    lm.addCost(
-        std::make_shared<moptim::AnalyticalCost<Point3PlaneDistance, double>>(
-            icp_.planeInputs().front().data(), icp_.planeOffsets().data(),
-            icp_.planeOffsets().size(), 6, 1, manifold_,
-            Point3PlaneDistance(total_T), /*active_param_dim=*/6));
     const Eigen::Affine3d pose_before = total_T;
+    if (!solver_) {
+      solver_ = std::make_unique<Solver>(manifold_, icp_, pose_before);
+    } else {
+      solver_->plane->setData(icp_.planeInputs().front().data(),
+                              icp_.planeOffsets().data(),
+                              icp_.planeOffsets().size());
+      solver_->plane->setModel(Point3PlaneDistance(pose_before));
+    }
+    auto &lm = solver_->lm;
+    lm.setMaxIterations(parameters.optimizer_iterations);
+    icp_.attachObserver(lm);
     lm.optimize(pose.data());
     icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 

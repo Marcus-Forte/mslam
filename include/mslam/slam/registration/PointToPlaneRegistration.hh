@@ -30,8 +30,18 @@ public:
   /// Time spent in the parts of every Align so far.
   const RegistrationTimings &timings() const { return icp_.timings(); }
 
+  PointToPlaneRegistration(const PointToPlaneRegistration &) = delete;
+  PointToPlaneRegistration &operator=(const PointToPlaneRegistration &) =
+      delete;
+  ~PointToPlaneRegistration() override;
+
 private:
+  /// The optimizer and its cost, kept from one round and Align to the next
+  /// (PointToPlaneRegistration.cc).
+  struct Solver;
+
   IcpWorkspace icp_;
+  std::unique_ptr<Solver> solver_;
   /// Shared with the optimizer and its costs (they must use the same object).
   std::shared_ptr<const SE3Manifold> manifold_ =
       std::make_shared<SE3Manifold>();

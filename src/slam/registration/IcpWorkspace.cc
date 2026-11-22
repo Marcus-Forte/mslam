@@ -9,13 +9,14 @@
 namespace mslam {
 
 namespace {
-// Benchmark-only knob (not part of the library API): MOPTIM_SPECULATIVE=1 turns on
-// moptim's speculative linear systems for every optimizer the registrations create.
-// All of them call attachObserver() right after construction.
-bool speculativeLinearSystemsFromEnv() {
+// The registrations evaluate each LM trial with a full linear system (moptim's
+// speculative linear systems): an accepted trial then costs one launch instead of
+// two, and x, the iterations and the cost are the same bit for bit. Benchmark-only
+// knob: MOPTIM_SPECULATIVE=0 turns it off.
+bool speculativeLinearSystems() {
   static const bool enabled = [] {
     const char *value = std::getenv("MOPTIM_SPECULATIVE");
-    return value != nullptr && std::strcmp(value, "1") == 0;
+    return value == nullptr || std::strcmp(value, "0") != 0;
   }();
   return enabled;
 }
@@ -97,9 +98,7 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
 
 void IcpWorkspace::attachObserver(
     moptim::LevenbergMarquardt<double> &optimizer) {
-  if (speculativeLinearSystemsFromEnv()) {
-    optimizer.setSpeculativeLinearSystems(true);
-  }
+  optimizer.setSpeculativeLinearSystems(speculativeLinearSystems());
   if (!logger_->should_log(spdlog::level::debug)) {
     optimizer.setObserver(nullptr);
     return;

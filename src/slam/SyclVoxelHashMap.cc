@@ -77,7 +77,11 @@ PointCloud SyclVoxelHashMap::addScan(const PointCloud &scan) {
             });
   changed_.erase(std::unique(changed_.begin(), changed_.end(), sameKey),
                  changed_.end());
-  invalidateAround(changed_);
+  // A map that has cached nothing yet (one being built before it is searched,
+  // like a loop-closure target) has nothing to invalidate.
+  if (known_normals_ > 0) {
+    invalidateAround(changed_);
+  }
   return added;
 }
 
@@ -114,6 +118,9 @@ device::MapView SyclVoxelHashMap::view() const {
 
 void SyclVoxelHashMap::storeNormal(std::uint32_t slot,
                                    const double *normal) const {
+  if (normal_state_[slot] == DeviceNormalCache::kUnknown) {
+    ++known_normals_;
+  }
   if (normal == nullptr) {
     normal_state_[slot] = DeviceNormalCache::kNoNormal;
     return;
@@ -246,9 +253,13 @@ void SyclVoxelHashMap::invalidateAround(
     while (keys_[slot].x != device::kEmptyKey) {
       if (sameKey(keys_[slot], probe.key)) {
         const device::Bucket bucket = buckets_[slot];
-        std::fill(normal_state_ + bucket.offset,
-                  normal_state_ + bucket.offset + bucket.count,
-                  DeviceNormalCache::kUnknown);
+        for (std::uint32_t i = 0; i < bucket.count; ++i) {
+          std::uint8_t &state = normal_state_[bucket.offset + i];
+          if (state != DeviceNormalCache::kUnknown) {
+            state = DeviceNormalCache::kUnknown;
+            --known_normals_;
+          }
+        }
         break;
       }
       slot = (slot + 1) & map.mask;
@@ -270,6 +281,7 @@ void SyclVoxelHashMap::rebuild() {
   });
   std::fill(normal_state_, normal_state_ + pool_capacity_,
             DeviceNormalCache::kUnknown);
+  known_normals_ = 0;
 }
 
 void SyclVoxelHashMap::updateShifts() const {
@@ -295,6 +307,7 @@ void SyclVoxelHashMap::updateShifts() const {
     // Cached normals were invalidated for another radius: drop them all.
     std::fill(normal_state_, normal_state_ + pool_capacity_,
               DeviceNormalCache::kUnknown);
+    known_normals_ = 0;
   }
   shifts_radius_ = radius;
 }

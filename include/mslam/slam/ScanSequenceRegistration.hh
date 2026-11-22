@@ -2,6 +2,7 @@
 
 #include "mslam/common/Points.hh"
 #include "mslam/common/State.hh"
+#include "mslam/map/SyclVoxelHashMap.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Preprocessor.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
@@ -68,7 +69,8 @@ public:
 private:
   ScanSequenceParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
-  VoxelHashMap map_;
+  /// The registrations search its device mirror in kernels (IcpWorkspace).
+  SyclVoxelHashMap map_;
   /// Shared by registration_ and fit_ (declared first: built before them).
   std::shared_ptr<const ParallelExecutor> executor_;
   PointToPlaneRegistration registration_;

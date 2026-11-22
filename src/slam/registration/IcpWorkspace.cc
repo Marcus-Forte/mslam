@@ -25,8 +25,8 @@ bool speculativeLinearSystems() {
 
 bool isNegligibleRoundStep(const Eigen::Affine3d &before,
                            const Eigen::Affine3d &after) {
-  constexpr double kMaxTranslation = 1e-6; // m
-  constexpr double kMaxRotation = 1e-6;    // rad
+  constexpr double kMaxTranslation = 1e-4; // m
+  constexpr double kMaxRotation = 1e-4;    // rad
   const Eigen::Matrix<double, 6, 1> step =
       se3Log(Eigen::Affine3d(after * before.inverse()));
   return step.head<3>().norm() < kMaxTranslation &&

@@ -45,12 +45,17 @@
     {
       "name": "pi5",
       "displayName": "Raspberry Pi 5 (Cortex-A76)",
+      "description": "DPC++ (moptim is a SYCL library), native_cpu, host and device code for the Cortex-A76",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "installDir": "${sourceDir}/build/${presetName}/install",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "/opt/sycl/bin/clang",
+        "CMAKE_CXX_COMPILER": "/opt/sycl/bin/clang++",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_TYPE": "Release",
+        "SYCL_TARGETS": "native_cpu",
+        "MOPTIM_NATIVE_CPU_ARCH": "cortex-a76",
         "MSLAM_CPU": "cortex-a76"
       }
     }

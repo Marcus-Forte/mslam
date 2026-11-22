@@ -106,6 +106,7 @@ private:
   // The normal cache, parallel to the pool.
   std::uint8_t *normal_state_ = nullptr;
   double *normal_values_ = nullptr;
+  mutable std::size_t known_normals_ = 0; ///< Slots whose state is not unknown.
 
   // Shifts of the current search radius, in VoxelHashMap order.
   mutable device::VoxelKey *shifts_ = nullptr;

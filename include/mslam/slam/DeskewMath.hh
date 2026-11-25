@@ -7,8 +7,7 @@
 namespace mslam::deskew_detail {
 
 /// Body-frame rotation accumulated while turning at @p omega for @p dt
-/// seconds (identity for a zero, negative or non-finite angle). Inline and
-/// device-safe: the host deskew and the preprocessing kernel share it.
+/// seconds (identity for a zero, negative or non-finite angle).
 inline Eigen::Matrix3d rotationIncrement(const Eigen::Vector3d &omega,
                                          double dt) {
   const double angle = omega.norm() * dt;

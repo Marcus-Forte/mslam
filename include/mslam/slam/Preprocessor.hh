@@ -63,21 +63,10 @@ private:
 /// construction. Avoids re-reading config fields on every scan iteration and
 /// keeps its working buffers between scans, so a scan costs no allocation once
 /// the buffers have grown to the largest scan seen.
-class DevicePreprocessor;
-
 class Preprocessor {
 public:
-  /// On the sycl @p backend the voxel_hash filter runs in the DevicePreprocessor
-  /// (deskew, range test and downsampling in one kernel); on the host, and for
-  /// voxel_grid, deskewInto() and VoxelFilter.
   Preprocessor(const PreProcessor &config,
-               std::shared_ptr<spdlog::logger> logger,
-               ComputeBackend backend = ComputeBackend::Host);
-  ~Preprocessor();
-  Preprocessor(Preprocessor &&) noexcept;
-
-  /// Work-groups of the device kernel (sycl.threads, resolved by deviceWidth()).
-  void setDeviceWidth(std::size_t width);
+               std::shared_ptr<spdlog::logger> logger);
 
   /// Range filter only — used during map initialisation.
   std::shared_ptr<Scan> filterNearCenter(const Scan &scan) const;
@@ -93,8 +82,7 @@ public:
   std::shared_ptr<Scan>
   process(const Scan &scan, const std::vector<msensor::IMUData> &imu_samples);
 
-  /// Time spent in process() so far, by part (bench_slam prints it). The device
-  /// kernel (deskew and filter) counts as deskew; filter is the host filter.
+  /// Time spent in process() so far, by part (bench_slam prints it).
   struct Timings {
     std::chrono::nanoseconds deskew{0};
     std::chrono::nanoseconds filter{0};
@@ -109,7 +97,6 @@ private:
   // Working buffers reused across scans.
   PointCloud deskewed_;
   VoxelFilter voxel_filter_;
-  std::unique_ptr<DevicePreprocessor> device_;
 };
 
 } // namespace mslam

@@ -1,4 +1,4 @@
-> Historical study: TBB was removed on 2026-11-22; the executor now runs on moptim's host thread pool.
+> TBB is mslam's parallel path again (2026-11-24); it was briefly replaced by SYCL (2026-11-22), which has been removed. The study below describes the code as restored.
 
 # oneTBB in mslam: parallel correspondence search and normal estimation
 
@@ -422,3 +422,7 @@ stage while the build image has `libfmt11`. Checked in `debian:sid-slim` on
 pulls it in; `libfmt10` is only a redundant package. `libtbb12` 2023.1.0-3 is
 installable there, the same version as in the build image. The deployment image
 itself was not built after this change.
+
+## Sweep 2026-11-25 (TBB restored)
+
+Sweep 2026-11-25 (test runner, Debian sid, GCC 16, x86-64 WSL2 host with 28 hardware threads, `bench_slam` with `test/integration/mslam.jsonc`, minima of 5 interleaved rounds; every pose identical to the old host path). Total ms, `living_room_garden` / `rooms`: old host 3862 / 1814; TBB t1 3890 / 1814, t2 2728 / 1334, t4 2144 / 1086, t8 1998 / 1032, t16 1993 / 1095, t0 (28) 2416 / 1221; the removed SYCL `native_cpu` path 2933 / 1643. `living_room_garden` register split, host -> t8: search 875 -> 215, normals 1522 -> 346, solve 666 -> 669 (moptim inline, one partition). From 16 threads on preprocess and solve get slower (solve 729 at t16, 817 at t0), probably spinning TBB workers hurting the sequential parts, so prefer an explicit count (`config/mslam.jsonc` uses 8; the Pi 5 config keeps 4, not measured) over 0.

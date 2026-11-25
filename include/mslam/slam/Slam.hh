@@ -6,6 +6,9 @@
 #include "mslam/slam/ImuPreintegration.hh"
 #include "mslam/slam/registration/ImuRegistration.hh"
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
+#include "mslam/utils/Parallel.hh"
+
+#include "moptim/ExecutionContext.hh"
 
 #include <Eigen/Dense>
 #include <memory>
@@ -97,6 +100,12 @@ private:
   // Members are listed in initialization order.
   std::shared_ptr<spdlog::logger> logger_;
   SlamConfiguration config_;
+  /// Shared by both registrations and their correspondence finders; null when
+  /// slam.num_threads is 1 (sequential).
+  std::shared_ptr<const ParallelExecutor> executor_;
+  /// The moptim context of both registrations' costs; slam.num_threads sets
+  /// its threads too.
+  std::shared_ptr<moptim::ExecutionContext> context_;
   std::unique_ptr<PointToPlaneRegistration> registration_;
   std::unique_ptr<ImuRegistration> imu_registration_;
   std::shared_ptr<IMap> map_;

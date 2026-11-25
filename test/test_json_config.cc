@@ -3,9 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <cstdlib>
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <string>
 
@@ -209,102 +207,52 @@ TEST(ShippedConfigs, LoadThroughJsonConfig) {
   EXPECT_TRUE(pose_graph.pose_graph.synchronous);
 }
 
-// Sets MSLAM_SYCL for one test and restores the previous value.
-class ScopedSyclEnv {
-public:
-  explicit ScopedSyclEnv(const char *value) {
-    if (const char *old = std::getenv("MSLAM_SYCL")) {
-      old_ = old;
-    }
-    if (value != nullptr) {
-      setenv("MSLAM_SYCL", value, 1);
-    } else {
-      unsetenv("MSLAM_SYCL");
-    }
-  }
-  ~ScopedSyclEnv() {
-    if (old_.has_value()) {
-      setenv("MSLAM_SYCL", old_->c_str(), 1);
-    } else {
-      unsetenv("MSLAM_SYCL");
-    }
-  }
-
-private:
-  std::optional<std::string> old_;
-};
-
-TEST_F(JsonConfigTest, SyclIsDisabledWhenTheBlockIsAbsent) {
-  const ScopedSyclEnv env(nullptr);
-  const auto config = load("");
-  EXPECT_EQ(config.parameters.backend, mslam::ComputeBackend::Host);
-  EXPECT_EQ(config.parameters.sycl_threads, 0U);
+TEST_F(JsonConfigTest, NumThreadsDefaultsToOneWhenAbsent) {
+  EXPECT_EQ(load("").parameters.num_threads, 1U);
 }
 
-TEST_F(JsonConfigTest, SyclBlockParsesEnabledAndThreads) {
-  const ScopedSyclEnv env(nullptr);
-  auto config = load("", "", R"(, "sycl": {"enabled": true, "threads": 4})");
-  EXPECT_EQ(config.parameters.backend, mslam::ComputeBackend::Sycl);
-  EXPECT_EQ(config.parameters.sycl_threads, 4U);
-  config = load("", "", R"(, "sycl": {"enabled": false, "threads": 0})");
-  EXPECT_EQ(config.parameters.backend, mslam::ComputeBackend::Host);
-  config = load("", "", R"(, "sycl": {})");
-  EXPECT_EQ(config.parameters.backend, mslam::ComputeBackend::Host);
-  EXPECT_EQ(config.parameters.sycl_threads, 0U);
+TEST_F(JsonConfigTest, NumThreadsParsesCountsAndZero) {
+  EXPECT_EQ(load(R"(, "num_threads": 4)").parameters.num_threads, 4U);
+  EXPECT_EQ(load(R"(, "num_threads": 0)").parameters.num_threads, 0U);
 }
 
-TEST_F(JsonConfigTest, SyclBlockRejectsInvalidValues) {
-  const ScopedSyclEnv env(nullptr);
-  for (const char *block :
-       {R"(, "sycl": true)", R"(, "sycl": {"enabled": 1})",
-        R"(, "sycl": {"enabled": "yes"})", R"(, "sycl": {"threads": -1})",
-        R"(, "sycl": {"threads": 2.5})", R"(, "sycl": {"threads": "4"})",
-        R"(, "sycl": {"threads": 257})", R"(, "sycl": {"thread": 4})"}) {
-    EXPECT_THROW(load("", "", block), std::runtime_error) << block;
-  }
+TEST_F(JsonConfigTest, NumThreadsRejectsAnInvalidValue) {
+  EXPECT_THROW(load(R"(, "num_threads": "4")"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": -1)"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": 2.5)"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": true)"), std::runtime_error);
+  EXPECT_THROW(load(R"(, "num_threads": 257)"), std::runtime_error);
 }
 
-TEST_F(JsonConfigTest, RemovedKeysNameTheReplacement) {
-  const ScopedSyclEnv env(nullptr);
-  for (const char *key : {R"(, "num_threads": 4)", R"(, "backend": "sycl")"}) {
+TEST_F(JsonConfigTest, RemovedSyclKeysSayTheyWereRemoved) {
+  // slam.backend and a top-level "sycl" block must not be ignored silently.
+  struct Case {
+    const char *slam;
+    const char *top_level;
+    const char *names;
+  };
+  for (const Case &removed :
+       {Case{R"(, "backend": "sycl")", "", "slam.backend"},
+        Case{"", R"(, "sycl": {"enabled": true, "threads": 4})",
+             "slam.num_threads"},
+        Case{"", R"(, "sycl": {})", "slam.num_threads"}}) {
     try {
-      load(key);
-      ADD_FAILURE() << "accepted " << key;
+      load(removed.slam, "", removed.top_level);
+      ADD_FAILURE() << "accepted " << removed.slam << removed.top_level;
     } catch (const std::runtime_error &error) {
       const std::string message = error.what();
       EXPECT_NE(message.find("was removed"), std::string::npos) << message;
-      EXPECT_NE(message.find("sycl.enabled"), std::string::npos) << message;
-      EXPECT_NE(message.find("sycl.threads"), std::string::npos) << message;
+      EXPECT_NE(message.find(removed.names), std::string::npos) << message;
     }
   }
 }
 
-TEST_F(JsonConfigTest, MslamSyclOverridesTheFile) {
-  {
-    const ScopedSyclEnv env("1");
-    EXPECT_EQ(load("").parameters.backend, mslam::ComputeBackend::Sycl);
-  }
-  {
-    const ScopedSyclEnv env("0");
-    EXPECT_EQ(load("", "", R"(, "sycl": {"enabled": true})").parameters.backend,
-              mslam::ComputeBackend::Host);
-  }
-  {
-    const ScopedSyclEnv env("maybe");
-    EXPECT_THROW(load(""), std::runtime_error);
-  }
-}
-
-TEST(SlamConfigurationPrint, ShowsTheSyclSettings) {
+TEST(SlamConfigurationPrint, ShowsTheThreads) {
   mslam::SlamConfiguration config;
-  std::ostringstream off;
-  off << config;
-  EXPECT_NE(off.str().find("SYCL: disabled"), std::string::npos);
-  config.parameters.backend = mslam::ComputeBackend::Sycl;
-  config.parameters.sycl_threads = 4;
-  std::ostringstream on;
-  on << config;
-  EXPECT_NE(on.str().find("SYCL: enabled, threads 4"), std::string::npos);
+  config.parameters.num_threads = 4;
+  std::ostringstream out;
+  out << config;
+  EXPECT_NE(out.str().find("Threads: 4"), std::string::npos);
 }
 
 TEST_F(JsonConfigTest, MapSearchRadiusDefaultsToOneWhenAbsent) {

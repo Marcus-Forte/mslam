@@ -47,19 +47,6 @@ struct ImuPriorSigma {
  */
 class ImuPreintegrationFactor;
 
-/// makeManifold() for moptim::DeviceLevenbergMarquardt: SE(3) then 18
-/// Euclidean entries, as ProductManifold steps them.
-struct ImuStatePlus {
-  static constexpr std::size_t kAmbientDim = 12 + 18;
-  static constexpr std::size_t kTangentDim = 6 + 18;
-  static void plus(const double *x, const double *delta, double *x_plus) {
-    se3Plus(x, delta, x_plus);
-    for (std::size_t i = 0; i < 18; ++i) {
-      x_plus[12 + i] = x[12 + i] + delta[6 + i];
-    }
-  }
-};
-
 class ImuPreintegrationFactor {
 public:
   static constexpr int kPoseStorageDim = SE3Manifold::kAmbientDim; // 12
@@ -152,7 +139,7 @@ public:
 
     Eigen::Map<Eigen::Matrix<double, kTangentDim, kResidualDim>> jac_t(jac);
     // Coefficient-wise product: a plain product of this size takes Eigen's GEMM
-    // path, which allocates and cannot run in a SYCL kernel.
+    // path, which allocates.
     jac_t.leftCols<kPreintegrationResidualDim>() =
         J.transpose().lazyProduct(sqrt_info_.transpose());
     jac_t.rightCols<kExtrasDim>().setZero();
@@ -168,9 +155,8 @@ public:
     const ImuState state_j = stateFrom(x, x + kExtrasJ);
 
     Eigen::Map<Eigen::Matrix<double, kResidualDim, 1>> res_map(res);
-    res_map.head<kPreintegrationResidualDim>() =
-        sqrt_info_.lazyProduct(
-            preintegrationResidual(preintegrated_, state_i, state_j));
+    res_map.head<kPreintegrationResidualDim>() = sqrt_info_.lazyProduct(
+        preintegrationResidual(preintegrated_, state_i, state_j));
 
     const Eigen::Map<const Eigen::Matrix<double, kExtrasDim, 1>> extras_i(
         x + kExtrasI);
@@ -195,8 +181,8 @@ private:
     return state;
   }
 
-  // A copy, not a reference to the ImuPreintegrator: the model is copied into
-  // SYCL USM and runs in a kernel, so it must not point at host data.
+  // A copy, not a reference to the ImuPreintegrator: the cost copies the model,
+  // so it must not point at the caller's data.
   PreintegratedImu preintegrated_;
   Eigen::Matrix<double, 15, 15> sqrt_info_;
   Eigen::Matrix<double, kExtrasDim, 1> prior_sqrt_info_;

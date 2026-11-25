@@ -1,16 +1,20 @@
 #include "mslam/config/JsonConfig.hh"
 
-#include <cstdlib>
 #include "jsoncpp/json/reader.h"
 #include "mslam/config/Validation.hh"
+#include <cstdlib>
 
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <limits>
 
 namespace mslam {
 
 namespace {
+// Upper bound of slam.num_threads, only to reject nonsense.
+constexpr unsigned kMaxThreads = 256;
+
 mslam::DownsampleFilter parseDownsampleFilter(const std::string &filter) {
   if (filter == "voxel_grid") {
     return mslam::DownsampleFilter::VoxelGrid;
@@ -306,29 +310,31 @@ void JsonConfig::load() {
   }
   config_.pose_graph = parsePoseGraph(root["pose_graph"]);
 
-  // Parallelism is SYCL only: say so for the keys of the host thread era.
-  for (const char *key : {"num_threads", "backend"}) {
-    if (root["slam"].isMember(key)) {
-      throw std::runtime_error(
-          std::string("slam.") + key +
-          " was removed: SYCL is the only parallel path, use sycl.enabled and "
-          "sycl.threads (top-level \"sycl\" block)");
+  if (!root["slam"]["num_threads"].empty()) {
+    const auto &num_threads = root["slam"]["num_threads"];
+    if (!num_threads.isIntegral() || num_threads.asDouble() < 0.0 ||
+        num_threads.asDouble() > kMaxThreads) {
+      throw std::runtime_error("Invalid slam num_threads: expected an integer "
+                               "in [0, " +
+                               std::to_string(kMaxThreads) + "]");
     }
+    config_.parameters.num_threads = num_threads.asUInt();
   }
-  const SyclSettings sycl = parseSyclSettings(root["sycl"], "config");
-  config_.parameters.backend =
-      sycl.enabled ? ComputeBackend::Sycl : ComputeBackend::Host;
-  config_.parameters.sycl_threads = sycl.threads;
-  // MSLAM_SYCL=0|1 overrides sycl.enabled, so one config (and one test or
-  // benchmark) runs on either path.
-  if (const char *override_enabled = std::getenv("MSLAM_SYCL")) {
-    const std::string_view value(override_enabled);
-    if (value != "0" && value != "1") {
-      throw std::runtime_error("Invalid MSLAM_SYCL: " + std::string(value) +
-                               " (expected 0 or 1)");
-    }
-    config_.parameters.backend =
-        value == "1" ? ComputeBackend::Sycl : ComputeBackend::Host;
+
+  // SYCL was removed again: say so for the keys it had, since a leftover
+  // top-level block would otherwise be ignored silently.
+  if (root["slam"].isMember("backend")) {
+    throw std::runtime_error(
+        "slam.backend was removed: SYCL is gone, mslam runs on the host; "
+        "use slam.num_threads for threads");
+  }
+  if (root.isMember("sycl")) {
+    throw std::runtime_error(
+        "the \"sycl\" block was removed: SYCL is gone; use slam.num_threads "
+        "for threads");
+  }
+  if (std::getenv("MSLAM_SYCL") != nullptr) {
+    std::cerr << "warning: MSLAM_SYCL is ignored, SYCL was removed\n";
   }
 
   if (config_.parameters.opt_iterations <= 0) {

@@ -1,12 +1,12 @@
 #pragma once
 
 #include "mslam/OptimizerObserver.hh"
-#include "mslam/config/IConfig.hh"
 #include "mslam/common/Points.hh"
+#include "mslam/config/IConfig.hh"
 #include "mslam/map/IMap.hh"
 #include "mslam/slam/ICorrespondenceFinder.hh"
 #include "mslam/slam/NormalEstimator.hh"
-#include "mslam/slam/registration/DeviceCorrespondenceSearch.hh"
+#include "mslam/utils/Parallel.hh"
 
 #include "moptim/ExecutionContext.hh"
 #include "moptim/LevenbergMarquardt.hh"
@@ -33,32 +33,24 @@ struct IcpParameters {
 /// (bench_slam prints it). search: the 1-NN correspondence search; normals: the
 /// normal estimation of the matched map points; assembly: building the
 /// point-to-plane constraints; solve: building the costs and the optimizer
-/// runs. Reading the clock a few times per round costs nothing measurable. On a
-/// map with a device mirror (DeviceVoxelHashMap) the search and the normals are
-/// one kernel, counted as search, and normals stays zero.
+/// runs. Reading the clock a few times per round costs nothing measurable.
 struct RegistrationTimings {
   std::chrono::nanoseconds search{0};
   std::chrono::nanoseconds normals{0};
   std::chrono::nanoseconds assembly{0};
   std::chrono::nanoseconds solve{0};
-  /// Device path: matched map points whose normal was computed / read from the
-  /// map's cache.
-  std::size_t normals_computed = 0;
-  std::size_t normals_cached = 0;
 
   RegistrationTimings &operator+=(const RegistrationTimings &other) {
     search += other.search;
     normals += other.normals;
     assembly += other.assembly;
     solve += other.solve;
-    normals_computed += other.normals_computed;
-    normals_cached += other.normals_cached;
     return *this;
   }
 };
 
 /// Whether a registration round moved the pose from @p before to @p after by
-/// less than 1 micrometre and 1 microradian (se3Log of the relative pose):
+/// less than 0.1 millimetre and 0.1 milliradian (se3Log of the relative pose):
 /// rounds that no longer move it are what ends an ICP loop early.
 ///
 /// The registrations used to count rounds whose optimizer returned SMALL_DELTA
@@ -91,17 +83,16 @@ struct FirstRoundIncrement {
  */
 class IcpWorkspace {
 public:
-  /// @param correspondence_finder The host path's search (sequential).
-  /// @param backend Where the registrations' solves run (their costs and
-  /// optimizer, see useDeviceOptimizer()); the search follows the map (a
-  /// DeviceVoxelHashMap is searched in kernels on its own context).
-  /// @param sycl_threads Work-groups of the device search kernel (0: every
-  /// compute unit); see deviceWidth().
+  /// @param executor Runs the normal estimation of new map points (nullptr:
+  /// sequential). The correspondence search runs on whatever executor
+  /// @p correspondence_finder was given.
+  /// @param context The moptim context the registrations' costs run on
+  /// (nullptr: a default-constructed one).
   IcpWorkspace(const IcpParameters &parameters,
                std::shared_ptr<spdlog::logger> logger,
                std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-               ComputeBackend backend = ComputeBackend::Host,
-               unsigned sycl_threads = 0);
+               std::shared_ptr<const ParallelExecutor> executor = nullptr,
+               std::shared_ptr<moptim::ExecutionContext> context = nullptr);
 
   const IcpParameters &parameters() const { return parameters_; }
   spdlog::logger &logger() const { return *logger_; }
@@ -129,12 +120,6 @@ public:
   /// which the point-to-plane constraints are assembled (points without a
   /// normal are dropped). Returns the number of constraints.
   ///
-  /// On a map with a device mirror (IMap::deviceMap()) the search and the
-  /// normals run in one SYCL kernel (DeviceCorrespondenceSearch) on as many
-  /// work-groups (deviceWidth()), with the normals cached in the
-  /// map across scans; the constraints are assembled in the same order and with
-  /// the same arithmetic as on the host path.
-  ///
   /// Constraint i is the pair (planeInputs()[i], planeOffsets()[i]) =
   /// ([source_xyz, normal_xyz], normal . map_point), the layout of
   /// Point3PlaneDistance.
@@ -150,15 +135,7 @@ public:
   /// the clock nor builds event payloads.
   void attachObserver(moptim::LevenbergMarquardt<double> &optimizer);
 
-  /// Whether the registrations run their solves with
-  /// moptim::DeviceLevenbergMarquardt (the whole optimize() in one launch): on
-  /// the sycl backend, unless debug logging wants the optimizer's telemetry
-  /// (the device optimizer has no observer). Otherwise moptim's
-  /// LevenbergMarquardt.
-  bool useDeviceOptimizer() const;
-
-  ComputeBackend backend() const { return backend_; }
-  /// The moptim context the registrations' costs run on (executionContextFor()).
+  /// The moptim context the registrations' costs run on.
   const std::shared_ptr<moptim::ExecutionContext> &context() const {
     return context_;
   }
@@ -172,9 +149,8 @@ private:
   IcpParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
   std::shared_ptr<ICorrespondenceFinder> correspondence_finder_;
-  ComputeBackend backend_;
+  std::shared_ptr<const ParallelExecutor> executor_;
   std::shared_ptr<moptim::ExecutionContext> context_;
-  std::size_t device_width_; ///< Work-groups of the search kernel.
   NormalEstimator normal_estimator_;
   std::vector<std::uint32_t> normal_slots_; ///< One per correspondence.
   std::optional<OptimizerObserver<double>> observer_;
@@ -185,7 +161,6 @@ private:
   std::vector<Eigen::Matrix<double, 6, 1>> plane_inputs_;
   std::vector<double> plane_offsets_;
   RegistrationTimings timings_;
-  DeviceCorrespondenceSearch device_search_;
 };
 
 } // namespace mslam

@@ -1,6 +1,5 @@
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
 #include "moptim/AnalyticalCost.hh"
-#include "moptim/DeviceLevenbergMarquardt.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
@@ -24,12 +23,11 @@ struct PointToPlaneRegistration::Solver {
             icp.planeOffsets().size(), 6, 1, manifold,
             Point3PlaneDistance(pose_before), /*active_param_dim=*/6,
             icp.context())),
-        lm(manifold), device_lm(plane) {
+        lm(manifold) {
     lm.addCost(plane);
   }
   std::shared_ptr<PlaneCost> plane;
-  moptim::LevenbergMarquardt<double> lm; ///< Debug telemetry, comparisons.
-  moptim::DeviceLevenbergMarquardt<double, SE3Plus, PlaneCost> device_lm;
+  moptim::LevenbergMarquardt<double> lm;
 };
 
 PointToPlaneRegistration::~PointToPlaneRegistration() = default;
@@ -38,11 +36,12 @@ PointToPlaneRegistration::PointToPlaneRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
     float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    ComputeBackend backend, unsigned sycl_threads)
+    std::shared_ptr<const ParallelExecutor> executor,
+    std::shared_ptr<moptim::ExecutionContext> context)
     : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
                          max_correspondence_distance},
            std::move(logger), std::move(correspondence_finder),
-           backend, sycl_threads) {}
+           std::move(executor), std::move(context)) {}
 
 SlamState PointToPlaneRegistration::Align(const SlamState &state,
                                           const IMap &map,
@@ -77,15 +76,10 @@ SlamState PointToPlaneRegistration::Align(const SlamState &state,
                               icp_.planeOffsets().size());
       solver_->plane->setModel(Point3PlaneDistance(pose_before));
     }
-    if (icp_.useDeviceOptimizer()) {
-      solver_->device_lm.setMaxIterations(parameters.optimizer_iterations);
-      solver_->device_lm.optimize(pose.data());
-    } else {
-      auto &lm = solver_->lm;
-      lm.setMaxIterations(parameters.optimizer_iterations);
-      icp_.attachObserver(lm);
-      lm.optimize(pose.data());
-    }
+    auto &lm = solver_->lm;
+    lm.setMaxIterations(parameters.optimizer_iterations);
+    icp_.attachObserver(lm);
+    lm.optimize(pose.data());
     icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 
     total_T = poseFromStorage(pose.data());

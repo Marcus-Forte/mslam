@@ -43,13 +43,10 @@ public:
   /// them together within it). 20 rounds are an upper bound; ICP stops early
   /// when the pose settles.
   static ScanSequenceParameters
-  verificationParameters(const PoseGraphParameters &parameters,
-                         ComputeBackend backend = ComputeBackend::Host);
+  verificationParameters(const PoseGraphParameters &parameters);
 
-  /// @param backend Where the verification registrations run.
   LoopCloser(const PoseGraphParameters &parameters,
-             std::shared_ptr<spdlog::logger> logger,
-             ComputeBackend backend = ComputeBackend::Host);
+             std::shared_ptr<spdlog::logger> logger);
 
   /// Verifies loop candidates for keyframe @p new_id (the last of @p graph).
   /// Candidates are keyframes whose graph pose is within `loop_search_radius`
@@ -62,7 +59,6 @@ public:
   LoopCloseResult close(const PoseGraph &graph, std::size_t new_id) const;
 
 private:
-  ComputeBackend backend_ = ComputeBackend::Host;
   PoseGraphParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
   /// Handed to the ScanSequenceRegistration of each verification, which logs

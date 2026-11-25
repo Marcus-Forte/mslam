@@ -10,7 +10,7 @@
 namespace mslam {
 
 /// plus(T, delta) = se3Exp(delta) * T on the 12-double storage: the one
-/// implementation of SE3Manifold::plus and SE3Plus::plus (inline, device-safe).
+/// implementation of SE3Manifold::plus.
 inline void se3Plus(const double *x, const double *delta, double *x_plus) {
   const Eigen::Affine3d step =
       se3Exp(Eigen::Map<const Eigen::Matrix<double, 6, 1>>(delta));
@@ -47,16 +47,6 @@ public:
 
   void plus(const double *x, const double *delta,
             double *x_plus) const override {
-    se3Plus(x, delta, x_plus);
-  }
-};
-
-/// SE3Manifold for moptim::DeviceLevenbergMarquardt (a compile-time manifold
-/// whose plus runs in the kernel).
-struct SE3Plus {
-  static constexpr std::size_t kAmbientDim = 12;
-  static constexpr std::size_t kTangentDim = 6;
-  static void plus(const double *x, const double *delta, double *x_plus) {
     se3Plus(x, delta, x_plus);
   }
 };

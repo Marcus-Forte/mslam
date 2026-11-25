@@ -5,8 +5,6 @@
 #include "msensor/config/config.hh"
 #include "msensor/lidar/mid360.hh"
 #include "mslam/map/VoxelHashMap.hh"
-#include "mslam/slam/ComputeContext.hh"
-#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/SensorStatus.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamPipeline.hh"
@@ -63,12 +61,13 @@ public:
 
 // Set from the signal handler, polled by the SLAM loop.
 std::atomic<bool> g_stop_requested{false};
-// Host-only check: this TU is also compiled by the SYCL device pass (it links
-// moptim through `slam`), whose target does not report lock-free atomics.
-#ifndef __SYCL_DEVICE_ONLY__
 static_assert(std::atomic<bool>::is_always_lock_free,
               "the stop flag is written from a signal handler");
-#endif
+// The config validates against one constant and the map against the other;
+// they must accept the same radii.
+static_assert(mslam::MapParameters::kMaxSearchRadius ==
+                  mslam::VoxelHashMap::kMaxAdjacentVoxels,
+              "map.search_radius must accept exactly the radii the map does");
 
 void onTerminationSignal(int /*signal_number*/) {
   g_stop_requested.store(true);
@@ -112,13 +111,6 @@ int main(int argc, char **argv) {
   }
 
   std::cout << config << std::endl;
-  if (config.parameters.backend == mslam::ComputeBackend::Sycl &&
-      !mslam::syclBackendAvailable()) {
-    std::cerr << "error: sycl.enabled is true, but this mslam was built "
-                 "without SYCL (configure with -DMSLAM_WITH_SYCL=ON, e.g. the "
-                 "sycl preset)\n";
-    return 1;
-  }
 
   // Create logger.
   const auto spdlog_logger = std::make_shared<spdlog::logger>(
@@ -127,9 +119,11 @@ int main(int argc, char **argv) {
   const auto logger = spdlog_logger;
 
   // Create Map interface.
-  std::shared_ptr<mslam::IMap> map;
-  map = mslam::makeVoxelHashMap(config.map_parameters,
-                                config.parameters.backend);
+  const auto voxel_map = std::make_shared<mslam::VoxelHashMap>(
+      config.map_parameters.resolution,
+      config.map_parameters.max_points_per_voxel);
+  voxel_map->setNumAdjacentVoxelSearch(config.map_parameters.search_radius);
+  const std::shared_ptr<mslam::IMap> map = voxel_map;
 
   mslam::SlamServer slam_server(logger);
   slam_server.start();

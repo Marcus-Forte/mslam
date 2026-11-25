@@ -24,20 +24,21 @@ include(cmake/code_format.cmake)
 # msensor tools (replay server, recorder): options here, targets below.
 include(cmake/msensor_tools.cmake)
 
-# SYCL is opt-in and the only parallel path. Without it mslam (and moptim) are sequential plain C++ built by
-# GCC, and sycl.enabled can only be false. With it, everything that links moptim is compiled by DPC++ and
-# sycl.enabled selects the SYCL kernels or the sequential host code at run time (MSLAM_SYCL=0|1 overrides
-# the config).
-option(MSLAM_WITH_SYCL "Build the SYCL backend (needs a DPC++ clang++)" OFF)
-set(MOPTIM_WITH_SYCL ${MSLAM_WITH_SYCL})
-message(STATUS "mslam: SYCL backend ${MSLAM_WITH_SYCL}")
-if(MSLAM_WITH_SYCL)
-  # moptim compiles fixed-size Eigen members into SYCL device code and copies them between the host and
-  # the device pass, so it fixes EIGEN_MAX_STATIC_ALIGN_BYTES=16 on everything that links it. Every
-  # other library here (maps, config, msensor, the I/O library) must agree on Eigen's layout, so the
-  # same value is set globally, before the subdirectories, like MSLAM_CPU.
-  add_compile_definitions(EIGEN_MAX_STATIC_ALIGN_BYTES=16)
+# oneTBB runs the correspondence search and normal estimation in parallel when
+# slam.num_threads (registration.num_threads for register_scans) is not 1. It
+# is looked up before moptim, which uses it too (MOPTIM_WITH_TBB). Without TBB the build is sequential and such
+# a setting only logs a warning.
+option(MSLAM_WITH_TBB "Use oneTBB for the parallel registration search" ON)
+if(MSLAM_WITH_TBB)
+  find_package(TBB QUIET)
+  if(NOT TBB_FOUND)
+    message(WARNING "MSLAM_WITH_TBB is ON but oneTBB was not found "
+                    "(install libtbb-dev); building the sequential version")
+  else()
+    message(STATUS "MSLAM_WITH_TBB is ON and oneTBB was found; building the parallel version")
+  endif()
 endif()
+set(MOPTIM_WITH_TBB ${MSLAM_WITH_TBB})
 
 add_subdirectory(third_party/robin-map)
 # moptim source tree: the submodule by default. Point it at a standalone moptim checkout (e.g. the

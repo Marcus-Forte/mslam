@@ -1,7 +1,6 @@
 #include "mslam/slam/registration/ImuRegistration.hh"
 
 #include "moptim/AnalyticalCost.hh"
-#include "moptim/DeviceLevenbergMarquardt.hh"
 #include "moptim/FusedCost.hh"
 #include "moptim/LevenbergMarquardt.hh"
 #include "mslam/slam/SE3.hh"
@@ -24,10 +23,8 @@ using Fused = moptim::FusedCost<double, PlaneCost, ImuCost>;
 
 } // namespace
 
-/// The costs and two optimizers over them, on the backend's moptim context: the
-/// device optimizer (the whole solve in one launch; the sycl backend) and
-/// LevenbergMarquardt with the costs fused (one launch per evaluation; the host
-/// backend, and debug telemetry). Built on the first
+/// The costs and LevenbergMarquardt over them fused into one cost (one dispatch
+/// per evaluation), on the workspace's moptim context. Built on the first
 /// round and then only refreshed: the point-to-plane cost gets each round's
 /// constraints and pose (setData/setModel), the IMU factor each scan's
 /// preintegration and previous state. Results are those of costs built afresh
@@ -45,7 +42,7 @@ struct ImuRegistration::Solver {
                                       Factor::kInputDim, Factor::kResidualDim,
                                       manifold, std::move(factor), 0,
                                       icp.context())),
-        lm(manifold), device_lm(plane, imu) {
+        lm(manifold) {
     lm.addCost(std::make_shared<Fused>(plane, imu));
   }
 
@@ -59,8 +56,6 @@ struct ImuRegistration::Solver {
   std::shared_ptr<PlaneCost> plane;
   std::shared_ptr<ImuCost> imu;
   moptim::LevenbergMarquardt<double> lm;
-  moptim::DeviceLevenbergMarquardt<double, ImuStatePlus, PlaneCost, ImuCost>
-      device_lm;
 };
 
 ImuRegistration::~ImuRegistration() = default;
@@ -69,11 +64,12 @@ ImuRegistration::ImuRegistration(
     int num_registration_iterations, int num_optimizer_iterations,
     float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    ComputeBackend backend, unsigned sycl_threads)
+    std::shared_ptr<const ParallelExecutor> executor,
+    std::shared_ptr<moptim::ExecutionContext> context)
     : icp_(IcpParameters{num_registration_iterations, num_optimizer_iterations,
                          max_correspondence_distance},
            std::move(logger), std::move(correspondence_finder),
-           backend, sycl_threads),
+           std::move(executor), std::move(context)),
       manifold_(Factor::makeManifold()) {}
 
 SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
@@ -145,21 +141,16 @@ SlamState ImuRegistration::Align(const SlamState &current, const IMap &map,
       }
     }
     if (!factor_is_current) {
-      // setData() so that a device without access to host memory gets a copy.
+      // setData() keeps the cost pointing at the copy in the solver.
       solver_->previous_state = prev_state_vec;
       solver_->imu->setData(solver_->previous_state.data(),
                             solver_->zeros.data(), 1);
       factor_is_current = true;
     }
-    if (icp_.useDeviceOptimizer()) {
-      solver_->device_lm.setMaxIterations(parameters.optimizer_iterations);
-      solver_->device_lm.optimize(state.data());
-    } else {
-      auto &lm = solver_->lm;
-      lm.setMaxIterations(parameters.optimizer_iterations);
-      icp_.attachObserver(lm);
-      lm.optimize(state.data());
-    }
+    auto &lm = solver_->lm;
+    lm.setMaxIterations(parameters.optimizer_iterations);
+    icp_.attachObserver(lm);
+    lm.optimize(state.data());
     icp_.timings().solve += std::chrono::steady_clock::now() - solve_start;
 
     total_T = poseFromStorage(state.data());

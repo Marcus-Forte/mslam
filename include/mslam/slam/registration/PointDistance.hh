@@ -5,6 +5,8 @@
 #include "mslam/slam/Transform.hh"
 #include <Eigen/Dense>
 
+#include <cmath>
+
 namespace mslam {
 namespace detail {
 
@@ -25,6 +27,32 @@ inline Eigen::Matrix2d rotation2DDerivative(double theta) {
   derivative << -s, -c, c, -s;
   return derivative;
 }
+
+#if defined(__AVX__) && defined(__FMA__)
+/// Keeps the compiler from fusing the value into a following add (FMA
+/// contraction): an empty asm that "modifies" it.
+inline double opaque(double value) {
+  asm("" : "+x"(value));
+  return value;
+}
+
+struct PlanePoint {
+  double x, y, z;
+};
+
+/// R * p + t in the operation order of Eigen's AVX code: per row, a plain
+/// product with column 0, then two fused multiply-adds with columns 1 and 2,
+/// then a plain add of the translation. `state.rotation_` is column-major.
+template <class State>
+inline PlanePoint transformPoint(const State &state, const double *p) {
+  const double *r = state.rotation_.data();
+  const double *t = state.translation_.data();
+  const double x = std::fma(r[6], p[2], std::fma(r[3], p[1], r[0] * p[0]));
+  const double y = std::fma(r[7], p[2], std::fma(r[4], p[1], r[1] * p[0]));
+  const double z = std::fma(r[8], p[2], std::fma(r[5], p[1], r[2] * p[0]));
+  return {x + t[0], y + t[1], z + t[2]};
+}
+#endif
 
 } // namespace detail
 
@@ -149,6 +177,44 @@ struct Point3PlaneDistance : SE3PointState {
   explicit Point3PlaneDistance(const Eigen::Affine3d &source_pose)
       : SE3PointState(source_pose) {}
 
+#if defined(__AVX__) && defined(__FMA__)
+  // Scalar version for AVX+FMA builds. The Eigen version below compiles, with
+  // -mavx, to masked loads/stores (vmaskmovpd) for its size-3 vectors, which
+  // cannot be store-forwarded: it cost 10.9 + 25.7 ns per element in the
+  // residual and the jacobian, 2.6 times more than the same code without AVX
+  // (bench_slam solve 675 ms -> 271 ms with this version, 2026-11-25).
+  //
+  // The result is bit-identical to the Eigen version: the sequence of
+  // operations below, which ones are fused and which are rounded, is the one
+  // of that version's machine code on this target, read from the assembly
+  // (Eigen's packet code, with GCC's FMA contraction): the plain products
+  // that are summed are kept from being fused by opaque(), and every fusion
+  // is written as std::fma, so the order does not depend on the compiler's
+  // contraction. Do not "simplify" the expressions; the pose of a recording
+  // depends on their last bit. Other targets (SSE only, NEON) keep the Eigen
+  // code, whose rounding they already have.
+  void residual(const double * /*x*/, const double *input,
+                const double *plane_offset, double *f_x) const {
+    const detail::PlanePoint q = detail::transformPoint(*this, input);
+    const double n0 = input[3], n1 = input[4], n2 = input[5];
+    const double sum = detail::opaque(n0 * q.x) + detail::opaque(n1 * q.y);
+    f_x[0] = plane_offset[0] - std::fma(n2, q.z, sum);
+  }
+
+  /// Writes d(residual)/d[rho, omega] (6 values; active_param_dim = 6).
+  void jacobian(const double * /*x*/, const double *input,
+                const double * /*plane_offset*/, double *jacobian) const {
+    const detail::PlanePoint q = detail::transformPoint(*this, input);
+    const double n0 = input[3], n1 = input[4], n2 = input[5];
+    jacobian[0] = -n0;
+    jacobian[1] = -n1;
+    jacobian[2] = -n2;
+    // -(q x n); each component is one rounded product and one fused one.
+    jacobian[3] = -std::fma(-q.z, n1, n2 * q.y);
+    jacobian[4] = -std::fma(-q.x, n2, n0 * q.z);
+    jacobian[5] = -std::fma(q.x, n1, -(n0 * q.y));
+  }
+#else
   void residual(const double * /*x*/, const double *input,
                 const double *plane_offset, double *f_x) const {
     Eigen::Map<const Eigen::Vector3d> source{input};
@@ -167,6 +233,7 @@ struct Point3PlaneDistance : SE3PointState {
     gradient.head<3>() = -normal;
     gradient.tail<3>() = -q.cross(normal);
   }
+#endif
 };
 
 } // namespace mslam

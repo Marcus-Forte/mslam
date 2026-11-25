@@ -12,15 +12,15 @@ namespace mslam {
 /// (SE3Manifold).
 class PointToPlaneRegistration : public IRegistration {
 public:
-  /// @param sycl_threads Work-groups of the device search kernel (0: every
-  /// compute unit).
-  /// @param backend Where the solves run (IcpWorkspace::useDeviceOptimizer()).
+  /// @param executor Runs the normal estimation (nullptr: sequential); give
+  /// @p correspondence_finder the same one to parallelize the search too.
+  /// @param context The moptim context of the costs (nullptr: a default one).
   PointToPlaneRegistration(
       int num_registration_iterations, int num_optimizer_iterations,
       float max_correspondence_distance, std::shared_ptr<spdlog::logger> logger,
       std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-      ComputeBackend backend = ComputeBackend::Host,
-      unsigned sycl_threads = 0);
+      std::shared_ptr<const ParallelExecutor> executor = nullptr,
+      std::shared_ptr<moptim::ExecutionContext> context = nullptr);
 
   SlamState Align(const SlamState &state, const IMap &map,
                   const PointCloud &scan) override;
@@ -33,8 +33,8 @@ public:
   const RegistrationTimings &timings() const { return icp_.timings(); }
 
   PointToPlaneRegistration(const PointToPlaneRegistration &) = delete;
-  PointToPlaneRegistration &operator=(const PointToPlaneRegistration &) =
-      delete;
+  PointToPlaneRegistration &
+  operator=(const PointToPlaneRegistration &) = delete;
   ~PointToPlaneRegistration() override;
 
 private:

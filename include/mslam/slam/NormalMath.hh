@@ -12,10 +12,7 @@ namespace mslam {
 /// false if there are fewer than 3 points or they are degenerate.
 /// `point(i)` returns the i-th point as something with x, y, z (floats).
 ///
-/// The one implementation of NormalEstimator::fromNeighbors() and of the
-/// normals the registration kernels compute (it is inline and device-safe).
-/// The host pass vectorizes Eigen and the SYCL device pass does not
-/// (EIGEN_DONT_VECTORIZE), so the two can differ in the last bits.
+/// The one implementation of NormalEstimator::fromNeighbors().
 template <class PointAt>
 inline bool normalFromPoints(std::size_t count, PointAt point,
                              Eigen::Vector3d &normal) {

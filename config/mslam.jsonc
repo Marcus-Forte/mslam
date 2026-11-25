@@ -37,17 +37,18 @@
         //   "preintegration_factor": IMU residual in the joint optimization (default)
         //   "dead_reckoning": IMU only integrated forward, seeds pose-only scan matching
         "imu_fusion": "preintegration_factor",
+        // Threads for the correspondence search and normal estimation (optional,
+        // default 1 = sequential; 0 = every hardware thread, n = at most n). The
+        // pose does not depend on it (bit for bit). Needs a build with oneTBB,
+        // otherwise a value other than 1 logs a warning and runs sequentially.
+        // 8 was the fastest on the 28-thread dev machine (2026-11-25); 0 (all
+        // threads) was slower, so prefer an explicit count.
+        "num_threads": 8,
         // Estimator (optional, default "odometry" = LiDAR-inertial odometry only):
         //   "odometry": the odometry alone
         //   "N": the same odometry plus keyframes, loop closure and a
         //                 pose-graph back end (see "pose_graph" below)
         "strategy": "pose_graph"
-    }
-
-    // SYCL is the only parallel path (optional block; absent = disabled).
-    , "sycl": {
-        "enabled": false, // true: registration and preprocessing run as SYCL kernels (needs a build with MSLAM_WITH_SYCL); false (default): the sequential host code
-        "threads": 0      // work-groups of mslam's SYCL kernels (correspondence search, preprocessing); 0 (default) = every compute unit; the pose does not depend on it
     }
 
     // Pose-graph back end, read only when "strategy" is "pose_graph"; every key

@@ -26,47 +26,35 @@ the field to `"info"` to show informational messages and more severe messages:
 
 Restart `mslam` after changing the value for the new level to take effect.
 
-### SYCL
+### Threads (oneTBB)
 
-SYCL is the only parallel path. The optional top-level `sycl` block selects it
-and sizes it:
+`slam.num_threads` (optional, default 1) sets how many threads run the
+correspondence search and the surface normal estimation during registration:
+1 runs sequentially, 0 uses every hardware thread, n uses at most n (the SLAM
+thread included). The same number sizes moptim's execution
+context that mslam hands to its costs: moptim runs a cost's partitions on
+those threads only for large costs (from 6 partitions for a linear system, 12
+for a cost alone: mainly the big `register_scans` clouds; the per-scan SLAM
+costs are one partition and run inline). The
+pose does not depend on it: the result is the same bit for bit at any thread
+count. `register_scans` reads the same setting from `registration.num_threads`
+in its own config.
 
-```jsonc
-"sycl": {
-    "enabled": false, // true: registration and preprocessing run as SYCL kernels (needs a build with MSLAM_WITH_SYCL); false (default): the sequential host code
-    "threads": 0      // work-groups of mslam's SYCL kernels (correspondence search, preprocessing); 0 (default) = every compute unit; the pose does not depend on it
+The parallel code uses oneTBB (`libtbb-dev` to build, `libtbb12` at run time).
+CMake looks for it when `MSLAM_WITH_TBB` is ON (the default); if it is not
+found, or with `-DMSLAM_WITH_TBB=OFF`, mslam is built sequential and a
+`num_threads` other than 1 logs a warning and runs sequentially.
+
+```json
+{
+  "slam": { "num_threads": 4 }
 }
 ```
 
-Without the block SYCL is disabled. What runs where:
-
-- `enabled: false`: the sequential host code, on one thread: the `VoxelHashMap`
-  correspondence search and normals, the host preprocessing, and moptim's
-  Levenberg-Marquardt with its costs on moptim's host backend (also on the
-  calling thread). Every build has it, and `sycl.threads` has no effect on it.
-- `enabled: true`: SYCL kernels on moptim's SYCL device (`native_cpu`, the host
-  CPU, for now). A device mirror of the voxel map keeps a normal cache across
-  scans. Each ICP round runs one kernel for the correspondence search and
-  normals (`sycl.threads` work-groups), each scan one kernel for its
-  preprocessing (also `sycl.threads` work-groups), and each round's whole
-  Levenberg-Marquardt solve is one launch (with `debug` logging it uses the
-  host solver, whose telemetry needs an observer; moptim sizes its own
-  launches). It needs a build with `-DMSLAM_WITH_SYCL=ON` (the `sycl` preset,
-  DPC++); a build without SYCL refuses `enabled: true` at startup. Loop-closure
-  verification in the pose-graph strategy always runs one work-group wide.
-
-The pose does not depend on `sycl.threads`: the result is the same bit for bit
-at any value. The two paths' poses agree to a fraction of a millimetre (the
-device kernels evaluate the normals with scalar Eigen).
-
-The environment variable `MSLAM_SYCL=0|1` overrides `sycl.enabled`.
-`bench_slam` and `register_scans` take `--sycl` / `--no-sycl` for the same;
-`bench_slam --threads n` overrides `sycl.threads`. `register_scans` reads the
-same `sycl` block from its own config (`config/registration.jsonc`). The old
-keys `slam.num_threads`, `slam.backend` and `registration.num_threads` were
-removed and are rejected with an error naming the new ones.
-`test/bench_backends.py` compares builds and paths (see
-[Benchmark](#benchmark)).
+History: mslam briefly replaced oneTBB by SYCL (DPC++, 2026-11-22 to 2026-11-24) and went
+back to oneTBB because SYCL was slower and a very large dependency; a leftover
+`slam.backend` key or top-level `sycl` block is rejected with an error naming
+`slam.num_threads`.
 
 ### Strategy
 
@@ -104,9 +92,9 @@ docker run -it --rm -v ./config/:/config/ mslam mslam -c /config/mslam.json
 If you want a custom configuration, mount your JSON file into the container and
 pass that path with `-c`.
 
-The image is built with the `pi5` preset: GCC for the Cortex-A76, host-only
-(sequential). `--build-arg PRESET=pi5-sycl` builds it with DPC++, so
-`sycl.enabled` can select the SYCL kernels.
+The image is built with the `pi5` preset: GCC for the Cortex-A76, with oneTBB
+(`libtbb12` in the runtime stage), so `slam.num_threads` can use several
+threads.
 
 For the Python viewer client.
 ```bash
@@ -268,9 +256,9 @@ optional, unknown keys and invalid values are rejected):
     "registration": {
         "reg_iterations": 30,
         "optimizer_iterations": 5,
-        "max_correspondence_distance": 0.3
-    },
-    "sycl": { "enabled": false, "threads": 0 }   // see "SYCL"
+        "max_correspondence_distance": 0.3,
+        "num_threads": 1             // 0 = all hardware threads; same poses at any value
+    }
 }
 ```
 
@@ -366,49 +354,47 @@ default run, without the option, is unchanged.
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 1 --save-map map.ply
 ```
 
-`--threads <n>` overrides `sycl.threads` of the config (work-groups of the SYCL
-kernels, 0 every compute unit; no effect on the host path). The pose must be
-the same at every value, so it is also a check of the parallel code:
+`--threads <n>` overrides `slam.num_threads` of the config (1 sequential, 0
+every hardware thread). The pose must be the same at every value, so it is
+also a check of the parallel code:
 
 ```bash
 build/gcc/test/bench_slam test/integration/mslam.jsonc test/data/living_room_garden.pbscan 5 --threads 4
 ```
 
-`--sycl` / `--no-sycl` override `sycl.enabled` (see [SYCL](#sycl)). The first line of the output names the
-backend and whether the build has SYCL.
+### Comparing thread counts and builds
 
-### Comparing builds and backends
-
-`test/bench_backends.py` (Python 3, no dependencies) runs `bench_slam`
-binaries side by side. It runs them interleaved, in a rotated order every
-round. For each recording and thread count it prints each label's minimum
-total, register, search and solve times, the ratio to a reference label, the
-moptim launches, the final pose, and that pose's distance from the
-reference's. Each `--run` is `LABEL=BINARY[:host|sycl|none]` (`sycl` passes
-`--sycl`, `host` passes `--no-sycl`, `none` passes nothing, for an older
-`bench_slam`), so one SYCL build can be listed twice, once per path:
+`test/bench_threads.py` (Python 3, no dependencies) runs `bench_slam`
+binaries at several `--threads` values. It runs them interleaved, in a rotated
+order every round. For each recording it prints each row's (label, thread
+count) minimum total, register, search, normals and solve times, the ratio to
+a reference row, the final pose, and that pose's distance from the
+reference's. Each `--run` is `LABEL=BINARY`, so a reference binary and a new
+one can be listed side by side:
 
 ```bash
-test/bench_backends.py --run host=build/gcc/test/bench_slam \
-    --run sycl=build/sycl/test/bench_slam:sycl --run sycl-host=build/sycl/test/bench_slam:host \
-    --threads 1 4 --rounds 5 test/data/living_room_garden.pbscan test/data/rooms.pbscan
+test/bench_threads.py --run new=build/gcc/test/bench_slam \
+    --threads 1 2 4 0 --rounds 5 test/data/living_room_garden.pbscan test/data/rooms.pbscan
 ```
 
 It exits with status 1 in any of these cases:
 
 - a run fails;
-- a label's pose changes between rounds or thread counts;
+- a row's pose changes between rounds, or a label's pose changes between
+  thread counts;
 - a pose is further from the reference's than `--tolerance-mm` /
-  `--tolerance-mrad` (defaults 0.5 mm and 0.15 mrad).
+  `--tolerance-mrad` (default 0: poses of one commit are identical; raise them
+  to compare builds that differ in the last digits).
 
 Other options:
 
-- `--ref` names the reference label (the first `--run` by default).
+- `--ref` names the reference row (`LABEL` or `LABEL:THREADS`; the first label
+  at the first `--threads` value by default).
 - `--strategy` overrides `slam.strategy`.
 - `--out <dir>` keeps every raw output.
-- `--history <file.jsonl>` appends one JSON line per label, recording and
-  thread count (date, commit, minimum times, launches, pose), to follow the
-  backends from one change to the next.
+- `--history <file.jsonl>` appends one JSON line per row and recording (date,
+  commit, minimum times, pose), to follow the timings from one change to the
+  next.
 
 `--strategy <odometry|pose_graph>` overrides `slam.strategy`. With
 `pose_graph` each run ends with `SlamPipeline::finish()` (the open keyframe

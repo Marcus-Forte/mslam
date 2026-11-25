@@ -59,15 +59,16 @@ struct ImuNoiseParams {
  * @brief The preintegrated measurement between two states: what the
  * preintegration residual needs, as a plain value.
  *
- * It is copied into the IMU factor (a moptim model, i.e. SYCL device code), so
- * it holds no pointer or reference to host data, and everything that reads it
- * (preintegrationResidual() and the SO(3) helpers below) is inline and
- * device-safe: no Eigen::AngleAxis from a matrix (stableNorm() cannot be
- * compiled into a kernel), no out-of-line call.
+ * It is copied into the IMU factor (a moptim model), so it holds no pointer or
+ * reference to host data, and everything that reads it
+ * (preintegrationResidual() and the SO(3) helpers below) is inline, with no
+ * Eigen::AngleAxis from a matrix (its arithmetic is written out in logSO3() and
+ * must not change).
  */
 struct PreintegratedImu {
-  Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();  ///< Linearization point.
-  Eigen::Vector3d bias_accel = Eigen::Vector3d::Zero(); ///< Linearization point.
+  Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero(); ///< Linearization point.
+  Eigen::Vector3d bias_accel =
+      Eigen::Vector3d::Zero(); ///< Linearization point.
   Eigen::Matrix3d delta_R = Eigen::Matrix3d::Identity();
   Eigen::Vector3d delta_v = Eigen::Vector3d::Zero();
   Eigen::Vector3d delta_p = Eigen::Vector3d::Zero();
@@ -92,10 +93,9 @@ inline Eigen::Matrix3d expSO3(const Eigen::Vector3d &omega) {
 }
 
 /// log: SO(3) -> so(3). Eigen::AngleAxisd(R) with its quaternion -> angle-axis
-/// step written out: that step calls stableNorm() when the vector part is tiny,
-/// and stableNorm()/maxCoeff() cannot be compiled into a SYCL kernel (a function
-/// pointer is called in the packet min/max). Same arithmetic otherwise; for a
-/// vector part below machine epsilon the plain norm replaces stableNorm().
+/// step written out: that step calls stableNorm() when the vector part is tiny.
+/// Same arithmetic otherwise; for a vector part below machine epsilon the plain
+/// norm replaces stableNorm().
 inline Eigen::Vector3d logSO3(const Eigen::Matrix3d &R) {
   const Eigen::Quaterniond q(R);
   double n = q.vec().norm();
@@ -146,7 +146,7 @@ inline Eigen::Matrix3d rightJacobianInverseSO3(const Eigen::Vector3d &phi) {
 
 /// The 15-dimensional preintegration residual between two states:
 /// [delta_R_error(3), delta_v_error(3), delta_p_error(3), bias_gyro_error(3),
-///  bias_accel_error(3)]. Device-safe (see PreintegratedImu).
+///  bias_accel_error(3)].
 inline Eigen::Matrix<double, 15, 1>
 preintegrationResidual(const PreintegratedImu &pre, const ImuState &state_i,
                        const ImuState &state_j) {
@@ -171,8 +171,8 @@ preintegrationResidual(const PreintegratedImu &pre, const ImuState &state_i,
   Eigen::Matrix<double, 15, 1> r;
 
   // Rotation residual: Log(delta_R_corrected^T * R_i^T * R_j)
-  r.segment<3>(0) = imu_detail::logSO3(corrected_delta_R.transpose() *
-                                       R_i.transpose() * R_j);
+  r.segment<3>(0) =
+      imu_detail::logSO3(corrected_delta_R.transpose() * R_i.transpose() * R_j);
 
   // Velocity residual: R_i^T * (v_j - v_i - g*dt) - corrected_delta_v
   r.segment<3>(3) =

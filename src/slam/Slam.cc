@@ -34,6 +34,15 @@ void warnIfGateExceedsMapReach(const std::shared_ptr<spdlog::logger> &logger,
       max_corner_reach);
 }
 
+// One knob: slam.num_threads sizes mslam's executor and moptim's thread count
+// (moptim only uses several threads for large costs; the per-scan costs here
+// run inline).
+std::shared_ptr<moptim::ExecutionContext> makeContext(unsigned num_threads) {
+  auto context = std::make_shared<moptim::ExecutionContext>();
+  context->setThreads(num_threads);
+  return context;
+}
+
 void logState(const std::shared_ptr<spdlog::logger> &logger,
               const mslam::SlamState &state,
               spdlog::level::level_enum level = spdlog::level::info) {
@@ -54,16 +63,18 @@ namespace mslam {
 Slam::Slam(const std::shared_ptr<spdlog::logger> &logger,
            const SlamConfiguration &config, const std::shared_ptr<IMap> &map)
     : logger_(logger), config_(config),
+      executor_(makeParallelExecutor(config.parameters.num_threads, *logger)),
+      context_(makeContext(config.parameters.num_threads)),
       registration_(std::make_unique<PointToPlaneRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          createLoggingCorrespondenceFinder(logger), config.parameters.backend,
-          config.parameters.sycl_threads)),
+          createLoggingCorrespondenceFinder(logger, executor_), executor_,
+          context_)),
       imu_registration_(std::make_unique<ImuRegistration>(
           config.parameters.reg_iterations, config.parameters.opt_iterations,
           config.parameters.max_correspondence_distance, logger,
-          createLoggingCorrespondenceFinder(logger), config.parameters.backend,
-          config.parameters.sycl_threads)),
+          createLoggingCorrespondenceFinder(logger, executor_), executor_,
+          context_)),
       map_(map) {
   if (const auto *voxel_map = dynamic_cast<const VoxelHashMap *>(map_.get())) {
     warnIfGateExceedsMapReach(

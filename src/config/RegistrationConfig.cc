@@ -121,8 +121,13 @@ const Json::Value *optionalSection(const Json::Value &root,
 
 RegistrationConfig loadRegistrationConfig(const std::filesystem::path &path) {
   const Json::Value root = parseObjectFile(path, "registration config");
+  // SYCL was removed: name the replacement instead of "unknown key".
+  if (root.isMember("sycl")) {
+    fail("registration config: the \"sycl\" block was removed: SYCL is gone; "
+         "use registration.num_threads for threads");
+  }
   rejectUnknownKeys(root, "",
-                    {"log_level", "voxel_size", "map", "registration", "sycl"});
+                    {"log_level", "voxel_size", "map", "registration"});
 
   RegistrationConfig config;
   if (const auto *level = optionalMember(root, "log_level")) {
@@ -144,13 +149,9 @@ RegistrationConfig loadRegistrationConfig(const std::filesystem::path &path) {
   }
 
   if (const auto *registration = optionalSection(root, "registration")) {
-    if (registration->isMember("num_threads")) {
-      fail("registration config: registration.num_threads was removed: SYCL "
-           "is the only parallel path, use sycl.enabled and sycl.threads");
-    }
     rejectUnknownKeys(*registration, "registration",
                       {"reg_iterations", "optimizer_iterations",
-                       "max_correspondence_distance"});
+                       "max_correspondence_distance", "num_threads"});
     config.reg_iterations = static_cast<int>(
         readCount(*registration, "registration", "reg_iterations",
                   config.reg_iterations, 1'000'000));
@@ -160,11 +161,10 @@ RegistrationConfig loadRegistrationConfig(const std::filesystem::path &path) {
     config.max_correspondence_distance = readPositiveFloat(
         *registration, "registration", "max_correspondence_distance",
         config.max_correspondence_distance);
+    config.num_threads = static_cast<unsigned>(
+        readInteger(*registration, "registration", "num_threads",
+                    config.num_threads, 0, 256));
   }
-  const SyclSettings sycl =
-      parseSyclSettings(root.get("sycl", Json::Value()), "registration config");
-  config.sycl_enabled = sycl.enabled;
-  config.sycl_threads = sycl.threads;
   return config;
 }
 

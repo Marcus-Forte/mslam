@@ -20,17 +20,6 @@ enum class ImuFusion { PreintegrationFactor, DeadReckoning };
 /// closure; see `PoseGraphParameters`.
 enum class SlamStrategy { Odometry, PoseGraph };
 
-/// Where the SLAM computes (`sycl.enabled`; the enum is derived from it):
-///  - Host: the sequential CPU implementation: VoxelHashMap searches,
-///    CorrespondenceFinder and NormalEstimator, deskewInto() and VoxelFilter,
-///    moptim's LevenbergMarquardt on its host backend (no host threads).
-///  - Sycl: the device implementation (DeviceVoxelHashMap with its normal
-///    cache, DeviceCorrespondenceSearch, DevicePreprocessor,
-///    moptim::DeviceLevenbergMarquardt) on moptim's SYCL backend, the only
-///    parallel path. Needs a build with MSLAM_WITH_SYCL.
-/// Both give the same estimator up to rounding.
-enum class ComputeBackend { Host, Sycl };
-
 inline constexpr std::string_view toString(spdlog::level::level_enum level) {
   switch (level) {
   case spdlog::level::trace:
@@ -103,17 +92,6 @@ inline constexpr std::string_view toString(ImuFusion fusion) {
   throw std::runtime_error("Invalid IMU fusion");
 }
 
-inline constexpr std::string_view toString(ComputeBackend backend) {
-  switch (backend) {
-  case ComputeBackend::Host:
-    return "host";
-  case ComputeBackend::Sycl:
-    return "sycl";
-  }
-
-  throw std::runtime_error("Invalid compute backend");
-}
-
 inline constexpr std::string_view toString(SlamStrategy strategy) {
   switch (strategy) {
   case SlamStrategy::Odometry:
@@ -134,12 +112,9 @@ struct SlamParameters {
   unsigned int reg_iterations = 5;
   float max_correspondence_distance = 0.1;
   ImuFusion imu_fusion = ImuFusion::PreintegrationFactor; // only with_imu
-  /// Sycl when `sycl.enabled`, else Host.
-  ComputeBackend backend = ComputeBackend::Host;
-  /// `sycl.threads`: work-groups of mslam's SYCL kernels (correspondence
-  /// search, preprocessing); 0: every compute unit. Results do not depend on
-  /// it; it has no effect on the host backend.
-  unsigned int sycl_threads = 0;
+  // Threads for the correspondence search and normal estimation: 1 runs
+  // sequentially, 0 uses every hardware thread. Results do not depend on it.
+  unsigned int num_threads = 1;
 };
 
 /**
@@ -256,8 +231,7 @@ struct SlamConfiguration {
        << "Log Level: " << toString(config.log_level) << "\n"
        << "Scanner: " << config.remote_scanner << "\n"
        << "# MAP Parameters #" << "\n"
-       << "Map Type: "
-       << "VoxelHash" << "\n"
+       << "Map Type: " << "VoxelHash" << "\n"
        << "Map resolution: " << config.map_parameters.resolution << "\n"
        << "Max pts per voxel: " << config.map_parameters.max_points_per_voxel
        << "\n"
@@ -279,11 +253,7 @@ struct SlamConfiguration {
        << "Max Corr. Distance: "
        << config.parameters.max_correspondence_distance << "\n"
        << "IMU Fusion: " << toString(config.parameters.imu_fusion) << "\n"
-       << "SYCL: "
-       << (config.parameters.backend == ComputeBackend::Sycl
-               ? "enabled, threads " + std::to_string(config.parameters.sycl_threads)
-               : std::string("disabled"))
-       << "\n"
+       << "Threads: " << config.parameters.num_threads << "\n"
        << "Strategy: " << toString(config.strategy) << "\n";
     if (config.strategy == SlamStrategy::PoseGraph) {
       const auto &pg = config.pose_graph;

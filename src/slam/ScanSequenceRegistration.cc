@@ -1,7 +1,6 @@
 #include "mslam/slam/ScanSequenceRegistration.hh"
 
 #include "mslam/slam/CorrespondenceFinderLogger.hh"
-#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/Transform.hh"
 
 #include <algorithm>
@@ -24,15 +23,18 @@ ScanSequenceRegistration::ScanSequenceRegistration(
     const ScanSequenceParameters &parameters,
     std::shared_ptr<spdlog::logger> logger)
     : parameters_(parameters), logger_(logger),
-      map_(makeVoxelHashMap(parameters.map_resolution,
-                            parameters.max_points_per_voxel, parameters.backend)),
+      map_(parameters.map_resolution, parameters.max_points_per_voxel),
+      executor_(makeParallelExecutor(parameters.num_threads, *logger)),
+      context_(std::make_shared<moptim::ExecutionContext>()),
       registration_(parameters.icp.registration_iterations,
                     parameters.icp.optimizer_iterations,
                     parameters.icp.max_correspondence_distance, logger,
-                    createLoggingCorrespondenceFinder(logger),
-                    parameters.backend, parameters.sycl_threads),
-      fit_(parameters.icp, logger, createLoggingCorrespondenceFinder(logger),
-           parameters.backend, parameters.sycl_threads) {
+                    createLoggingCorrespondenceFinder(logger, executor_),
+                    executor_, context_),
+      fit_(parameters.icp, logger,
+           createLoggingCorrespondenceFinder(logger, executor_), executor_,
+           context_) {
+  context_->setThreads(parameters.num_threads);
   // The tolerance keeps a float quotient such as 0.3F / 0.1F (3.00000004) from
   // costing an extra ring of voxels.
   const double wanted = std::ceil(
@@ -41,7 +43,7 @@ ScanSequenceRegistration::ScanSequenceRegistration(
   const double clamped = std::clamp(
       wanted, 1.0, static_cast<double>(VoxelHashMap::kMaxAdjacentVoxels));
   search_radius_ = static_cast<int>(clamped);
-  map_->setNumAdjacentVoxelSearch(search_radius_);
+  map_.setNumAdjacentVoxelSearch(search_radius_);
   logger_->info("map search radius: {} voxels of {} m", search_radius_,
                 parameters.map_resolution);
   if (clamped != wanted) {
@@ -68,12 +70,12 @@ ScanSequenceRegistration::add(const PointCloud &cloud,
                              : (step.registered ? pose_ : SlamState{});
 
   if (step.registered) {
-    step.pose = registration_.Align(step.prior, *map_, thinned_);
+    step.pose = registration_.Align(step.prior, map_, thinned_);
     step.first_round = registration_.lastFirstRound();
 
     // Fit of the result, measured against the map as it was for the alignment.
-    fit_.begin(*map_, thinned_, toAffine(step.pose));
-    step.matched_points = fit_.findPlaneConstraints(*map_);
+    fit_.begin(map_, thinned_, toAffine(step.pose));
+    step.matched_points = fit_.findPlaneConstraints(map_);
     double sum_squares = 0.0;
     const auto inputs = fit_.planeInputs();
     const auto offsets = fit_.planeOffsets();
@@ -93,7 +95,7 @@ ScanSequenceRegistration::add(const PointCloud &cloud,
   placed_ = thinned_;
   const Eigen::Affine3d placement = toAffine(step.pose);
   transformCloud(placement, placed_);
-  map_->addScan(placed_);
+  map_.addScan(placed_);
 
   pose_ = step.pose;
   ++clouds_added_;

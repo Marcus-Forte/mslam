@@ -8,6 +8,7 @@
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
 #include "mslam/slam/registration/PointToPointRegistration.hh"
 
+#include "mslam/utils/Parallel.hh"
 
 #include <bit>
 #include <cstdint>
@@ -226,6 +227,54 @@ TEST(IcpWorkspace, PlaneConstraintsHoldSourceNormalAndPlaneOffset) {
   EXPECT_NEAR(workspace.source()[0].z, 0.53F, 1e-6F);
   workspace.resetSource(Eigen::Affine3d::Identity());
   EXPECT_NEAR(workspace.source()[0].z, 0.52F, 1e-6F);
+}
+
+bool sameBits(const Eigen::Vector3d &a, const Eigen::Vector3d &b) {
+  for (int i = 0; i < 3; ++i) {
+    if (std::bit_cast<std::uint64_t>(a[i]) !=
+        std::bit_cast<std::uint64_t>(b[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The parallel search and normal estimation must not change a single bit of
+// the result: the integration gates compare poses to the last digit.
+TEST(PointToPlaneRegistration, ParallelAlignMatchesSequentialBitForBit) {
+  if (!mslam::ParallelExecutor::available()) {
+    GTEST_SKIP() << "built without TBB";
+  }
+  mslam::VoxelHashMap map(0.1F, 5);
+  map.addScan(test::sampleRoom(400.0F, 1));
+  // Two consecutive Align calls, so the reuse of buffers and caches is covered.
+  const Eigen::Affine3d first = mslam::toAffine(0.04, -0.02, 0.01, 0, 0, 0.02);
+  const Eigen::Affine3d second =
+      mslam::toAffine(-0.03, 0.02, 0.0, 0.01, 0, -0.01);
+  mslam::PointCloud scan_a = test::sampleRoom(150.0F, 2, 2.5F);
+  mslam::transformCloud(first.inverse(), scan_a);
+  mslam::PointCloud scan_b = test::sampleRoom(150.0F, 3, 2.5F);
+  mslam::transformCloud(second.inverse(), scan_b);
+  ASSERT_GT(scan_a.size(), 1000U);
+
+  const auto executor = std::make_shared<const mslam::ParallelExecutor>(4);
+  mslam::PointToPlaneRegistration sequential(
+      10, 5, 0.5F, silentLogger(),
+      std::make_shared<mslam::CorrespondenceFinder>());
+  mslam::PointToPlaneRegistration parallel(
+      10, 5, 0.5F, silentLogger(),
+      std::make_shared<mslam::CorrespondenceFinder>(executor), executor);
+
+  for (const auto *scan : {&scan_a, &scan_b}) {
+    const auto expected = sequential.Align(mslam::SlamState{}, map, *scan);
+    const auto actual = parallel.Align(mslam::SlamState{}, map, *scan);
+    EXPECT_TRUE(sameBits(actual.position, expected.position))
+        << actual.position.transpose() << " vs "
+        << expected.position.transpose();
+    EXPECT_TRUE(sameBits(actual.rotation, expected.rotation))
+        << actual.rotation.transpose() << " vs "
+        << expected.rotation.transpose();
+  }
 }
 
 } // namespace

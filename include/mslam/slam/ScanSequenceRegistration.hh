@@ -2,11 +2,13 @@
 
 #include "mslam/common/Points.hh"
 #include "mslam/common/State.hh"
-#include "mslam/map/DeviceVoxelHashMap.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Preprocessor.hh"
 #include "mslam/slam/registration/IcpWorkspace.hh"
 #include "mslam/slam/registration/PointToPlaneRegistration.hh"
+#include "mslam/utils/Parallel.hh"
+
+#include "moptim/ExecutionContext.hh"
 
 #include <cstddef>
 #include <memory>
@@ -20,11 +22,10 @@ struct ScanSequenceParameters {
   float map_resolution = 0.1F; ///< Voxel size of the target map.
   std::size_t max_points_per_voxel = 8;
   IcpParameters icp{30, 5, 0.3F};
-  /// Where the map is searched and the solves run (see ComputeBackend).
-  ComputeBackend backend = ComputeBackend::Host;
-  /// Work-groups of the device search kernel (0: every compute unit); only on
-  /// the sycl backend. Results do not depend on it.
-  unsigned sycl_threads = 0;
+  /// Threads of the correspondence search and the normal estimation (1:
+  /// sequential, 0: every hardware thread) and of the number of threads moptim
+  /// may use for a cost. Results do not depend on it.
+  unsigned num_threads = 1;
 };
 
 /// What add() did with one cloud.
@@ -64,16 +65,18 @@ public:
   /// Pose of the last cloud added (identity before the first).
   const SlamState &currentPose() const { return pose_; }
   /// Occupied voxels of the map.
-  std::size_t mapVoxels() const { return map_->size(); }
+  std::size_t mapVoxels() const { return map_.size(); }
   /// Neighbour search radius set on the map, in voxels.
   int searchRadiusVoxels() const { return search_radius_; }
 
 private:
   ScanSequenceParameters parameters_;
   std::shared_ptr<spdlog::logger> logger_;
-  /// A VoxelHashMap, or on the sycl backend a DeviceVoxelHashMap whose mirror
-  /// the registrations search in kernels (IcpWorkspace).
-  std::unique_ptr<VoxelHashMap> map_;
+  VoxelHashMap map_;
+  /// Declared before the registrations that use it; null when num_threads is
+  /// 1.
+  std::shared_ptr<const ParallelExecutor> executor_;
+  std::shared_ptr<moptim::ExecutionContext> context_;
   PointToPlaneRegistration registration_;
   IcpWorkspace fit_; ///< Only measures the fit of a result.
   VoxelFilter filter_;

@@ -62,8 +62,7 @@ void expectDefaults(const mslam::RegistrationConfig &config) {
   EXPECT_EQ(config.reg_iterations, 30);
   EXPECT_EQ(config.optimizer_iterations, 5);
   EXPECT_FLOAT_EQ(config.max_correspondence_distance, 0.3F);
-  EXPECT_FALSE(config.sycl_enabled);
-  EXPECT_EQ(config.sycl_threads, 0U);
+  EXPECT_EQ(config.num_threads, 1U);
 }
 
 TEST_F(RegistrationConfigTest, DefaultsWithoutAFile) {
@@ -144,28 +143,28 @@ TEST_F(RegistrationConfigTest, RejectsInvalidValues) {
   expectConfigError(
       R"({"registration": {"max_correspondence_distance": null}})",
       "registration.max_correspondence_distance");
-  expectConfigError(R"({"sycl": {"threads": -1}})", "sycl.threads");
-  expectConfigError(R"({"sycl": {"threads": 2.5}})", "sycl.threads");
-  expectConfigError(R"({"sycl": {"threads": "4"}})", "sycl.threads");
-  expectConfigError(R"({"sycl": {"threads": 257}})", "sycl.threads");
-  expectConfigError(R"({"sycl": {"enabled": 1}})", "sycl.enabled");
-  expectConfigError(R"({"sycl": {"thread": 1}})", "sycl.thread");
-  expectConfigError(R"({"sycl": []})", "sycl");
+  expectConfigError(R"({"registration": {"num_threads": -1}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"registration": {"num_threads": 2.5}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"registration": {"num_threads": "4"}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"registration": {"num_threads": 257}})",
+                    "registration.num_threads");
 }
 
-TEST_F(RegistrationConfigTest, ParsesTheSyclBlock) {
-  const auto config =
-      loadConfig(R"({"sycl": {"enabled": true, "threads": 4}})");
-  EXPECT_TRUE(config.sycl_enabled);
-  EXPECT_EQ(config.sycl_threads, 4U);
-  const auto all = loadConfig(R"({"sycl": {"threads": 0}})");
-  EXPECT_FALSE(all.sycl_enabled);
-  EXPECT_EQ(all.sycl_threads, 0U);
+TEST_F(RegistrationConfigTest, ParsesNumThreadsIncludingZero) {
+  EXPECT_EQ(loadConfig(R"({"registration": {"num_threads": 4}})").num_threads,
+            4U);
+  EXPECT_EQ(loadConfig(R"({"registration": {"num_threads": 0}})").num_threads,
+            0U);
 }
 
-TEST_F(RegistrationConfigTest, RejectsTheRemovedNumThreadsKey) {
-  expectConfigError(R"({"registration": {"num_threads": 4}})",
-                    "registration.num_threads was removed");
+TEST_F(RegistrationConfigTest, RejectsALeftoverSyclBlock) {
+  // Not "unknown key": the message names what replaces it.
+  expectConfigError(R"({"sycl": {"enabled": true, "threads": 4}})",
+                    "registration.num_threads");
+  expectConfigError(R"({"sycl": {}})", "was removed");
 }
 
 TEST_F(RegistrationConfigTest, RejectsAnUnreadableOrUnparsableFile) {

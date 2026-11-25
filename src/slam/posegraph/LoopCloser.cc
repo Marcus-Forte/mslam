@@ -22,22 +22,19 @@ Pose3D toPose3D(const Eigen::Affine3d &pose) {
 } // namespace
 
 ScanSequenceParameters
-LoopCloser::verificationParameters(const PoseGraphParameters &parameters,
-                                   ComputeBackend backend) {
+LoopCloser::verificationParameters(const PoseGraphParameters &parameters) {
   ScanSequenceParameters out;
   out.voxel_size = static_cast<float>(parameters.mini_map_voxel_size);
   out.map_resolution = 0.1F;
   out.max_points_per_voxel = 8;
   out.icp = IcpParameters{20, 5, 0.2F};
-  out.backend = backend;
-  out.sycl_threads = 1; // verification stays one work-group wide
+  out.num_threads = 1; // verification stays single-threaded
   return out;
 }
 
 LoopCloser::LoopCloser(const PoseGraphParameters &parameters,
-                       std::shared_ptr<spdlog::logger> logger,
-                       ComputeBackend backend)
-    : backend_(backend), parameters_(parameters), logger_(std::move(logger)),
+                       std::shared_ptr<spdlog::logger> logger)
+    : parameters_(parameters), logger_(std::move(logger)),
       registration_logger_(logger_->clone(logger_->name() + "-loop-icp")) {
   registration_logger_->set_level(
       std::max(logger_->level(), spdlog::level::warn)); // off stays off
@@ -94,8 +91,8 @@ LoopCloseResult LoopCloser::close(const PoseGraph &graph,
     }
 
     const Eigen::Affine3d prior = target_from_world * fresh.pose;
-    ScanSequenceRegistration sequence(
-        verificationParameters(parameters_, backend_), registration_logger_);
+    ScanSequenceRegistration sequence(verificationParameters(parameters_),
+                                      registration_logger_);
     sequence.add(target);
     const SequenceStep step =
         sequence.add(*fresh.view, std::optional<Pose3D>(toPose3D(prior)));

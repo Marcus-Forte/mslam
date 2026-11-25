@@ -1,7 +1,5 @@
 #include "mslam/slam/registration/IcpWorkspace.hh"
 
-#include "mslam/map/DeviceVoxelHashMap.hh"
-#include "mslam/slam/ComputeContext.hh"
 #include "mslam/slam/SE3.hh"
 #include "mslam/slam/Transform.hh"
 
@@ -12,9 +10,9 @@ namespace mslam {
 
 namespace {
 // The registrations evaluate each LM trial with a full linear system (moptim's
-// speculative linear systems): an accepted trial then costs one launch instead of
-// two, and x, the iterations and the cost are the same bit for bit. Benchmark-only
-// knob: MOPTIM_SPECULATIVE=0 turns it off.
+// speculative linear systems): an accepted trial then costs one evaluation instead
+// of two, and x, the iterations and the cost are the same bit for bit.
+// Benchmark-only knob: MOPTIM_SPECULATIVE=0 turns it off.
 bool speculativeLinearSystems() {
   static const bool enabled = [] {
     const char *value = std::getenv("MOPTIM_SPECULATIVE");
@@ -37,11 +35,13 @@ bool isNegligibleRoundStep(const Eigen::Affine3d &before,
 IcpWorkspace::IcpWorkspace(
     const IcpParameters &parameters, std::shared_ptr<spdlog::logger> logger,
     std::shared_ptr<ICorrespondenceFinder> correspondence_finder,
-    ComputeBackend backend, unsigned sycl_threads)
+    std::shared_ptr<const ParallelExecutor> executor,
+    std::shared_ptr<moptim::ExecutionContext> context)
     : parameters_(parameters), logger_(std::move(logger)),
       correspondence_finder_(std::move(correspondence_finder)),
-      backend_(backend), context_(executionContextFor(backend)),
-      device_width_(deviceWidth(backend, sycl_threads)) {}
+      executor_(std::move(executor)),
+      context_(context ? std::move(context)
+                       : std::make_shared<moptim::ExecutionContext>()) {}
 
 void IcpWorkspace::begin(const IMap &map, const PointCloud &scan,
                          const Eigen::Affine3d &initial_guess) {
@@ -60,73 +60,12 @@ void IcpWorkspace::resetSource(const Eigen::Affine3d &total) {
 }
 
 void IcpWorkspace::findCorrespondences(const IMap &map) {
-  if (const DeviceVoxelHashMap *device_map = map.deviceMap()) {
-    const DeviceCorrespondence *found =
-        device_search_.run(*device_map, source_,
-                           parameters_.max_correspondence_distance,
-                           device_width_);
-    correspondences_.clear();
-    for (std::size_t i = 0; i < source_.size(); ++i) {
-      if (found[i].matched != 0) {
-        correspondences_.emplace_back(
-            source_[i], Point{found[i].map_point[0], found[i].map_point[1],
-                              found[i].map_point[2]});
-      }
-    }
-    return;
-  }
   correspondence_finder_->find(
       map, source_, parameters_.max_correspondence_distance, correspondences_);
 }
 
 std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   using Clock = std::chrono::steady_clock;
-  if (const DeviceVoxelHashMap *device_map = map.deviceMap()) {
-    const auto search_start = Clock::now();
-    const DeviceCorrespondence *found =
-        device_search_.run(*device_map, source_,
-                           parameters_.max_correspondence_distance,
-                           device_width_);
-    const auto assembly_start = Clock::now();
-    timings_.search += assembly_start - search_start;
-
-    // The host path's order and arithmetic: correspondences in source order,
-    // constraints for those whose map point has a normal. Normals computed by
-    // this launch go into the map's cache (several points may share a map
-    // point; they computed the same value from the same map).
-    correspondences_.clear();
-    plane_inputs_.clear();
-    plane_offsets_.clear();
-    for (std::size_t i = 0; i < source_.size(); ++i) {
-      const DeviceCorrespondence &c = found[i];
-      if (c.matched == 0) {
-        continue;
-      }
-      const Point &scan_point = source_[i];
-      const Point map_point{c.map_point[0], c.map_point[1], c.map_point[2]};
-      correspondences_.emplace_back(scan_point, map_point);
-      if (c.computed != 0) {
-        device_map->storeNormal(c.slot,
-                                c.has_normal != 0 ? c.normal : nullptr);
-        ++timings_.normals_computed;
-      } else {
-        ++timings_.normals_cached;
-      }
-      if (c.has_normal == 0) {
-        continue;
-      }
-      plane_inputs_.emplace_back(scan_point.x, scan_point.y, scan_point.z,
-                                 c.normal[0], c.normal[1], c.normal[2]);
-      plane_offsets_.push_back(c.normal[0] * map_point.x +
-                               c.normal[1] * map_point.y +
-                               c.normal[2] * map_point.z);
-    }
-    timings_.assembly += Clock::now() - assembly_start;
-    logger_->debug("Normal estimation. {} / {} points", plane_offsets_.size(),
-                   correspondences_.size());
-    return plane_offsets_.size();
-  }
-
   const auto search_start = Clock::now();
   findCorrespondences(map);
   const auto normals_start = Clock::now();
@@ -136,7 +75,8 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   plane_offsets_.clear();
   plane_inputs_.reserve(correspondences_.size());
   plane_offsets_.reserve(correspondences_.size());
-  normal_estimator_.estimateAll(correspondences_, normal_slots_);
+  normal_estimator_.estimateAll(correspondences_, normal_slots_,
+                                executor_.get());
   const auto assembly_start = Clock::now();
   timings_.normals += assembly_start - normals_start;
   // Assembled in correspondence order.
@@ -156,11 +96,6 @@ std::size_t IcpWorkspace::findPlaneConstraints(const IMap &map) {
   logger_->debug("Normal estimation. {} / {} points", plane_offsets_.size(),
                  correspondences_.size());
   return plane_offsets_.size();
-}
-
-bool IcpWorkspace::useDeviceOptimizer() const {
-  return backend_ == ComputeBackend::Sycl &&
-         !logger_->should_log(spdlog::level::debug);
 }
 
 void IcpWorkspace::attachObserver(

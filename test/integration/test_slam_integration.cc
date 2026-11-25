@@ -4,7 +4,7 @@
 //    reference: no threads, no clock);
 //  - through the live loop (SlamRunner + SensorInput) fed by the playback
 //    driver on its own thread;
-//  - and, with SYCL enabled, synchronously again with sycl.threads = 4,
+//  - and, with TBB, synchronously again with slam.num_threads = 4,
 //    which must give the same pose as the first replay to the last bit.
 //
 // The live run is deterministic: the sensor input blocks the playback thread
@@ -20,12 +20,12 @@
 #include "mslam/config/JsonConfig.hh"
 #include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/ImuScanSync.hh"
-#include "mslam/slam/MapFactory.hh"
 #include "mslam/slam/Slam.hh"
 #include "mslam/slam/SlamOutput.hh"
 #include "mslam/slam/SlamPipeline.hh"
 #include "mslam/slam/SlamRunner.hh"
 #include "mslam/slam/Transform.hh"
+#include "mslam/utils/Parallel.hh"
 
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
@@ -79,8 +79,11 @@ struct ReplayResult {
 
 std::shared_ptr<mslam::VoxelHashMap>
 makeMap(const mslam::SlamConfiguration &config) {
-  return mslam::makeVoxelHashMap(config.map_parameters,
-                                 config.parameters.backend);
+  auto map = std::make_shared<mslam::VoxelHashMap>(
+      config.map_parameters.resolution,
+      config.map_parameters.max_points_per_voxel);
+  map->setNumAdjacentVoxelSearch(config.map_parameters.search_radius);
+  return map;
 }
 
 ReplayResult resultOf(const mslam::Slam &slam,
@@ -323,9 +326,9 @@ protected:
     pose_graph_ =
         replaySynchronously(graph_json.getConfig(), logger, recording);
     live_ = replayThroughTheLiveLoop(config, logger, recording);
-    if (config.parameters.backend == mslam::ComputeBackend::Sycl) {
+    if (mslam::ParallelExecutor::available()) {
       auto parallel_config = config;
-      parallel_config.parameters.sycl_threads = 4;
+      parallel_config.parameters.num_threads = 4;
       four_threads_ = replaySynchronously(parallel_config, logger, recording);
     }
 
@@ -364,7 +367,7 @@ protected:
 
   static std::optional<ReplayResult> synchronous_;
   static std::optional<LiveRun> live_;
-  /// The synchronous replay with sycl.threads = 4 (only with SYCL enabled).
+  /// The synchronous replay with slam.num_threads = 4 (absent without TBB).
   static std::optional<ReplayResult> four_threads_;
   /// The synchronous replay with strategy = pose_graph.
   static std::optional<ReplayResult> pose_graph_;
@@ -426,14 +429,13 @@ TEST_F(SlamIntegration, LiveLoopMatchesTheSynchronousReplay) {
   }
 }
 
-// The SYCL kernels write each result into its own slot and keep every
-// order-dependent step sequential, so sycl.threads cannot change the result. A
-// difference here is a bug in that code, not floating-point noise. Only with
-// SYCL enabled: the host path has no threads.
+// The parallel correspondence search and normal estimation write each result
+// into its own slot and keep every order-dependent step sequential, so the
+// thread count cannot change the result. A difference here is a bug in that
+// code, not floating-point noise.
 TEST_F(SlamIntegration, FourThreadsMatchTheSynchronousReplay) {
   if (!four_threads_.has_value()) {
-    GTEST_SKIP() << "sycl.threads only applies with SYCL enabled "
-                    "(sycl.enabled or MSLAM_SYCL=1 in a SYCL build)";
+    GTEST_SKIP() << "built without TBB";
   }
   const auto &parallel = *four_threads_;
   const auto &sync = *synchronous_;

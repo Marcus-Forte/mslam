@@ -155,6 +155,40 @@ TEST(Point3PlaneDistance, JacobianMatchesCentralDifferencesThroughPlus) {
   }
 }
 
+// Point3PlaneDistance is written as scalar code on AVX+FMA builds (the Eigen
+// version stalls on masked loads there). The scalar code is meant to round
+// like the Eigen expressions it replaced, bit for bit; this checks it against
+// those expressions, kept here as the reference.
+TEST(Point3PlaneDistance, ScalarCodeRoundsLikeTheEigenExpressions) {
+  for (const auto &pose : testPoses()) {
+    const Pose x = storageOf(pose);
+    Point3PlaneDistance model;
+    model.setState(x.data());
+    for (const auto &sample : makeSamples(2000, 23)) {
+      const auto input = planeInputOf(sample);
+      const double offset = sample.normal.dot(sample.target);
+
+      Eigen::Map<const Eigen::Vector3d> source{input.data()};
+      Eigen::Map<const Eigen::Vector3d> normal{input.data() + 3};
+      const Eigen::Vector3d q = model.rotation_ * source + model.translation_;
+      const double expected_residual = offset - normal.dot(q);
+      Vector6 expected_jacobian;
+      expected_jacobian.head<3>() = -normal;
+      expected_jacobian.tail<3>() = -q.cross(normal);
+
+      double residual = 0.0;
+      model.residual(x.data(), input.data(), &offset, &residual);
+      Vector6 jacobian;
+      model.jacobian(x.data(), input.data(), &offset, jacobian.data());
+
+      EXPECT_EQ(residual, expected_residual);
+      for (int i = 0; i < 6; ++i) {
+        EXPECT_EQ(jacobian[i], expected_jacobian[i]) << "entry " << i;
+      }
+    }
+  }
+}
+
 // The analytical cost, evaluated through moptim, produces the same normal
 // equations as the numerical cost of the same scalar model on the same
 // manifold.

@@ -34,8 +34,9 @@ void warnIfGateExceedsMapReach(const std::shared_ptr<spdlog::logger> &logger,
       max_corner_reach);
 }
 
-// One knob: slam.num_threads sizes mslam's executor and moptim's launches
-// (moptim only goes wide for large costs; the per-scan costs here run inline).
+// One knob: slam.num_threads sizes mslam's executor and moptim's thread count
+// (moptim only uses several threads for large costs; the per-scan costs here
+// run inline).
 std::shared_ptr<moptim::ExecutionContext> makeContext(unsigned num_threads) {
   auto context = std::make_shared<moptim::ExecutionContext>();
   context->setThreads(num_threads);

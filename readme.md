@@ -31,7 +31,7 @@ Restart `mslam` after changing the value for the new level to take effect.
 `slam.num_threads` (optional, default 1) sets how many threads run the
 correspondence search and the surface normal estimation during registration:
 1 runs sequentially, 0 uses every hardware thread, n uses at most n (the SLAM
-thread included). The same number sizes the launches of moptim's execution
+thread included). The same number sizes moptim's execution
 context that mslam hands to its costs: moptim runs a cost's partitions on
 those threads only for large costs (from 6 partitions for a linear system, 12
 for a cost alone: mainly the big `register_scans` clouds; the per-scan SLAM

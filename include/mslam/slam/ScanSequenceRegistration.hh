@@ -23,8 +23,8 @@ struct ScanSequenceParameters {
   std::size_t max_points_per_voxel = 8;
   IcpParameters icp{30, 5, 0.3F};
   /// Threads of the correspondence search and the normal estimation (1:
-  /// sequential, 0: every hardware thread) and of moptim's launches. Results do
-  /// not depend on it.
+  /// sequential, 0: every hardware thread) and of the number of threads moptim
+  /// may use for a cost. Results do not depend on it.
   unsigned num_threads = 1;
 };
 

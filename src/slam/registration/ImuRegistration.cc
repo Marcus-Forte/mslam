@@ -23,7 +23,7 @@ using Fused = moptim::FusedCost<double, PlaneCost, ImuCost>;
 
 } // namespace
 
-/// The costs and LevenbergMarquardt over them fused into one cost (one launch
+/// The costs and LevenbergMarquardt over them fused into one cost (one dispatch
 /// per evaluation), on the workspace's moptim context. Built on the first
 /// round and then only refreshed: the point-to-plane cost gets each round's
 /// constraints and pose (setData/setModel), the IMU factor each scan's

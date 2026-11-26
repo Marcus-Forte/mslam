@@ -38,14 +38,14 @@ WORLD_NODE = "/world"
 """Every visual is a child of this frame; following moves it (see follow.py)."""
 RECONNECT_DELAY_SEC = 5.0
 RESYNC_DELAY_SEC = 1.0
+KEYFRAME_STREAM_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+"""StreamKeyframes sends one whole keyframe per message; the server allows 64 MiB, gRPC Python's default receive limit
+is 4 MiB (about 250k points)."""
 MAP_POINT_SIZE_SCALE = 0.2
 SCAN_POINT_SIZE_SCALE = 0.2
 CORRESPONDENCE_POINT_SIZE_SCALE = 0.2
 SCAN_COLOR = np.array([0, 255, 0], dtype=np.uint8)
 CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
-
-
-class SlamViewerClient:
 RESET_CAMERA_LABEL = "Reset camera (R)"
 RESET_CAMERA_OFFSET = np.array([1.25, -1.25, 0.95]) * 2.0
 """Where the reset view puts the camera relative to the origin (z up, looking at the origin)."""
@@ -60,6 +60,9 @@ RESET_CAMERA_KEY_HTML = (
     'if(b){e.preventDefault();b.click();}});}">'
 )
 """viser has no keyboard API: this hidden element installs one page-level `r` listener that clicks the reset button."""
+
+
+class SlamViewerClient:
     def __init__(self, server_addr: str, viser_port: int, point_size: float) -> None:
         try:
             import viser
@@ -155,9 +158,6 @@ RESET_CAMERA_KEY_HTML = (
         start_button = self._viser_server.gui.add_button("Start")
         stop_button = self._viser_server.gui.add_button("Stop")
         reset_button = self._viser_server.gui.add_button("Reset")
-
-        @start_button.on_click
-        def _on_start(_: Any) -> None:
         reset_camera_button = self._viser_server.gui.add_button(
             RESET_CAMERA_LABEL, hint="Look at the origin from the default viewpoint (shortcut: R)."
         )
@@ -166,6 +166,9 @@ RESET_CAMERA_KEY_HTML = (
         @reset_camera_button.on_click
         def _on_reset_camera(_: Any) -> None:
             self._reset_camera()
+
+        @start_button.on_click
+        def _on_start(_: Any) -> None:
             try:
                 self._control_stub.Start(slam_pb2.Empty())
                 logger.info("Sent Start command")
@@ -317,7 +320,8 @@ RESET_CAMERA_KEY_HTML = (
         return self._map_mode
 
     def _stream_map_increments(self) -> None:
-        with grpc.insecure_channel(self._server_addr) as channel:
+        options = [("grpc.max_receive_message_length", KEYFRAME_STREAM_MAX_MESSAGE_BYTES)]
+        with grpc.insecure_channel(self._server_addr, options=options) as channel:
             stub = slam_pb2_grpc.SlamServiceStub(channel)
             if self._choose_map_mode(stub) == "keyframes":
                 # The open keyframe (the scans since the last one) is not in this stream: the live transformed
@@ -433,10 +437,6 @@ RESET_CAMERA_KEY_HTML = (
             except Exception:
                 logger.exception("Pose rendering failed")
 
-    def _orbit_around(self, point: np.ndarray) -> None:
-        """Make every client's camera orbit around `point` (rviz moves its focal point to the target frame)."""
-        for client in self._viser_server.get_clients().values():
-            try:
     def _reset_camera(self) -> None:
         """Put every client's camera at the default viewpoint, looking at the origin (as drawn, so it also works
         while following)."""
@@ -449,6 +449,10 @@ RESET_CAMERA_KEY_HTML = (
             except AssertionError:
                 logger.debug("Client camera state not known yet; not resetting it")
 
+    def _orbit_around(self, point: np.ndarray) -> None:
+        """Make every client's camera orbit around `point` (rviz moves its focal point to the target frame)."""
+        for client in self._viser_server.get_clients().values():
+            try:
                 client.camera.look_at = point
             except AssertionError:
                 logger.debug("Client camera state not known yet; not moving its focal point")

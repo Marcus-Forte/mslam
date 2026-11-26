@@ -26,7 +26,7 @@ def to_viser_points(point_cloud: lidar_pb2.PointCloud3) -> np.ndarray:
 
 
 # Mid360 reflectivity is 0 to 255 and `toGRPC` (src/slam/Conversion.cc) copies it into the uint32 `intensity` field
-# (map points average it over a voxel, so it stays inside that range). A fixed range keeps a point's colour
+# (a map point is a raw point or the average over a voxel, so it stays inside that range). A fixed range keeps a point's colour
 # independent of the chunk it arrives in.
 INTENSITY_RANGE = (0.0, 255.0)
 # Fallback when a cloud has no intensity: colour by height over a fixed range in metres (indoor scale). Heights

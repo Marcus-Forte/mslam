@@ -8,7 +8,7 @@
     "remote_scanner": "localhost:50051", // "local" for on-board Mid360, or host:port of a sensor/replay server
 
     "preprocessor": {
-        "voxel_size": 0.1,
+        "voxel_size": 0.05,
         "min_distance_to_center": 1.0,
         "min_intensity": 5,
         "downsample_filter": "voxel_hash", // voxel_hash
@@ -31,7 +31,7 @@
     "slam": {
         "optimizer_iterations": 5,
         "reg_iterations": 5,
-        "max_correspondence_distance": 0.1,
+        "max_correspondence_distance": 0.2,
         // How the IMU is used when "imu" is on (optional):
         //   "preintegration_factor": IMU residual in the joint optimization (default)
         //   "dead_reckoning": IMU only integrated forward, seeds pose-only scan matching
@@ -42,7 +42,7 @@
         // otherwise a value other than 1 logs a warning and runs sequentially.
         // 8 was the fastest on the 28-thread dev machine (2026-11-25); 0 (all
         // threads) was slower, so prefer an explicit count.
-        "num_threads": 4,
+        "num_threads": 0,
         // Estimator (optional, default "odometry" = LiDAR-inertial odometry only):
         //   "odometry": the odometry alone
         //   "N": the same odometry plus keyframes, loop closure and a
@@ -53,8 +53,8 @@
     // Pose-graph back end, read only when "strategy" is "pose_graph"; every key
     // is optional (defaults shown).
     , "pose_graph": {
-    //     "keyframe_distance": 0.5,            // m moved before a new keyframe
-    //     "keyframe_angle": 0.26,              // rad turned before a new keyframe
+        // "keyframe_distance": 1.0,            // m moved before a new keyframe
+        // "keyframe_angle": 0.56,              // rad turned before a new keyframe
     //     "keyframe_max_interval_s": 0,        // s; closes a keyframe while still, 0 = off
     //     "loop_search_radius": 2.0,           // m, loop candidates around a keyframe
     //     "loop_min_separation": 10,           // keyframes skipped as recent neighbours
@@ -66,6 +66,6 @@
     //     "odometry_sigma_translation": 0.05,  // m
     //     "odometry_sigma_rotation": 0.01,     // rad
     //     "optimizer_iterations": 20,
-    //     "synchronous": false                 // true: back end inline (deterministic replays)
+        "synchronous": true                 // true: back end inline (deterministic replays)
     }
 }

@@ -46,6 +46,20 @@ CORRESPONDENCE_COLOR = np.array([255, 80, 80], dtype=np.uint8)
 
 
 class SlamViewerClient:
+RESET_CAMERA_LABEL = "Reset camera (R)"
+RESET_CAMERA_OFFSET = np.array([1.25, -1.25, 0.95]) * 2.0
+"""Where the reset view puts the camera relative to the origin (z up, looking at the origin)."""
+RESET_CAMERA_KEY_HTML = (
+    f'<img src="data:," style="display:none" onerror="'
+    "if(!window.__slamResetKey){window.__slamResetKey=1;"
+    "window.addEventListener('keydown',function(e){"
+    "if(e.key!=='r'&&e.key!=='R')return;if(e.ctrlKey||e.metaKey||e.altKey||e.repeat)return;"
+    "var t=document.activeElement;if(t&&/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;"
+    "var b=Array.from(document.querySelectorAll('button')).find(function(x){"
+    f"return x.textContent.trim()==='{RESET_CAMERA_LABEL}'}});"
+    'if(b){e.preventDefault();b.click();}});}">'
+)
+"""viser has no keyboard API: this hidden element installs one page-level `r` listener that clicks the reset button."""
     def __init__(self, server_addr: str, viser_port: int, point_size: float) -> None:
         try:
             import viser
@@ -144,6 +158,14 @@ class SlamViewerClient:
 
         @start_button.on_click
         def _on_start(_: Any) -> None:
+        reset_camera_button = self._viser_server.gui.add_button(
+            RESET_CAMERA_LABEL, hint="Look at the origin from the default viewpoint (shortcut: R)."
+        )
+        self._viser_server.gui.add_html(RESET_CAMERA_KEY_HTML)
+
+        @reset_camera_button.on_click
+        def _on_reset_camera(_: Any) -> None:
+            self._reset_camera()
             try:
                 self._control_stub.Start(slam_pb2.Empty())
                 logger.info("Sent Start command")
@@ -415,6 +437,18 @@ class SlamViewerClient:
         """Make every client's camera orbit around `point` (rviz moves its focal point to the target frame)."""
         for client in self._viser_server.get_clients().values():
             try:
+    def _reset_camera(self) -> None:
+        """Put every client's camera at the default viewpoint, looking at the origin (as drawn, so it also works
+        while following)."""
+        target = self._follow_view.on_screen(np.zeros(3))
+        for client in self._viser_server.get_clients().values():
+            try:
+                client.camera.up_direction = (0.0, 0.0, 1.0)
+                client.camera.position = target + RESET_CAMERA_OFFSET
+                client.camera.look_at = target
+            except AssertionError:
+                logger.debug("Client camera state not known yet; not resetting it")
+
                 client.camera.look_at = point
             except AssertionError:
                 logger.debug("Client camera state not known yet; not moving its focal point")

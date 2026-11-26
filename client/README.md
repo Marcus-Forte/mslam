@@ -115,3 +115,7 @@ start the playback; at the end A, B and C must hold the same epoch, offset, poin
 ```bash
 uv run python tools/check_map_stream.py --server 127.0.0.1:50052 [--half-offset 500] [--disconnect-offset 200]
 ```
+
+Press `R` in the browser (or click "Reset camera (R)") to put the camera back at the default viewpoint looking at the
+origin. viser has no keyboard API, so the key is a small page-level listener installed through a hidden HTML element
+(`RESET_CAMERA_KEY_HTML`) that clicks that button; it ignores `R` while a text field has focus.

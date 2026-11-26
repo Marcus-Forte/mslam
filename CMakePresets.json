@@ -16,9 +16,9 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_TYPE": "Release",
+        "MSLAM_INTEGRATION_TESTS": "ON",
         "MSLAM_INSTALL_REPLAY_SERVER": "ON",
         "MSLAM_INSTALL_REMOTE_RECORDER": "ON",
-        "MSLAM_INTEGRATION_TESTS": "ON",
         "MSLAM_WITH_TBB": "ON"
       }
     },
@@ -48,6 +48,28 @@
       "name": "build-pi5",
       "configurePreset": "pi5",
       "verbose": false
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "gcc",
+      "displayName": "Unit tests (integration excluded)",
+      "configurePreset": "gcc",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "integration" } }
+    },
+    {
+      "name": "gcc-integration",
+      "displayName": "Integration tests only",
+      "configurePreset": "gcc",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "integration" } }
+    },
+    {
+      "name": "gcc-all",
+      "displayName": "All tests",
+      "configurePreset": "gcc",
+      "output": { "outputOnFailure": true }
     }
   ]
 }

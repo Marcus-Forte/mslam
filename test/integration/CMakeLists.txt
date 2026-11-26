@@ -25,11 +25,17 @@ target_link_libraries(test_slam_integration
 target_compile_definitions(test_slam_integration
   PRIVATE MSLAM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-# One CTest entry for the whole binary: its tests share the replays of the
-# recording (SetUpTestSuite), which one process per test would repeat.
+# One CTest entry per suite: the tests of a suite share its replays
+# (SetUpTestSuite), which one process per test would repeat. The neighborhood
+# suite replays a long outdoor recording (about 40 s) and gets its own entry, so
+# `ctest -R SlamIntegration$` still runs the quick suite alone.
 if(MSLAM_INTEGRATION_TESTS)
-  add_test(NAME SlamIntegration COMMAND test_slam_integration)
-  set_tests_properties(SlamIntegration PROPERTIES LABELS integration)
+  add_test(NAME SlamIntegration COMMAND test_slam_integration
+    --gtest_filter=SlamIntegration.*)
+  add_test(NAME SlamIntegrationNeighborhood COMMAND test_slam_integration
+    --gtest_filter=NeighborhoodLoopClosure.*)
+  set_tests_properties(SlamIntegration SlamIntegrationNeighborhood
+    PROPERTIES LABELS integration)
 endif()
 
 # Build and run directly, without going through CTest.

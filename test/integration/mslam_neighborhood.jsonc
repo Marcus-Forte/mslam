@@ -1,0 +1,62 @@
+// Configuration of the neighboorhood.pbscan integration test (a 214 m outdoor
+// loop). A pinned copy of the owner's config/mslam.jsonc of 2026-11-26, which
+// tracks this recording, with two changes for the test:
+//  - "synchronous": true, so the back end runs inline and the replay does not
+//    depend on timing;
+//  - "loop_max_rms": 0.08 instead of the default 0.05: the verifications of the
+//    return to the start converge at 54 to 74 mm RMS outdoors, so the default
+//    rejects every one of them and no correction happens. 0.065 and 0.08 give
+//    the same map pose to 1e-9; 0.08 leaves a margin for other toolchains.
+// The pose graph keys are the defaults otherwise, spelled out to pin them.
+{
+    "imu": true,
+    "lidar": true,
+    "camera": false,
+    "imu_acceleration_scale": 9.80665,
+    "log_level": "info", // trace || debug || info || warning || error
+    "map_type": "voxel",
+    "remote_scanner": "localhost:50051", // unused: the test replays in-process
+
+    "preprocessor": {
+        "voxel_size": 0.05,
+        "min_distance_to_center": 1.0,
+        "min_intensity": 5,
+        "downsample_filter": "voxel_hash",
+        "deskew": true,
+        "points_per_second": 200000
+    },
+    "map": {
+        "resolution": 0.1,
+        "max_points_per_voxel": 10,
+        "search_radius": 2,
+        "max_voxels": 0,
+        "max_range": 0
+    },
+
+    "slam": {
+        "optimizer_iterations": 5,
+        "reg_iterations": 5,
+        "max_correspondence_distance": 0.2,
+        "imu_fusion": "preintegration_factor",
+        // The pose does not depend on it (bit for bit); 4 only for speed.
+        "num_threads": 4,
+        "strategy": "pose_graph"
+    },
+
+    "pose_graph": {
+        "keyframe_distance": 0.5,
+        "keyframe_angle": 0.26,
+        "keyframe_max_interval_s": 0,
+        "loop_search_radius": 2.0,
+        "loop_min_separation": 10,
+        "loop_submap_keyframes": 2,
+        "loop_max_rms": 0.08,
+        "loop_min_matched_fraction": 0.6,
+        "loop_sigma_translation": 0.02,
+        "loop_sigma_rotation": 0.005,
+        "odometry_sigma_translation": 0.05,
+        "odometry_sigma_rotation": 0.01,
+        "optimizer_iterations": 20,
+        "synchronous": true
+    }
+}

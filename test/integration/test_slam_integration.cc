@@ -42,6 +42,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -66,7 +67,16 @@ struct PoseGraphOutcome {
   std::size_t keyframes = 0;
   std::size_t accepted_loops = 0;
   std::size_t rejected_loops = 0;
+  /// Keyframe gap (`to - from`) of every loop edge in the final graph.
+  std::vector<std::size_t> loop_gaps;
+  /// Newest keyframe of the loop edges whose gap is at least
+  /// `k_revisit_min_gap` (0 = none): where the revisit closed.
+  std::size_t first_revisit_keyframe = 0;
 };
+
+/// A loop edge spanning this many keyframes closes a real revisit, not a
+/// neighbour (loop_min_separation is 10).
+constexpr std::size_t k_revisit_min_gap = 100;
 
 /// What one replay ended with.
 struct ReplayResult {
@@ -101,6 +111,18 @@ ReplayResult resultOf(const mslam::Slam &slam,
     outcome.keyframes = graph->stats.keyframes;
     outcome.accepted_loops = graph->stats.candidates_accepted;
     outcome.rejected_loops = graph->stats.candidates_rejected;
+    for (const auto &edge : graph->edges) {
+      if (edge.kind != mslam::EdgeKind::Loop) {
+        continue;
+      }
+      const std::size_t gap = edge.to - edge.from;
+      outcome.loop_gaps.push_back(gap);
+      if (gap >= k_revisit_min_gap &&
+          (outcome.first_revisit_keyframe == 0 ||
+           edge.to < outcome.first_revisit_keyframe)) {
+        outcome.first_revisit_keyframe = edge.to;
+      }
+    }
     result.graph = outcome;
   }
   return result;
@@ -484,6 +506,122 @@ TEST_F(SlamIntegration, PoseGraphClosesTheLoop) {
                                      graph.map_pose[2]);
   EXPECT_LT((map_position - odom_position).norm(), k_max_map_odom_offset_m);
   EXPECT_LT(positionNorm(graph.map_pose), k_max_origin_offset_m);
+}
+
+// neighboorhood.pbscan: a 214 m outdoor walk (5954 scans, 286 s) that comes
+// back past its start at about 183 s and then stands still about 1 m from it
+// for the last 90 s. The odometry drifts, the loop closer verifies the return
+// to the start, and the optimization pulls the map frame back. Its own suite
+// and CTest entry, since one replay takes about 40 s.
+//
+// The reference is the map pose of this synchronous replay (dev container,
+// aarch64, GCC 16, 2026-11-26): odom [-0.753209113 0.705919493 -0.909361517
+// 0.073733852 0.141882456 1.288137914], map [-0.285243254 0.836434214
+// -0.153361548 0.064470101 0.144025910 1.268837232], 410 keyframes, 48 of 48
+// loop verifications accepted with gaps 341 to 409. The true final pose is not
+// measured (the owner placed the device about 1 m from the start); the
+// owner's live run through playback_publisher, which may drop scans and so is
+// not reproducible, ended near [-0.835 0.679 -0.656 0.071 0.148 1.259].
+//
+// What is gated: a revisit closes, late in the recording; it moves the map
+// frame far from the odometry (0.90 m measured); and the map pose stays near
+// the reference (another toolchain rounds differently, so not to the digit).
+constexpr double k_neighborhood_min_correction_m = 0.5;
+constexpr double k_neighborhood_max_position_error_m = 0.1;
+constexpr double k_neighborhood_max_rotation_error_rad = 0.02;
+const mslam::Pose3D k_neighborhood_reference_map_pose =
+    (mslam::Pose3D() << -0.285243254, 0.836434214, -0.153361548, 0.064470101,
+     0.144025910, 1.268837232)
+        .finished();
+
+class NeighborhoodLoopClosure : public ::testing::Test {
+protected:
+  static void SetUpTestSuite() {
+    const std::filesystem::path source_dir{MSLAM_SOURCE_DIR};
+    const auto recording = source_dir / "test/data/neighboorhood.pbscan";
+    if (!std::filesystem::exists(recording)) {
+      return; // every test skips
+    }
+    mslam::JsonConfig json_config(source_dir /
+                                  "test/integration/mslam_neighborhood.jsonc");
+    json_config.load();
+
+    auto logger = spdlog::default_logger();
+    logger->set_level(spdlog::level::off);
+    replay_ = replaySynchronously(json_config.getConfig(), logger, recording);
+
+    std::cout << "Neighborhood: " << *replay_;
+    if (const auto &g = replay_->graph) {
+      std::cout << " map_pose=[" << g->map_pose[0] << " " << g->map_pose[1]
+                << " " << g->map_pose[2] << " " << g->map_pose[3] << " "
+                << g->map_pose[4] << " " << g->map_pose[5]
+                << "] keyframes=" << g->keyframes
+                << " loops accepted=" << g->accepted_loops
+                << " rejected=" << g->rejected_loops
+                << " first_revisit_keyframe=" << g->first_revisit_keyframe;
+    }
+    std::cout << "\n";
+  }
+
+  static void TearDownTestSuite() { replay_.reset(); }
+
+  void SetUp() override {
+    if (!replay_.has_value()) {
+      GTEST_SKIP() << "Missing recording test/data/neighboorhood.pbscan "
+                      "(untracked sample data)";
+    }
+  }
+
+  static std::optional<ReplayResult> replay_;
+};
+
+std::optional<ReplayResult> NeighborhoodLoopClosure::replay_;
+
+TEST_F(NeighborhoodLoopClosure, ReplayIsComplete) {
+  EXPECT_EQ(replay_->scans, 5954U);
+  EXPECT_EQ(replay_->sync.scans_uncovered, 0U);
+  EXPECT_EQ(replay_->registration.lidar_only_scans, 0U);
+}
+
+TEST_F(NeighborhoodLoopClosure, ClosesTheLoopNearTheEnd) {
+  ASSERT_TRUE(replay_->graph.has_value());
+  const auto &graph = *replay_->graph;
+  std::size_t revisits = 0;
+  for (const std::size_t gap : graph.loop_gaps) {
+    revisits += gap >= k_revisit_min_gap ? 1U : 0U;
+  }
+  RecordProperty("revisit_loops", std::to_string(revisits));
+
+  ASSERT_GE(revisits, 1U) << "no loop edge spans " << k_revisit_min_gap
+                          << " keyframes: the return to the start never closed";
+  // The return to the start comes in the last fifth of the keyframes.
+  EXPECT_GT(graph.first_revisit_keyframe, graph.keyframes * 4 / 5)
+      << "first revisit at keyframe " << graph.first_revisit_keyframe << " of "
+      << graph.keyframes;
+}
+
+TEST_F(NeighborhoodLoopClosure, CorrectionMovesTheMapPoseToTheReference) {
+  ASSERT_TRUE(replay_->graph.has_value());
+  const auto &map_pose = replay_->graph->map_pose;
+  const auto &odom_pose = replay_->pose;
+
+  // Pose3D is a row vector.
+  const Eigen::Vector3d odom_position = odom_pose.head<3>().transpose();
+  const Eigen::Vector3d map_position = map_pose.head<3>().transpose();
+  const Eigen::Vector3d reference_position =
+      k_neighborhood_reference_map_pose.head<3>().transpose();
+  const double correction_m = (map_position - odom_position).norm();
+  const double position_error_m = (map_position - reference_position).norm();
+  const double rotation_error_rad =
+      (map_pose.tail<3>() - k_neighborhood_reference_map_pose.tail<3>())
+          .cwiseAbs()
+          .maxCoeff();
+  RecordProperty("map_odom_correction_m", std::to_string(correction_m));
+  RecordProperty("map_reference_error_m", std::to_string(position_error_m));
+
+  EXPECT_GT(correction_m, k_neighborhood_min_correction_m);
+  EXPECT_LT(position_error_m, k_neighborhood_max_position_error_m);
+  EXPECT_LT(rotation_error_rad, k_neighborhood_max_rotation_error_rad);
 }
 
 } // namespace

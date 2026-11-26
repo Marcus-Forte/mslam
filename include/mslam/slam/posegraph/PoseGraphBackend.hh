@@ -81,8 +81,10 @@ public:
   /// @param points_in_odom_frame The scan, already in the odom frame.
   /// @param seed_scan One of the pipeline's seed scans: the keyframe interval
   ///        trigger is ignored, so they all land in the origin keyframe.
-  /// @return The points (odom frame) of the voxels this scan made the open
-  ///         keyframe own: the scan's contribution to the single-layer map.
+  /// @return The points (odom frame) this scan added to the open keyframe's
+  ///         owned voxels (one mean point per newly owned voxel, or every
+  ///         accepted point up to `max_points_per_voxel` per voxel): the scan's
+  ///         contribution to the single-layer map.
   ///         Ownership is decided here, on the caller thread; the worker only
   ///         ever sees sealed clouds.
   PointCloud onScan(std::int64_t stamp_ns, const Eigen::Affine3d &T_odom_scan,

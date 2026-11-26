@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -542,6 +543,35 @@ TEST(SlamPipeline, PoseGraphIncrementsAreTheNewlyOwnedVoxelsOnly) {
   // Later scans see the same room: almost nothing is new after the first.
   EXPECT_GT(clouds.front().size(), 1000U);
   EXPECT_LT(clouds[count - 1].size(), clouds.front().size() / 4);
+}
+
+TEST(SlamPipeline, PoseGraphIncrementsKeepUpToNPointsPerOwnedVoxel) {
+  auto config = poseGraphConfig();
+  config.pose_graph.max_points_per_voxel = 3;
+  Fixture f(config);
+  feed(f, mslam::SlamPipeline::kInitScans + 3);
+
+  const auto &clouds = f.output.increment_clouds_;
+  const std::size_t count =
+      std::min(clouds.size(), f.output.increments_before_first_clear_);
+  ASSERT_GE(count, 8U);
+  std::map<std::array<int, 3>, int> per_voxel;
+  std::size_t points = 0;
+  for (std::size_t k = 0; k < count; ++k) {
+    for (const auto &p : clouds[k]) {
+      ++per_voxel[{static_cast<int>(std::floor(p.x / 0.05F)),
+                   static_cast<int>(std::floor(p.y / 0.05F)),
+                   static_cast<int>(std::floor(p.z / 0.05F))}];
+      ++points;
+    }
+  }
+  int most = 0;
+  for (const auto &entry : per_voxel) {
+    most = std::max(most, entry.second);
+  }
+  EXPECT_LE(most, 3);
+  // Different samplings of the room fill voxels beyond one point.
+  EXPECT_GT(points, per_voxel.size());
 }
 
 TEST(SlamPipeline, TheSeedScansBecomeTheOriginKeyframe) {

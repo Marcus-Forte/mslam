@@ -2,7 +2,6 @@
 
 #include <algorithm>
 
-#include "mslam/map/VoxelHashMap.hh"
 #include "mslam/slam/Transform.hh"
 
 #include <utility>
@@ -12,9 +11,6 @@ namespace mslam {
 namespace {
 
 using Clock = std::chrono::steady_clock;
-
-constexpr double kDenseMapVoxelSize = 0.01;
-constexpr int kDenseMapVoxelBucketSize = 10;
 
 std::chrono::nanoseconds since(Clock::time_point start) {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
@@ -38,10 +34,6 @@ SlamPipeline::SlamPipeline(Slam &slam, const SlamConfiguration &config,
     : slam_(slam), config_(config), logger_(std::move(logger)), output_(output),
       map_(slam.map()), preprocessor_(config.preprocessor, logger_),
       sync_(config.with_imu, config.preprocessor.points_per_second, logger_) {
-  if (config_.map_parameters.dense_map) {
-    dense_map_ = std::make_unique<VoxelHashMap>(kDenseMapVoxelSize,
-                                                kDenseMapVoxelBucketSize);
-  }
   if (config_.strategy == SlamStrategy::PoseGraph) {
     backend_ = std::make_unique<PoseGraphBackend>(config_.pose_graph, logger_);
     applied_result_ = backend_->latestResult();
@@ -190,15 +182,13 @@ void SlamPipeline::initScan(const Scan &scan) {
 
 void SlamPipeline::insertAndPublish(PointCloud &points, PointCloud *owned) {
   auto map_increment = map_->addScan(points);
-  if (dense_map_) {
-    dense_map_->addScan(points);
-  }
   pruneMap();
 
   if (owned != nullptr) {
-    // Pose-graph strategy: publish only the voxels this scan made the open
-    // keyframe own (odom frame), not the registration map's increment, so the
-    // map the viewers accumulate has each voxel once.
+    // Pose-graph strategy: publish only what this scan added to the open
+    // keyframe's owned voxels (odom frame), not the registration map's
+    // increment, so the map the viewers accumulate has each voxel owned once
+    // and at most max_points_per_voxel points in it.
     map_increment = std::move(*owned);
   }
 
@@ -296,9 +286,6 @@ void SlamPipeline::reset() {
   sync_.clear();
   slam_.ResetPose();
   map_->clear();
-  if (dense_map_) {
-    dense_map_->clear();
-  }
   if (backend_) {
     backend_->reset();
     applied_result_ = backend_->latestResult();

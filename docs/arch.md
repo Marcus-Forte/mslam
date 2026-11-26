@@ -86,7 +86,6 @@ class SlamPipeline {
 	+timings() StageTimings
 	-preprocessor_ Preprocessor
 	-sync_ ImuScanSynchronizer
-	-dense_map_ unique_ptr~IMap~
 }
 
 class ImuScanSynchronizer {
@@ -289,23 +288,31 @@ scan count. `KeyframeSelector` opens a keyframe when a scan moved more than
 `keyframe_distance` or turned more than `keyframe_angle` from the current one
 (or `keyframe_max_interval_s` passed). Every scan between two keyframes, the
 one that opens the keyframe included, goes into two clouds of that keyframe,
-both thinned to one running centroid per `mini_map_voxel_size` voxel (so memory
-and per-scan cost are bounded by the occupied voxels) and expressed in the
-keyframe's own frame once it is sealed:
+thinned per `map.resolution` voxel (so memory and per-scan cost are bounded by
+the occupied voxels) and expressed in the keyframe's own frame once it is
+sealed:
 - the **view** (`MiniMapBuilder`): everything the keyframe saw. Only the loop
   verification reads it, because a keyframe that revisits a place owns almost
   nothing there. Views of different keyframes overlap.
 - the **owned mini map** (`OwnedMapBuilder`): only the voxels no earlier keyframe
   owns. A voxel belongs to the FIRST keyframe that observes it, decided on the
   voxel in the odom frame, which never changes (so no re-keying after an
-  optimization). Sealed voxels are a hash set that only grows; the open keyframe
-  keeps a centroid per voxel it owns, emitted in first-seen order. Everything
-  published (the keyframe stream, the `StreamMap` re-send, `--save-map`) is this
-  cloud, so the published map has each voxel once.
-`onScan` returns the voxels this scan made the open keyframe own, and the
-pipeline publishes those, moved by `T_map_odom`, as the per-scan map increment
-instead of the registration map's own (odometry keeps the latter). Ownership is
-decided on the caller thread; the worker only ever sees sealed clouds.
+  optimization). Sealed voxels are a hash set that only grows. With
+  `map.max_points_per_voxel` 1 the open keyframe keeps one centroid per voxel it
+  owns, emitted in first-seen order; with more it keeps the first N raw points of
+  each voxel it owns (the rule of `VoxelHashMap::addScan`) in arrival order, and
+  keeps filling its voxels until N while it is open. Sealing freezes its voxels,
+  filled or not, and a later keyframe never refills them. Everything published
+  (the keyframe stream, the `StreamMap` re-send, `--save-map`) is this cloud, so
+  the published map has each voxel owned once and at most N points in it. The
+  view stays one centroid per voxel, so loop verification does not depend on N.
+`onScan` returns what this scan added to the open keyframe's owned voxels (one
+mean point per newly owned voxel at N = 1; at N > 1 every accepted point, also
+in voxels the keyframe already owned), and the pipeline publishes those, moved
+by `T_map_odom`, as the per-scan map increment instead of the registration map's
+own (odometry keeps the latter). At N > 1 the sealed cloud is the concatenation
+of the increments published while the keyframe was open. Ownership is decided on
+the caller thread; the worker only ever sees sealed clouds.
 
 A keyframe is sealed (its clouds final) when the next one opens. The first one
 is the **origin keyframe**: the pipeline calls `sealOpenKeyframe()` after the

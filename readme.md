@@ -62,14 +62,18 @@ back to oneTBB because SYCL was slower and a very large dependency; a leftover
 LiDAR-inertial odometry alone) or `"pose_graph"` (the same odometry plus a
 keyframe pose-graph back end with loop closure). An unknown value is rejected.
 The optional top-level `pose_graph` block is read only for `pose_graph`; every
-key is optional:
+key is optional. The keyframes' mini maps (and the voxels a keyframe owns, which
+form the published map) are thinned at `map.resolution` and keep up to
+`map.max_points_per_voxel` points per voxel (1 keeps a centroid, more keep the
+first raw points); there are no separate keys for them, and
+`mini_map_voxel_size` or `max_points_per_voxel` in `pose_graph` are rejected as
+unknown keys:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `keyframe_distance` | 0.5 m | movement that opens a new keyframe |
 | `keyframe_angle` | 0.26 rad | rotation that opens a new keyframe |
 | `keyframe_max_interval_s` | 0 (off) | closes a keyframe after this long, even when still |
-| `mini_map_voxel_size` | 0.05 m | thinning of a keyframe's mini map, and the voxel a keyframe owns |
 | `loop_search_radius` | 2.0 m | loop candidates within this distance |
 | `loop_min_separation` | 10 | keyframes skipped as recent neighbours |
 | `loop_submap_keyframes` | 2 | neighbours on each side of a candidate in the verification target |
@@ -402,9 +406,11 @@ joins the graph, the worker drains) and more lines follow the usual ones:
 the back end's counters (keyframes, odometry edges, loop attempts, accepted and
 rejected, optimizations, map re-sends, back-end time) with the range of the
 accepted loops (keyframe gap, RMS, matched fraction), a `map:` line with the
-duplication of the published map (its points, the distinct map-frame voxels of
-`mini_map_voxel_size` they fill, their ratio, about 1 when each voxel is
-published once, and the points held in the keyframes' views, which overlap),
+published map (its points, the distinct map-frame voxels of `map.resolution`
+they fill, the mean points per voxel, up to `map.max_points_per_voxel`, the
+keyframe overlap, about 1 when each voxel is published once, the largest
+keyframe cloud, which one `StreamKeyframes` message carries, and the points
+held in the keyframes' views, which overlap),
 then the final pose in the
 odom frame (it must equal the odometry run's to the last digit) and in the map
 frame, the distance between the two and each one's distance from the origin.
@@ -481,9 +487,10 @@ announces its epoch and stays silent. The contract follows `StreamMap`:
 
 - A **keyframe** has a consecutive `id` from 0 in each **epoch**, a pose in the
   map frame and its mini map in the keyframe's **own** frame (place it with the
-  pose). A mini map holds only the voxels (`mini_map_voxel_size`, decided in the
-  odom frame) that no earlier keyframe owns, so the union of the keyframes is a
-  single layer: each voxel once. Keyframe 0 is the origin keyframe, the seed
+  pose). A mini map holds only the voxels (`map.resolution`, decided in the
+  odom frame) that no earlier keyframe owns, with up to
+  `map.max_points_per_voxel` points each, so the union of the keyframes is a
+  single layer: each voxel owned once. Keyframe 0 is the origin keyframe, the seed
   scans at the identity pose, and is sent before the first registered scan. It is sent once, as `KeyframeAdded{epoch, id, pose, cloud}`, in order
   from the stream's cursor on, with no gap and no duplicate.
 - **Pose encoding**: `PoseQuat` = `x y z` plus the unit quaternion `qw qx qy qz`

@@ -163,6 +163,16 @@ sensors::PoseQuat toPoseQuat(const Eigen::Affine3d &pose) {
 
 void SlamServer::addKeyframe(std::uint64_t id, const Eigen::Affine3d &pose,
                              std::shared_ptr<const PointCloud> cloud) {
+  // One keyframe is one stream message. A point is at most 17 bytes on the wire
+  // (three packed floats and a 5-byte varint intensity).
+  constexpr std::size_t k_max_bytes_per_point = 17;
+  if (cloud && logger_ &&
+      cloud->size() * k_max_bytes_per_point >
+          static_cast<std::size_t>(g_max_grpc_message_size)) {
+    logger_->error("Keyframe {} has {} points: its message can exceed the {} "
+                   "byte gRPC limit and the viewer will not receive it",
+                   id, cloud->size(), g_max_grpc_message_size);
+  }
   StoredKeyframe stored{std::move(cloud), toPoseQuat(pose)};
   {
     std::scoped_lock lock(keyframe_mutex_);

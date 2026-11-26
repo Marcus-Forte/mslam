@@ -22,8 +22,7 @@
         "resolution": 0.1,
         "max_points_per_voxel": 5,
         "max_voxels": 0,
-        "max_range": 0,
-        "dense_map": false
+        "max_range": 0
     },
 
     "slam": {

@@ -8,7 +8,7 @@
     "remote_scanner": "localhost:50051", // "local" for on-board Mid360, or host:port of a sensor/replay server
 
     "preprocessor": {
-        "voxel_size": 0.05,
+        "voxel_size": 0.1,
         "min_distance_to_center": 1.0,
         "min_intensity": 5,
         "downsample_filter": "voxel_hash", // voxel_hash
@@ -17,16 +17,15 @@
     },
     "map": {
         "resolution": 0.1,
-        "max_points_per_voxel": 2,
+        "max_points_per_voxel": 10,
         // Voxels searched around a query (optional, default 1 = 3x3x3, max 8).
         // Neighbours are only guaranteed within search_radius * resolution;
         // a larger slam.max_correspondence_distance may miss matches or find
         // a non-nearest one (Slam logs a warning at startup).
-        "search_radius": 1,
+        "search_radius": 2,
         // Bound the registration map so per-scan cost stays flat over long runs.
         "max_voxels": 0, // 0 disables the voxel budget
-        "max_range": 0, // 0 disables radius pruning (m)
-        "dense_map": false // unused 1 cm map: leave off (memory)
+        "max_range": 0 // 0 disables radius pruning (m)
     },
 
     "slam": {
@@ -43,7 +42,7 @@
         // otherwise a value other than 1 logs a warning and runs sequentially.
         // 8 was the fastest on the 28-thread dev machine (2026-11-25); 0 (all
         // threads) was slower, so prefer an explicit count.
-        "num_threads": 8,
+        "num_threads": 4,
         // Estimator (optional, default "odometry" = LiDAR-inertial odometry only):
         //   "odometry": the odometry alone
         //   "N": the same odometry plus keyframes, loop closure and a
@@ -53,11 +52,10 @@
 
     // Pose-graph back end, read only when "strategy" is "pose_graph"; every key
     // is optional (defaults shown).
-    // , "pose_graph": {
+    , "pose_graph": {
     //     "keyframe_distance": 0.5,            // m moved before a new keyframe
     //     "keyframe_angle": 0.26,              // rad turned before a new keyframe
     //     "keyframe_max_interval_s": 0,        // s; closes a keyframe while still, 0 = off
-    //     "mini_map_voxel_size": 0.05,         // m, thinning of a keyframe's mini map
     //     "loop_search_radius": 2.0,           // m, loop candidates around a keyframe
     //     "loop_min_separation": 10,           // keyframes skipped as recent neighbours
     //     "loop_submap_keyframes": 2,          // neighbours each side forming the target
@@ -69,5 +67,5 @@
     //     "odometry_sigma_rotation": 0.01,     // rad
     //     "optimizer_iterations": 20,
     //     "synchronous": false                 // true: back end inline (deterministic replays)
-    // }
+    }
 }

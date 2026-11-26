@@ -212,9 +212,8 @@ TEST(ImuPreintegrationFactor, AnalyticalJacobianMatchesCentralDifferences) {
   Eigen::Matrix<double, Factor::kAmbientDim, 1> far = f.x;
   {
     Eigen::Matrix<double, Factor::kTangentDim, 1> delta;
-    delta << 0.2, -0.1, 0.3, 0.3, -0.2, 0.25, 0.3, -0.2, 0.1, 2e-3, -3e-3,
-        1e-3, 0.05, -0.04, 0.03, -0.2, 0.1, 0.3, 4e-3, 2e-3, -3e-3, 0.02,
-        -0.03, 0.04;
+    delta << 0.2, -0.1, 0.3, 0.3, -0.2, 0.25, 0.3, -0.2, 0.1, 2e-3, -3e-3, 1e-3,
+        0.05, -0.04, 0.03, -0.2, 0.1, 0.3, 4e-3, 2e-3, -3e-3, 0.02, -0.03, 0.04;
     manifold->plus(f.x.data(), delta.data(), far.data());
   }
   for (const auto *x : {&f.x, &far}) {

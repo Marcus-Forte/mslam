@@ -35,7 +35,7 @@ public:
   static constexpr std::size_t kMaxCandidates = 1;
 
   /// Registration settings of a verification. The mini maps are already
-  /// thinned at `mini_map_voxel_size`, the target map has voxels of 0.1 m, and
+  /// thinned at `map.resolution`, the target map has voxels of 0.1 m, and
   /// the correspondence gate is 0.2 m: loose enough for the drift of a loop
   /// (a few cm to some 10 cm in the prior), tight enough that the two surfaces
   /// of a corner stay further apart than the gate (the

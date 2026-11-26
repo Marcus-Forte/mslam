@@ -10,8 +10,8 @@ namespace mslam {
 
 namespace {
 // The registrations evaluate each LM trial with a full linear system (moptim's
-// speculative linear systems): an accepted trial then costs one evaluation instead
-// of two, and x, the iterations and the cost are the same bit for bit.
+// speculative linear systems): an accepted trial then costs one evaluation
+// instead of two, and x, the iterations and the cost are the same bit for bit.
 // Benchmark-only knob: MOPTIM_SPECULATIVE=0 turns it off.
 bool speculativeLinearSystems() {
   static const bool enabled = [] {

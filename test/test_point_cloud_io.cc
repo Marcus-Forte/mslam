@@ -13,9 +13,9 @@
 #include <iterator>
 #include <memory>
 #include <sstream>
-#include <unistd.h>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -28,8 +28,7 @@ std::filesystem::path makeTemporaryPlyPath() {
       std::chrono::steady_clock::now().time_since_epoch().count();
   return std::filesystem::temp_directory_path() /
          ("mslam_point_cloud_" + std::to_string(::getpid()) + "_" +
-          std::to_string(counter++) + "_" + std::to_string(timestamp) +
-          ".ply");
+          std::to_string(counter++) + "_" + std::to_string(timestamp) + ".ply");
 }
 
 TEST(PointCloudIO, ReadsAsciiVerticesAndSkipsFollowingListElements) {

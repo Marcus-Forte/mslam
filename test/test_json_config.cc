@@ -103,7 +103,6 @@ TEST_F(JsonConfigTest, PoseGraphDefaultsWhenTheBlockIsAbsent) {
   EXPECT_EQ(pg.keyframe_distance, 0.5);
   EXPECT_EQ(pg.keyframe_angle, 0.26);
   EXPECT_EQ(pg.keyframe_max_interval_s, 0.0);
-  EXPECT_EQ(pg.mini_map_voxel_size, 0.05);
   EXPECT_EQ(pg.loop_search_radius, 2.0);
   EXPECT_EQ(pg.loop_min_separation, 10U);
   EXPECT_EQ(pg.loop_submap_keyframes, 2U);
@@ -114,10 +113,27 @@ TEST_F(JsonConfigTest, PoseGraphDefaultsWhenTheBlockIsAbsent) {
   EXPECT_EQ(pg.odometry_sigma_translation, d.odometry_sigma_translation);
 }
 
+TEST_F(JsonConfigTest, PoseGraphMiniMapSettingsFollowTheMapBlock) {
+  const auto config = load("");
+  EXPECT_EQ(config.pose_graph.mini_map_voxel_size,
+            config.map_parameters.resolution);
+  EXPECT_EQ(config.pose_graph.max_points_per_voxel,
+            config.map_parameters.max_points_per_voxel);
+}
+
+TEST_F(JsonConfigTest, PoseGraphRejectsTheRemovedMapKeysAsUnknown) {
+  for (const char *key :
+       {R"("mini_map_voxel_size": 0.05)", R"("max_points_per_voxel": 3)"}) {
+    EXPECT_THROW(load("", "", std::string(", \"pose_graph\": {") + key + "}"),
+                 std::runtime_error)
+        << key;
+  }
+}
+
 TEST_F(JsonConfigTest, PoseGraphBlockParsesEveryKey) {
   const auto pg = load("", "", R"(, "pose_graph": {
       "keyframe_distance": 1.0, "keyframe_angle": 0.5,
-      "keyframe_max_interval_s": 5.0, "mini_map_voxel_size": 0.1,
+      "keyframe_max_interval_s": 5.0,
       "loop_search_radius": 3.0, "loop_min_separation": 20,
       "loop_submap_keyframes": 0, "loop_max_rms": 0.1,
       "loop_min_matched_fraction": 1.0, "loop_sigma_translation": 0.03,
@@ -128,7 +144,6 @@ TEST_F(JsonConfigTest, PoseGraphBlockParsesEveryKey) {
   EXPECT_EQ(pg.keyframe_distance, 1.0);
   EXPECT_EQ(pg.keyframe_angle, 0.5);
   EXPECT_EQ(pg.keyframe_max_interval_s, 5.0);
-  EXPECT_EQ(pg.mini_map_voxel_size, 0.1);
   EXPECT_EQ(pg.loop_search_radius, 3.0);
   EXPECT_EQ(pg.loop_min_separation, 20U);
   EXPECT_EQ(pg.loop_submap_keyframes, 0U);
@@ -150,26 +165,17 @@ TEST_F(JsonConfigTest, PartialPoseGraphBlockKeepsTheOtherDefaults) {
 }
 
 TEST_F(JsonConfigTest, PoseGraphRejectsOutOfRangeValues) {
-  for (const char *bad : {R"("keyframe_distance": 0)",
-                          R"("keyframe_distance": -1)",
-                          R"("keyframe_angle": 0)",
-                          R"("keyframe_angle": 4)",
-                          R"("keyframe_max_interval_s": -1)",
-                          R"("mini_map_voxel_size": 0)",
-                          R"("loop_search_radius": 0)",
-                          R"("loop_min_separation": 0)",
-                          R"("loop_min_separation": 1.5)",
-                          R"("loop_submap_keyframes": -1)",
-                          R"("loop_max_rms": 0)",
-                          R"("loop_min_matched_fraction": 0)",
-                          R"("loop_min_matched_fraction": 1.5)",
-                          R"("loop_sigma_translation": 0)",
-                          R"("loop_sigma_rotation": -0.1)",
-                          R"("odometry_sigma_translation": 0)",
-                          R"("odometry_sigma_rotation": 0)",
-                          R"("optimizer_iterations": 0)",
-                          R"("keyframe_distance": "far")",
-                          R"("synchronous": 1)"}) {
+  for (const char *bad :
+       {R"("keyframe_distance": 0)", R"("keyframe_distance": -1)",
+        R"("keyframe_angle": 0)", R"("keyframe_angle": 4)",
+        R"("keyframe_max_interval_s": -1)", R"("loop_search_radius": 0)",
+        R"("loop_min_separation": 0)", R"("loop_min_separation": 1.5)",
+        R"("loop_submap_keyframes": -1)", R"("loop_max_rms": 0)",
+        R"("loop_min_matched_fraction": 0)",
+        R"("loop_min_matched_fraction": 1.5)", R"("loop_sigma_translation": 0)",
+        R"("loop_sigma_rotation": -0.1)", R"("odometry_sigma_translation": 0)",
+        R"("odometry_sigma_rotation": 0)", R"("optimizer_iterations": 0)",
+        R"("keyframe_distance": "far")", R"("synchronous": 1)"}) {
     EXPECT_THROW(
         load("", "", std::string(R"(, "pose_graph": { )") + bad + " }"),
         std::runtime_error)

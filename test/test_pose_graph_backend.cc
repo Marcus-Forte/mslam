@@ -10,6 +10,7 @@
 
 #include <array>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -156,7 +157,8 @@ PointCloud odomScan(int k) {
   return cloud;
 }
 
-mslam::PoseGraphParameters driveParameters(bool synchronous) {
+mslam::PoseGraphParameters
+driveParameters(bool synchronous, unsigned int max_points_per_voxel = 1) {
   mslam::PoseGraphParameters p;
   p.keyframe_distance = 0.5;
   p.keyframe_angle = 3.0;
@@ -164,12 +166,15 @@ mslam::PoseGraphParameters driveParameters(bool synchronous) {
   p.loop_min_separation = 5;
   p.loop_submap_keyframes = 1;
   p.synchronous = synchronous;
+  p.max_points_per_voxel = max_points_per_voxel;
   return p;
 }
 
 std::shared_ptr<const mslam::PoseGraphResult>
-drive(bool synchronous, std::vector<mslam::PointCloud> *newly_owned = nullptr) {
-  mslam::PoseGraphBackend backend(driveParameters(synchronous), silentLogger());
+drive(bool synchronous, std::vector<mslam::PointCloud> *newly_owned = nullptr,
+      unsigned int max_points_per_voxel = 1) {
+  mslam::PoseGraphBackend backend(
+      driveParameters(synchronous, max_points_per_voxel), silentLogger());
   for (int k = 0; k < kScans; ++k) {
     auto fresh = backend.onScan(k * kScanNs, odomPose(k), odomScan(k));
     if (newly_owned != nullptr) {
@@ -287,6 +292,51 @@ TEST(PoseGraphBackend, TheOwnedMapHasEachOdomVoxelOnceAndViewsOverlap) {
   // room is seen from every keyframe.
   EXPECT_EQ(owned_points, seen.size());
   EXPECT_GT(result->stats.view_points, 3 * owned_points);
+}
+
+TEST(PoseGraphBackend, TheOwnedMapKeepsAtMostNPointsPerOdomVoxelAndOneOwner) {
+  const unsigned int n = 3;
+  const auto result = drive(true, nullptr, n);
+  ASSERT_GE(result->poses.size(), 8U);
+
+  std::map<std::array<int, 3>, std::size_t> owner; // voxel -> keyframe
+  std::map<std::array<int, 3>, unsigned int> points_in;
+  unsigned int most = 0;
+  for (std::size_t k = 0; k < result->mini_maps.size(); ++k) {
+    const int scan = static_cast<int>(result->stamps_ns[k] / kScanNs);
+    const Eigen::Affine3d odom = odomPose(scan);
+    for (const auto &point : *result->mini_maps[k]) {
+      const Eigen::Vector3d p =
+          odom * Eigen::Vector3d(point.x, point.y, point.z);
+      const std::array<int, 3> voxel = {
+          static_cast<int>(std::floor(p.x() / 0.05)),
+          static_cast<int>(std::floor(p.y() / 0.05)),
+          static_cast<int>(std::floor(p.z() / 0.05))};
+      const auto [it, inserted] = owner.emplace(voxel, k);
+      EXPECT_EQ(it->second, k) << "voxel owned by two keyframes";
+      (void)inserted;
+      most = std::max(most, ++points_in[voxel]);
+    }
+  }
+  EXPECT_LE(most, n);
+  EXPECT_GE(most, 2U); // the scene repeats points in a voxel
+  EXPECT_GT(result->stats.owned_points, owner.size());
+}
+
+TEST(PoseGraphBackend, SynchronousAndWorkerAgreeWithSeveralPointsPerVoxel) {
+  const auto sync = drive(true, nullptr, 3);
+  const auto worker = drive(false, nullptr, 3);
+  ASSERT_EQ(sync->mini_maps.size(), worker->mini_maps.size());
+  for (std::size_t k = 0; k < sync->mini_maps.size(); ++k) {
+    const auto &a = *sync->mini_maps[k];
+    const auto &b = *worker->mini_maps[k];
+    ASSERT_EQ(a.size(), b.size()) << k;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      EXPECT_EQ(a[i].x, b[i].x);
+      EXPECT_EQ(a[i].y, b[i].y);
+      EXPECT_EQ(a[i].z, b[i].z);
+    }
+  }
 }
 
 TEST(PoseGraphBackend, SealOpenKeyframeMakesTheSeedScansTheOrigin) {

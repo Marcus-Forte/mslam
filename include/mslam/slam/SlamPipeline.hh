@@ -132,7 +132,6 @@ private:
   std::shared_ptr<spdlog::logger> logger_;
   ISlamOutput &output_;
   std::shared_ptr<IMap> map_;
-  std::unique_ptr<IMap> dense_map_;
   Preprocessor preprocessor_;
   ImuScanSynchronizer sync_;
   ImuScanSynchronizer::Window window_;

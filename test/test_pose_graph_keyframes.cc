@@ -428,6 +428,107 @@ TEST(CloseReason, SeedAndFinishComeFromTheCaller) {
   EXPECT_EQ(last->last_stamp_ns, 5 * kStep);
 }
 
+// ---------------------------------------------------------------------------
+// max_points_per_voxel > 1: up to N raw points per owned voxel.
+
+TEST(OwnedMapBuilderPoints, KeepsAtMostNPointsPerVoxelAcrossScans) {
+  mslam::OwnedMapBuilder owned(0.05, 3);
+  owned.begin(Eigen::Affine3d::Identity());
+  // Five points of one voxel over two scans, plus one in another voxel.
+  const PointCloud first = owned.add({{1.00F, 1.0F, 1.0F, 1.0F},
+                                      {1.01F, 1.0F, 1.0F, 2.0F},
+                                      {2.0F, 2.0F, 2.0F, 9.0F}});
+  ASSERT_EQ(first.size(), 3U);
+  const PointCloud second = owned.add({{1.02F, 1.0F, 1.0F, 3.0F},
+                                       {1.03F, 1.0F, 1.0F, 4.0F},
+                                       {1.04F, 1.0F, 1.0F, 5.0F}});
+  // The voxel had two points: only one more fits, the others are dropped.
+  ASSERT_EQ(second.size(), 1U);
+  EXPECT_FLOAT_EQ(second[0].x, 1.02F);
+  EXPECT_FLOAT_EQ(second[0].intensity, 3.0F);
+
+  const auto sealed = owned.seal();
+  ASSERT_EQ(sealed->size(), 4U);
+  // Raw points in arrival order, not centroids.
+  EXPECT_FLOAT_EQ((*sealed)[0].x, 1.00F);
+  EXPECT_FLOAT_EQ((*sealed)[1].x, 1.01F);
+  EXPECT_FLOAT_EQ((*sealed)[2].x, 2.0F);
+  EXPECT_FLOAT_EQ((*sealed)[3].x, 1.02F);
+}
+
+TEST(OwnedMapBuilderPoints, ASealedVoxelIsNeverRefilled) {
+  mslam::OwnedMapBuilder owned(0.05, 3);
+  owned.begin(Eigen::Affine3d::Identity());
+  EXPECT_EQ(owned.add({{1.0F, 1.0F, 1.0F, 1.0F}}).size(), 1U);
+  owned.seal(); // partly filled (1 of 3), frozen anyway
+  EXPECT_EQ(owned.sealedVoxels(), 1U);
+  owned.begin(Eigen::Affine3d::Identity());
+  EXPECT_TRUE(owned.add({{1.01F, 1.0F, 1.0F, 2.0F}}).empty());
+  EXPECT_EQ(owned.add({{5.0F, 1.0F, 1.0F, 2.0F}}).size(), 1U);
+}
+
+TEST(OwnedMapBuilderPoints, SealedCloudIsTheConcatenationOfTheIncrements) {
+  // A keyframe at a non-trivial pose: increments (odom frame) moved by the
+  // pose inverse equal the sealed cloud (keyframe frame).
+  const Eigen::Affine3d pose = poseAt(0.7, 0.4);
+  mslam::OwnedMapBuilder owned(0.05, 3);
+  owned.begin(pose);
+  PointCloud increments;
+  for (int scan = 0; scan < 4; ++scan) {
+    PointCloud points;
+    for (int i = 0; i < 20; ++i) {
+      points.push_back({0.02F * static_cast<float>(i + scan),
+                        0.5F * static_cast<float>(i % 3), 0.0F,
+                        static_cast<float>(scan)});
+    }
+    for (const auto &p : owned.add(points)) {
+      increments.push_back(p);
+    }
+  }
+  const auto sealed = owned.seal();
+  ASSERT_EQ(sealed->size(), increments.size());
+  for (std::size_t k = 0; k < increments.size(); ++k) {
+    const Eigen::Vector3d expected =
+        pose.inverse() *
+        Eigen::Vector3d(increments[k].x, increments[k].y, increments[k].z);
+    EXPECT_NEAR((*sealed)[k].x, expected.x(), 1e-5);
+    EXPECT_NEAR((*sealed)[k].y, expected.y(), 1e-5);
+    EXPECT_NEAR((*sealed)[k].z, expected.z(), 1e-5);
+    EXPECT_FLOAT_EQ((*sealed)[k].intensity, increments[k].intensity);
+  }
+}
+
+TEST(OwnedMapBuilderPoints, ResultIsRepeatableAndMatchesTheOpenSnapshot) {
+  const auto run = [] {
+    mslam::OwnedMapBuilder owned(0.05, 2);
+    owned.begin(Eigen::Affine3d::Identity());
+    owned.add({{5.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 0.0F, 0.0F, 1.0F}});
+    owned.add({{9.0F, 0.0F, 0.0F, 1.0F},
+               {1.01F, 0.0F, 0.0F, 1.0F},
+               {1.02F, 0.0F, 0.0F, 1.0F}});
+    const PointCloud open = owned.snapshot();
+    const PointCloud sealed = *owned.seal();
+    EXPECT_EQ(open.size(), sealed.size());
+    return sealed;
+  };
+  const PointCloud a = run();
+  const PointCloud b = run();
+  ASSERT_EQ(a.size(), 4U); // 5, 1, 9 and the second point of voxel 1
+  for (std::size_t k = 0; k < a.size(); ++k) {
+    EXPECT_EQ(a[k].x, b[k].x);
+  }
+}
+
+TEST(OwnedMapBuilderPoints, OneKeepsTheCentroidAndZeroIsRejected) {
+  mslam::OwnedMapBuilder one(0.05, 1);
+  one.begin(Eigen::Affine3d::Identity());
+  one.add({{1.00F, 1.0F, 1.0F, 10.0F}, {1.02F, 1.0F, 1.0F, 30.0F}});
+  const auto sealed = one.seal();
+  ASSERT_EQ(sealed->size(), 1U);
+  EXPECT_NEAR((*sealed)[0].x, 1.01F, 1e-6);
+  EXPECT_THROW(mslam::OwnedMapBuilder(0.05, 0), std::invalid_argument);
+}
+
 TEST(CloseReason, NamesAreTheLoggedWords) {
   EXPECT_STREQ(toString(CloseReason::Seed), "seed");
   EXPECT_STREQ(toString(CloseReason::Distance), "distance");

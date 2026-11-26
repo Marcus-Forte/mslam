@@ -115,42 +115,55 @@ private:
 };
 
 /// Decides which voxels a keyframe owns: a voxel belongs to the FIRST keyframe
-/// that observes it, so the union of the keyframes' owned clouds has one point
-/// per voxel however often a place is revisited.
+/// that observes it, so the union of the keyframes' owned clouds has at most
+/// `max_points_per_voxel` points per voxel however often a place is revisited.
+///
+/// With `max_points_per_voxel` 1 the keyframe keeps a running centroid per
+/// voxel it owns. With more it keeps the first N raw points that fall into each
+/// voxel (the same rule as `VoxelHashMap::addScan`), appended in the order they
+/// arrive, so the sealed cloud is exactly the concatenation of the increments
+/// `add()` returned. The open keyframe keeps filling its voxels until N;
+/// sealing freezes them, partly filled or not.
 ///
 /// Ownership is keyed by the voxel in the ODOM frame at `voxel_size`. The odom
 /// frame never changes (the front end is self-consistent there and the back end
 /// only corrects on the output side), so nothing needs re-keying after an
 /// optimization. The sealed voxels are a hash set that only grows; the open
-/// keyframe keeps a running centroid per voxel it owns. It is used from the
+/// keyframe keeps what it owns per voxel (see above). It is used from the
 /// caller thread only: the worker never sees it, only the clouds `seal()`
 /// hands out.
 class OwnedMapBuilder {
 public:
-  explicit OwnedMapBuilder(double voxel_size);
+  explicit OwnedMapBuilder(double voxel_size,
+                           unsigned int max_points_per_voxel = 1);
 
   /// Starts the next keyframe (in the frame of @p pose_odom). The voxels owned
   /// so far stay owned.
   void begin(const Eigen::Affine3d &pose_odom);
 
   /// Adds a scan given in the odom frame. Points in voxels owned by a sealed
-  /// keyframe are skipped, the others join the open keyframe's centroids.
-  /// Returns, in the odom frame, one point (the mean of this scan's points in
-  /// it) per voxel that THIS scan made the open keyframe own, in first-seen
-  /// order; a voxel the open keyframe already owned is not returned again.
+  /// keyframe are skipped, the others join the open keyframe's voxels.
+  /// With N == 1 it returns, in the odom frame, one point (the mean of this
+  /// scan's points in it) per voxel that THIS scan made the open keyframe own,
+  /// in first-seen order; a voxel the open keyframe already owned is not
+  /// returned again. With N > 1 it returns the points this scan added (up to
+  /// N per voxel over the whole keyframe), in arrival order.
   PointCloud add(const PointCloud &points_in_odom);
 
-  /// The open keyframe's centroids so far, in its own frame (a copy).
+  /// The open keyframe's owned points so far, in its own frame (a copy).
   PointCloud snapshot() const;
 
-  /// Returns the open keyframe's centroids in its own frame, in first-seen
-  /// order, and freezes its voxels: no later keyframe owns them.
+  /// Returns the open keyframe's owned points in its own frame (first-seen
+  /// order at N == 1, arrival order at N > 1) and freezes its voxels: no later
+  /// keyframe owns them.
   std::shared_ptr<const PointCloud> seal();
 
   /// Forgets everything, the sealed voxels included.
   void reset();
 
-  std::size_t openVoxels() const { return open_.size(); }
+  std::size_t openVoxels() const {
+    return max_points_per_voxel_ > 1 ? open_slots_.size() : open_.size();
+  }
   std::size_t sealedVoxels() const { return sealed_.size(); }
 
 private:
@@ -159,12 +172,19 @@ private:
     std::size_t count = 0;
   };
 
+  PointCloud addCentroids(const PointCloud &points_in_odom);
+  PointCloud addPoints(const PointCloud &points_in_odom);
+  Voxel3 voxelOf(const Point &point) const;
+
   double inverse_voxel_size_;
+  unsigned int max_points_per_voxel_;
   Eigen::Affine3d odom_from_keyframe_ = Eigen::Affine3d::Identity();
   tsl::robin_set<Voxel3> sealed_;
+  // N == 1: voxel -> index into open_. N > 1: voxel -> points kept so far.
   tsl::robin_map<Voxel3, std::uint32_t> open_slots_;
-  std::vector<Accumulator> open_;  // odom frame, first-seen order
-  std::vector<Accumulator> fresh_; // this scan's points in new voxels
+  std::vector<Accumulator> open_;  // N == 1: odom frame, first-seen order
+  std::vector<Accumulator> fresh_; // N == 1: this scan's points in new voxels
+  PointCloud open_points_;         // N > 1: odom frame, arrival order
 };
 
 /// A keyframe whose clouds are final.
@@ -192,9 +212,9 @@ public:
   ///        the interval trigger is off for it, so the seed scans are never
   ///        split into several keyframes (distance and angle cannot fire at a
   ///        constant pose).
-  /// @param newly_owned If not null, receives (odom frame) the points of the
-  ///        voxels this scan made the open keyframe own: the scan's
-  ///        contribution to the single-layer map.
+  /// @param newly_owned If not null, receives (odom frame) what this scan added
+  ///        to the open keyframe's owned voxels (see OwnedMapBuilder::add): the
+  ///        scan's contribution to the single-layer map.
   /// @return The keyframe that this scan sealed, if it opened a new one.
   std::optional<SealedKeyframe> onScan(std::int64_t stamp_ns,
                                        const Eigen::Affine3d &T_odom_scan,

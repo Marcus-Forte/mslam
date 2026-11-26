@@ -101,9 +101,14 @@ std::shared_ptr<const PointCloud> MiniMapBuilder::seal() {
   return sealed;
 }
 
-OwnedMapBuilder::OwnedMapBuilder(double voxel_size) {
+OwnedMapBuilder::OwnedMapBuilder(double voxel_size,
+                                 unsigned int max_points_per_voxel)
+    : max_points_per_voxel_(max_points_per_voxel) {
   if (!std::isfinite(voxel_size) || voxel_size <= 0.0) {
     throw std::invalid_argument("mini map voxel size must be positive");
+  }
+  if (max_points_per_voxel == 0) {
+    throw std::invalid_argument("max points per voxel must be positive");
   }
   inverse_voxel_size_ = 1.0 / voxel_size;
 }
@@ -112,19 +117,48 @@ void OwnedMapBuilder::begin(const Eigen::Affine3d &pose_odom) {
   odom_from_keyframe_ = pose_odom;
   open_slots_.clear();
   open_.clear();
+  open_points_.clear();
+}
+
+Voxel3 OwnedMapBuilder::voxelOf(const Point &point) const {
+  return Voxel3(static_cast<int>(std::floor(static_cast<double>(point.x) *
+                                            inverse_voxel_size_)),
+                static_cast<int>(std::floor(static_cast<double>(point.y) *
+                                            inverse_voxel_size_)),
+                static_cast<int>(std::floor(static_cast<double>(point.z) *
+                                            inverse_voxel_size_)));
 }
 
 PointCloud OwnedMapBuilder::add(const PointCloud &points_in_odom) {
+  return max_points_per_voxel_ > 1 ? addPoints(points_in_odom)
+                                   : addCentroids(points_in_odom);
+}
+
+PointCloud OwnedMapBuilder::addPoints(const PointCloud &points_in_odom) {
+  const std::size_t first_new = open_points_.size();
+  for (const auto &point : points_in_odom) {
+    const Voxel3 voxel = voxelOf(point);
+    if (sealed_.find(voxel) != sealed_.end()) {
+      continue; // owned by an earlier keyframe, for good
+    }
+    const auto [it, inserted] = open_slots_.try_emplace(voxel, 0U);
+    (void)inserted;
+    if (it.value() >= max_points_per_voxel_) {
+      continue; // this keyframe's voxel is full
+    }
+    ++it.value();
+    open_points_.push_back(point);
+  }
+  return PointCloud(open_points_.begin() +
+                        static_cast<std::ptrdiff_t>(first_new),
+                    open_points_.end());
+}
+
+PointCloud OwnedMapBuilder::addCentroids(const PointCloud &points_in_odom) {
   const std::size_t first_new = open_.size();
   fresh_.clear();
   for (const auto &point : points_in_odom) {
-    const Voxel3 voxel(
-        static_cast<int>(
-            std::floor(static_cast<double>(point.x) * inverse_voxel_size_)),
-        static_cast<int>(
-            std::floor(static_cast<double>(point.y) * inverse_voxel_size_)),
-        static_cast<int>(
-            std::floor(static_cast<double>(point.z) * inverse_voxel_size_)));
+    const Voxel3 voxel = voxelOf(point);
     if (sealed_.find(voxel) != sealed_.end()) {
       continue; // owned by an earlier keyframe, for good
     }
@@ -166,6 +200,20 @@ PointCloud OwnedMapBuilder::add(const PointCloud &points_in_odom) {
 PointCloud OwnedMapBuilder::snapshot() const {
   const Eigen::Affine3d keyframe_from_odom = inverseRigid(odom_from_keyframe_);
   PointCloud cloud;
+  if (max_points_per_voxel_ > 1) {
+    cloud.reserve(open_points_.size());
+    for (const auto &raw : open_points_) {
+      const Eigen::Vector3d p =
+          keyframe_from_odom * Eigen::Vector3d(raw.x, raw.y, raw.z);
+      Point point;
+      point.x = static_cast<float>(p.x());
+      point.y = static_cast<float>(p.y());
+      point.z = static_cast<float>(p.z());
+      point.intensity = raw.intensity;
+      cloud.push_back(point);
+    }
+    return cloud;
+  }
   cloud.reserve(open_.size());
   for (const auto &acc : open_) {
     const double inv = 1.0 / static_cast<double>(acc.count);
@@ -189,6 +237,7 @@ std::shared_ptr<const PointCloud> OwnedMapBuilder::seal() {
   }
   open_slots_.clear();
   open_.clear();
+  open_points_.clear();
   return sealed;
 }
 
@@ -196,6 +245,7 @@ void OwnedMapBuilder::reset() {
   sealed_.clear();
   open_slots_.clear();
   open_.clear();
+  open_points_.clear();
   fresh_.clear();
 }
 
@@ -203,7 +253,7 @@ KeyframeBuilder::KeyframeBuilder(const PoseGraphParameters &parameters)
     : selector_(parameters.keyframe_distance, parameters.keyframe_angle,
                 parameters.keyframe_max_interval_s),
       mini_map_(parameters.mini_map_voxel_size),
-      owned_(parameters.mini_map_voxel_size) {}
+      owned_(parameters.mini_map_voxel_size, parameters.max_points_per_voxel) {}
 
 std::optional<SealedKeyframe>
 KeyframeBuilder::onScan(std::int64_t stamp_ns,

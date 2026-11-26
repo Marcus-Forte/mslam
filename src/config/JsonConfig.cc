@@ -96,11 +96,10 @@ PoseGraphParameters parsePoseGraph(const Json::Value &block) {
   rejectUnknownKeys(
       block, "pose_graph",
       {"keyframe_distance", "keyframe_angle", "keyframe_max_interval_s",
-       "mini_map_voxel_size", "loop_search_radius", "loop_min_separation",
-       "loop_submap_keyframes", "loop_max_rms", "loop_min_matched_fraction",
-       "loop_sigma_translation", "loop_sigma_rotation",
-       "odometry_sigma_translation", "odometry_sigma_rotation",
-       "optimizer_iterations", "synchronous"},
+       "loop_search_radius", "loop_min_separation", "loop_submap_keyframes",
+       "loop_max_rms", "loop_min_matched_fraction", "loop_sigma_translation",
+       "loop_sigma_rotation", "odometry_sigma_translation",
+       "odometry_sigma_rotation", "optimizer_iterations", "synchronous"},
       "config");
   constexpr double kInf = std::numeric_limits<double>::infinity();
   constexpr double kPi = 3.14159265358979323846;
@@ -110,8 +109,6 @@ PoseGraphParameters parsePoseGraph(const Json::Value &block) {
                       false);
   readPoseGraphNumber(block, "keyframe_max_interval_s",
                       pg.keyframe_max_interval_s, 0.0, kInf, true);
-  readPoseGraphNumber(block, "mini_map_voxel_size", pg.mini_map_voxel_size, 0.0,
-                      kInf, false);
   readPoseGraphNumber(block, "loop_search_radius", pg.loop_search_radius, 0.0,
                       kInf, false);
   readPoseGraphCount(block, "loop_min_separation", pg.loop_min_separation, 1,
@@ -253,9 +250,6 @@ void JsonConfig::load() {
   if (!root["map"]["max_voxels"].empty()) {
     config_.map_parameters.max_voxels = root["map"]["max_voxels"].asUInt();
   }
-  if (!root["map"]["dense_map"].empty()) {
-    config_.map_parameters.dense_map = root["map"]["dense_map"].asBool();
-  }
   if (!root["map"]["search_radius"].empty()) {
     const auto &search_radius = root["map"]["search_radius"];
     // jsoncpp's isInt()/isIntegral() accept 2.0; only a JSON integer token
@@ -309,6 +303,11 @@ void JsonConfig::load() {
     config_.strategy = parseSlamStrategy(root["slam"]["strategy"].asString());
   }
   config_.pose_graph = parsePoseGraph(root["pose_graph"]);
+  // Keyframe mini maps are thinned at the registration map's resolution (there
+  // is no separate pose_graph key for it).
+  config_.pose_graph.mini_map_voxel_size = config_.map_parameters.resolution;
+  config_.pose_graph.max_points_per_voxel =
+      config_.map_parameters.max_points_per_voxel;
 
   if (!root["slam"]["num_threads"].empty()) {
     const auto &num_threads = root["slam"]["num_threads"];

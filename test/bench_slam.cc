@@ -180,22 +180,35 @@ void printPoseGraph(const mslam::PoseGraphResult &graph,
   // Duplication of the published map: the keyframe clouds as StreamKeyframes
   // and the final map re-send publish them (what --save-map writes after
   // finish()), counted against the distinct map-frame voxels they fill.
+  // `per_cloud_voxels` sums each keyframe's own distinct voxels, so published /
+  // per_cloud_voxels is the mean points per voxel (up to
+  // map.max_points_per_voxel) and per_cloud_voxels / distinct is the overlap
+  // between keyframes (about 1 when each voxel is published once).
   std::size_t published = 0;
+  std::size_t per_cloud_voxels = 0;
+  std::size_t largest_cloud = 0;
   tsl::robin_set<mslam::Voxel3> voxels;
   const auto inverse = static_cast<float>(1.0 / voxel_size);
   for (const auto &cloud : graph.map_clouds) {
     published += cloud->size();
+    largest_cloud = std::max(largest_cloud, cloud->size());
+    tsl::robin_set<mslam::Voxel3> own;
     for (const auto &point : *cloud) {
-      voxels.insert(mslam::PointToVoxel(point, inverse));
+      const auto voxel = mslam::PointToVoxel(point, inverse);
+      own.insert(voxel);
+      voxels.insert(voxel);
     }
+    per_cloud_voxels += own.size();
   }
-  std::printf("  map: published=%zu points, distinct voxels=%zu (%.3f m), "
-              "ratio=%.3f | keyframe views=%zu points\n",
-              published, voxels.size(), voxel_size,
-              voxels.empty() ? 0.0
-                             : static_cast<double>(published) /
-                                   static_cast<double>(voxels.size()),
-              s.view_points);
+  const auto ratio = [](std::size_t a, std::size_t b) {
+    return b == 0 ? 0.0 : static_cast<double>(a) / static_cast<double>(b);
+  };
+  std::printf(
+      "  map: published=%zu points, distinct voxels=%zu (%.3f m), "
+      "points per voxel=%.3f, keyframe overlap=%.3f | largest keyframe "
+      "cloud=%zu points | keyframe views=%zu points\n",
+      published, voxels.size(), voxel_size, ratio(published, per_cloud_voxels),
+      ratio(per_cloud_voxels, voxels.size()), largest_cloud, s.view_points);
 
   const Eigen::Affine3d odom = slam.getTransform();
   const Eigen::Affine3d map = pipeline.mapFromOdom() * odom;

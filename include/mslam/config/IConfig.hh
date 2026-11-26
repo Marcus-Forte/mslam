@@ -134,9 +134,15 @@ struct PoseGraphParameters {
   // Close a keyframe after this long even when standing still, bounding the
   // mini map (and the wait for a loop check). 0 = off.
   double keyframe_max_interval_s = 0.0; // s
-  // Thinning of a mini map; half the default registration voxel (0.1 m) keeps
-  // the detail ICP verification needs at a modest point count.
+  // Thinning of a mini map, and the voxel a keyframe owns. Not a config key:
+  // JsonConfig sets it to map.resolution, so the published map and the
+  // registration map share one voxel size. The default is for code that builds
+  // the parameters directly (tests).
   double mini_map_voxel_size = 0.05; // m
+  // Points a keyframe keeps per voxel it owns (the published map). Not a config
+  // key: JsonConfig sets it to map.max_points_per_voxel. 1 keeps a running
+  // centroid per voxel (the default for code that builds the parameters).
+  unsigned int max_points_per_voxel = 1;
 
   // --- Loop closure ---
   // Candidates: keyframes within this distance (map frame) of the new one.
@@ -197,7 +203,6 @@ struct MapParameters {
   // session. 0 disables the corresponding bound.
   float max_range = 0.0F; // drop voxels farther than this from the pose
   unsigned int max_voxels = 300000; // hard voxel budget, evict farthest
-  bool dense_map = false;           // additionally build a 1 cm dense map
   // Neighbourhood searched around a query's voxel, in voxels (0 = the query's
   // voxel only, 1 = 3x3x3, n = (2n+1)^3). The nearest neighbour is only
   // guaranteed within search_radius * resolution.
@@ -237,7 +242,6 @@ struct SlamConfiguration {
        << "\n"
        << "Max map range: " << config.map_parameters.max_range << "\n"
        << "Max map voxels: " << config.map_parameters.max_voxels << "\n"
-       << "Dense map: " << config.map_parameters.dense_map << "\n"
        << "Map search radius: " << config.map_parameters.search_radius
        << " voxels\n"
        << "# Preprocessor Parameters #" << "\n"
@@ -262,6 +266,7 @@ struct SlamConfiguration {
          << "Keyframe angle: " << pg.keyframe_angle << "\n"
          << "Keyframe max interval: " << pg.keyframe_max_interval_s << "\n"
          << "Mini map voxel size: " << pg.mini_map_voxel_size << "\n"
+         << "Mini map max points per voxel: " << pg.max_points_per_voxel << "\n"
          << "Loop search radius: " << pg.loop_search_radius << "\n"
          << "Loop min separation: " << pg.loop_min_separation << "\n"
          << "Loop submap keyframes: " << pg.loop_submap_keyframes << "\n"

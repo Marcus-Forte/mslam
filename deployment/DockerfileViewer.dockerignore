@@ -1,0 +1,9 @@
+# Used instead of the repository .dockerignore for DockerfileViewer, which needs
+# client/ (the repository one excludes it for the SLAM image).
+.git
+**/.git
+**/.venv/
+**/__pycache__/
+**/.ruff_cache/
+**/.pytest_cache/
+client/tests/

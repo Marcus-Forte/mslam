@@ -25,8 +25,7 @@
         "search_radius": 1,
         // Bound the registration map so per-scan cost stays flat over long runs.
         "max_voxels": 300000, // 0 disables the voxel budget
-        "max_range": 0, // 0 disables radius pruning (m)
-        "dense_map": false // unused 1 cm map: leave off (memory)
+        "max_range": 0 // 0 disables radius pruning (m)
     },
 
     "slam": {

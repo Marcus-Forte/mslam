@@ -4,6 +4,6 @@ COPY ./client /app
 
 WORKDIR /app
 
-RUN uv sync
+RUN uv sync --frozen
 
 ENTRYPOINT ["uv", "run", "slam_client.py"]
